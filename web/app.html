@@ -91,7 +91,7 @@
         <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
         <label><span>Agent account</span><input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
         <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
-        <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (included)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
+        <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (hackathon demo)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
         <label id="aiKeyRow"><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
         <label><span>Owner account (optional, approves above the threshold)</span><input id="owner" placeholder="you.testnet" autocomplete="off"></label>
         <label><span>Owner key (optional, full access)</span><input id="ownerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
@@ -102,7 +102,7 @@
         <button id="forget" type="button" class="btn-ghost">Forget keys</button>
         <span class="muted" style="font-size:14px;max-width:60ch">The agent key can only call <span class="mono">request_payment</span> on the treasury; it cannot move funds. Gas for this direct call comes from the agent account's own small balance (the CLI agent goes through a relayer instead).</span>
       </div>
-      <div class="muted" style="font-size:14px;max-width:80ch;margin-top:16px"><b>Two ways to read.</b> With "Bursar reading" the page sends the invoice through Bursar's relay, which holds the NEAR AI Cloud key, forwards the bytes untouched and keeps nothing; the invoice is in transit on that relay before it enters the enclave. With your own key the invoice goes from this browser straight to the enclave and never passes through Bursar. The receipt and its checks are identical either way.</div>
+      <div class="muted" style="font-size:14px;max-width:80ch;margin-top:16px"><b>Two ways to read.</b> "Bursar reading" is for the NEAR HACKATHON demo: the page sends the invoice through Bursar's relay, which holds a NEAR AI Cloud key paid by the team, forwards the bytes untouched and keeps nothing; the invoice is in transit on that relay before it enters the enclave, and daily caps apply. A company using Bursar brings its own NEAR AI Cloud key: the invoice then goes from this browser straight to the enclave and never passes through Bursar. The receipt and its checks are identical either way.</div>
       <div hidden>
       </div>
     </div>
