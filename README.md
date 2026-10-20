@@ -40,7 +40,7 @@ The AI never chooses an address. The executor cannot redirect funds. The owner i
 | DAO (Sputnik v2) | `bursar-bursar-c34d05b8.sputnik-v2.testnet` |
 | Test USDC | `tusdc.bursar-c34d05b8.testnet` |
 
-Payments 1 to 5 on that contract are the walkthrough below, run end to end on 20 October 2026 with the invoices read by NEAR AI Cloud inside the TEE (every `attestation_ref` starts with `nearai:`): paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate. Open `web/index.html?network=testnet&treasury=treasury.bursar-c34d05b8.testnet` to see them. The two failure paths of step 4, a DAO rejection and a rolled-back transfer, are payments 6 and 7 on the earlier deployment `treasury.bursar-itlecew5.testnet`.
+Payments 1 to 5 on that contract are the walkthrough below, run end to end on 20 October 2026 with the invoices read by NEAR AI Cloud inside the TEE (every `attestation_ref` starts with `nearai:`): paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate. Open `web/dashboard.html?network=testnet&treasury=treasury.bursar-c34d05b8.testnet` to see them. The two failure paths of step 4, a DAO rejection and a rolled-back transfer, are payments 6 and 7 on the earlier deployment `treasury.bursar-itlecew5.testnet`.
 
 Mainnet deployment with real USDC and NEAR Intents: see the demo post (link added at submission).
 
@@ -148,7 +148,7 @@ See: all the `ok` lines above, `quote_tcb` included (the Intel collateral is fet
 ```
 Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf and explain the decision". See: the tool `submit_invoice` returns `Blocked payout_changed`, and `explain_decision` says why in plain words. `verify_attestation` runs the checks of step 6; `sync_dao_approvals` the DAO check of step 4.
 
-**8. Dashboard.** Open `web/index.html` in a browser (a static file, no build) and paste the treasury account. See: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC. Hostable on GitHub Pages as is.
+**8. Dashboard.** Open `web/dashboard.html` in a browser (a static file, no build) and paste the treasury account. See: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC. Hostable on GitHub Pages as is.
 
 **9. Do it all from a browser.** `web/app.html` is the agent as a web page: no server, no build. Open it, fill Settings (treasury, agent account, the agent's function-call key from `~/.near-credentials/testnet/agent.you.testnet.json`, your NEAR AI Cloud key; all kept in that browser's local storage) and drop `invoices/samples/05-acme-hosting-1001.pdf` on it. See: the PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, the enclave's answer, then the same receipt checks as step 6 (minus the Intel collateral check) and a "Download receipt JSON" link. Press "Request payment": the page signs `request_payment` with the agent key (plain borsh plus ed25519, no NEAR library) and shows the contract's decision, `#7 Paid` on the live contract, with the transaction link. Drop invoice 4 instead: `Blocked payout_changed`. The agent account needs a little NEAR for gas on this direct path (`setup` leaves it 0.5); the CLI agent goes through the relayer and needs none. The workflow in `.github/workflows/pages.yml` publishes `web/` with GitHub Pages (enable Pages with source "GitHub Actions" in the repository settings).
 
@@ -182,8 +182,10 @@ app/src/executor.ts   NEAR Intents 1-Click routing for cross-chain vendors
 app/src/mcp.ts        MCP server (submit_invoice, list_payments, explain_decision, vendors, treasury_status)
 app/src/setup.ts      one-shot environment setup
 app/test/             vitest: receipt tampering, offline parser
-web/index.html        static dashboard, reads the contract over RPC
-web/app.html          the agent as a web page: PDF to PNG, enclave call, receipt checks, request_payment signed in the browser
+web/index.html        landing page: the three roles, the last decisions read live from the contract
+web/dashboard.html    static dashboard, reads the contract over RPC
+web/app.html          the console: PDF to PNG, enclave call, receipt checks, request_payment signed in the browser
+web/style.css         shared styles (NEAR's palette: obsidian, paper, one signal green)
 invoices/             make_invoices.py and five fictional sample invoices
 ```
 

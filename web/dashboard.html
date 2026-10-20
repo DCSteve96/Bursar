@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar treasury</title>
+<meta name="description" content="Read-only dashboard for a Bursar policy contract: balance, caps, vendors and every payment decision, straight from the NEAR RPC.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  form { display: grid; grid-template-columns: 160px minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+  @media (max-width: 640px) { form { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="bar"><div class="in">
+  <a class="wordmark" href="index.html"><i></i>Bursar</a>
+  <nav><a href="app.html">Console</a><a href="dashboard.html" aria-current="page">Dashboard</a></nav>
+</div></header>
+
+<section class="band" style="border-top:0">
+  <div class="in">
+    <div class="eyebrow accent">[ DASHBOARD ]</div>
+    <h1 class="heading" style="margin-top:16px">Every decision the contract made, read from the chain.</h1>
+    <p class="sub muted" style="max-width:60ch;margin-top:16px">Balance, caps, vendors and payments come straight from the policy contract over RPC. There is no database and nothing to trust but the chain.</p>
+    <form id="f" style="margin-top:32px">
+      <label><span>Network</span><select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
+      <label><span>Treasury account</span><input id="treasury" placeholder="treasury.you.testnet" required></label>
+      <button type="submit" class="btn-signal">Load</button>
+    </form>
+    <div id="err" class="err" hidden></div>
+  </div>
+</section>
+
+<section class="band light" id="out" hidden>
+  <div class="in">
+    <div class="grid stats" id="stats"></div>
+    <h2 class="heading-sm" style="margin:40px 0 16px">Vendors, allowlisted by the owner</h2>
+    <div class="wrap"><table id="vendors"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th><th>active</th></tr></thead><tbody></tbody></table></div>
+    <h2 class="heading-sm" style="margin:40px 0 16px">Payments</h2>
+    <div class="wrap"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
+    <p class="muted" id="foot" style="margin-top:24px;font-size:14px"></p>
+  </div>
+</section>
+
+<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys.</footer>
+
+<script>
+const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+// ?rpc=https://... overrides the RPC endpoint (own node, FastNEAR, local sandbox).
+const rpcOverride = new URLSearchParams(location.search).get("rpc");
+const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
+const DEC = 6;
+const $ = (s) => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+if (q.get("treasury")) $("#treasury").value = q.get("treasury");
+if (q.get("network")) $("#network").value = q.get("network");
+
+async function view(network, contract, method, args = {}) {
+  const r = await fetch(rpcOverride || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "final", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.data?.message ?? j.error.message ?? JSON.stringify(j.error));
+  if (j.result.error) throw new Error(j.result.error);
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+}
+const usdc = (u) => { const n = BigInt(u); const d = 10n ** BigInt(DEC); return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(DEC, "0").slice(0, 2)} USDC`; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const payout = (p) => p.Near ? `NEAR ${esc(p.Near.account)}` : `${esc(p.Chain.chain)} ${esc(p.Chain.address)}`;
+const REASON = {
+  payout_changed: "payout on the invoice differs from the vendor record: the new bank details fraud",
+  duplicate_invoice: "same vendor and invoice number already accepted",
+  unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner",
+  over_payment_cap: "above the per-payment cap", over_monthly_budget: "vendor monthly budget exceeded", over_daily_cap: "daily cap exceeded",
+  insufficient_treasury: "not enough USDC in the treasury", zero_amount: "zero amount", paused: "treasury paused",
+  dao_proposal_failed: "the DAO refused to open the proposal; budget released",
+  transfer_failed: "USDC transfer failed on the token contract; balance restored",
+};
+function why(p) {
+  const parts = [];
+  if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
+  if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
+  if (p.status === "Approval") parts.push(p.dao_proposal_id === null ? "DAO proposal being opened" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`);
+  if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
+  if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
+  if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
+  if (p.status === "Paid") parts.push(p.dao_proposal_id === null ? "paid on NEAR in the same transaction" : `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR`);
+  if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
+  return esc(parts.join(". "));
+}
+async function load(e) {
+  e?.preventDefault();
+  const network = $("#network").value, treasury = $("#treasury").value.trim();
+  if (!treasury) return;
+  history.replaceState(null, "", `?network=${network}&treasury=${encodeURIComponent(treasury)}${rpcOverride ? `&rpc=${encodeURIComponent(rpcOverride)}` : ""}`);
+  $("#err").hidden = true; $("#out").hidden = true;
+  try {
+    const [stats, limits, roles, vendors, payments] = await Promise.all([
+      view(network, treasury, "get_stats"), view(network, treasury, "get_limits"), view(network, treasury, "get_roles"),
+      view(network, treasury, "list_vendors"), view(network, treasury, "list_payments", { from: 0, limit: 200 }),
+    ]);
+    const stat = (k, v) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent today", usdc(stats.spent_today)) + stat("per payment cap", usdc(limits.per_payment_cap)) + stat("daily cap", usdc(limits.daily_cap)) + stat("approval from", usdc(limits.approval_threshold)) + stat("payments", stats.payments) + (stats.paused ? stat("paused", "yes") : "");
+    $("#vendors tbody").innerHTML = vendors.map(([id, v]) => {
+      const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month);
+      const pct = b > 0n ? Number(s * 100n / b) : 0;
+      return `<tr><td class="mono id">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${payout(v.payout)}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td><td>${v.active ? "yes" : "no"}</td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">no vendors</td></tr>`;
+    $("#payments tbody").innerHTML = payments.slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono id">${esc(p.vendor_id)}</td><td class="mono id">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td><span class="s ${esc(p.status)}">${esc(p.status)}</span>${p.reason && p.status === "Blocked" ? `<div class="mono">${esc(p.reason)}</div>` : ""}</td><td>${why(p)}</td><td class="mono">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
+    $("#foot").innerHTML = `owner ${esc(roles[0])}, agent ${esc(roles[1])} (one function-call key), executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}, token ${esc(roles[4])}. Contract <a href="${EXPLORER[network]}/address/${encodeURIComponent(treasury)}" target="_blank" rel="noopener">${esc(treasury)}</a> on ${network}.`;
+    $("#out").hidden = false;
+  } catch (err) {
+    $("#err").textContent = `could not read ${treasury} on ${network}: ${err.message}`;
+    $("#err").hidden = false;
+  }
+}
+$("#f").addEventListener("submit", load);
+if ($("#treasury").value) load();
+</script>
+</body>
+</html>

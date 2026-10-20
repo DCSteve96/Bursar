@@ -4,136 +4,154 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
-<meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the receipt, and ask the policy contract to pay. Everything runs in this browser against the NEAR RPC; keys never leave it.">
+<meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
 <style>
-  /* Same tokens as index.html: a paper-like neutral, one blue accent, semantic colors for decisions. */
-  :root { --bg:#fbfaf7; --fg:#1c1c1a; --muted:#6b6a65; --line:#e3e1da; --card:#ffffff; --ok:#1f7a4d; --warn:#9a6b00; --bad:#b3261e; --accent:#2c5aa0; --accent-fg:#ffffff; --chip:#eef2f8; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe6; --muted:#9b9a93; --line:#2b2b28; --card:#1d1d1b; --ok:#5ccf8a; --warn:#e3b341; --bad:#ff6b61; --accent:#7fa6e6; --accent-fg:#101010; --chip:#23262c; color-scheme: dark; } }
-  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe6; --muted:#9b9a93; --line:#2b2b28; --card:#1d1d1b; --ok:#5ccf8a; --warn:#e3b341; --bad:#ff6b61; --accent:#7fa6e6; --accent-fg:#101010; --chip:#23262c; color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  h2 { font-size: 16px; margin: 28px 0 8px; }
-  .tag { color: var(--muted); font-size: 13px; }
-  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  label { display:flex; flex-direction:column; gap:3px; font-size: 12px; color: var(--muted); flex: 1 1 240px; min-width: 0; }
-  input, select, button, textarea { font: inherit; padding: 8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
-  input, select { width: 100%; }
-  button { cursor:pointer; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
-  button.quiet { background: var(--card); color: var(--fg); border-color: var(--line); font-weight: 500; }
-  button:disabled { opacity: .5; cursor: default; }
-  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  details { border:1px solid var(--line); border-radius: 8px; background: var(--card); padding: 10px 12px; margin: 14px 0; }
-  summary { cursor: pointer; font-weight: 600; }
-  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
-  .card { background: var(--card); border:1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
-  .card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-  .card .v { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; overflow-wrap: anywhere; }
-  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; color: var(--muted); background: var(--card); cursor: pointer; }
-  .drop.over { border-color: var(--accent); color: var(--fg); }
-  .drop input { display: none; }
-  .two { display:grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 14px; margin-top: 12px; }
-  @media (max-width: 640px) { .two { grid-template-columns: 1fr; } }
-  canvas.page { width: 100%; height: auto; border:1px solid var(--line); border-radius: 6px; background: #fff; }
-  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .steps li { display:flex; gap: 8px; align-items: baseline; font-size: 14px; }
-  .steps .st { width: 44px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; flex: none; }
-  .steps .ok { color: var(--ok); } .steps .fail { color: var(--bad); } .steps .skip, .steps .wait { color: var(--muted); }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
-  .kv { display:grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font-size: 14px; }
-  .kv .k { color: var(--muted); }
-  .chip { display:inline-block; padding: 2px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; margin: 2px 4px 2px 0; }
-  .chip.bad { color: var(--bad); border: 1px solid var(--bad); background: transparent; }
-  .s { font-weight: 600; }
-  .Paid, .Settled { color: var(--ok); } .Queued, .Settling, .Approval { color: var(--warn); } .Blocked { color: var(--bad); } .Cancelled { color: var(--muted); }
-  table { width:100%; border-collapse: collapse; background: var(--card); border:1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  th, td { text-align:left; padding: 8px 10px; border-top:1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
-  .wrap { overflow-x: auto; }
-  .muted { color: var(--muted); }
-  .err { color: var(--bad); margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .note { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
-  a { color: var(--accent); }
-  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 4px; }
-  .bar i { display:block; height:100%; background: var(--accent); }
-  .decision { font-size: 18px; margin: 8px 0 4px; }
-  @media (prefers-reduced-motion: no-preference) { .drop { transition: border-color .15s; } }
+  .two { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 24px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .hero-stats { display: flex; flex-wrap: wrap; gap: 32px; margin-top: 48px; }
+  .hero-stats div { min-width: 0; }
+  .hero-stats .k { font: 600 12px/1.17 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-dark); }
+  .hero-stats .v { font-size: 28px; line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
+  .flag { display: inline-block; border: 1px solid var(--blocked); color: var(--blocked); border-radius: 4px; padding: 2px 8px; font: 500 12px/1.5 var(--mono); margin: 4px 6px 0 0; }
+  .flag.none { border-color: var(--line-dark); color: var(--mute-dark); }
+  .decision-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; margin-top: 32px; }
+  @media (max-width: 760px) { .decision-row { grid-template-columns: 1fr; } }
+  .receipt-head { display: flex; align-items: center; gap: 16px; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Bursar console</h1>
-  <div class="tag">The AI reads. The contract decides. A dumb executor moves the money. This page is the agent, running in your browser: it reads the invoice inside a NEAR AI Cloud enclave, checks the receipt, then asks the policy contract with the agent's one key.</div>
+<header class="bar"><div class="in">
+  <a class="wordmark" href="index.html"><i></i>Bursar</a>
+  <nav><a href="app.html" aria-current="page">Console</a><a href="dashboard.html" id="dashLink">Dashboard</a><a href="#settings" id="settingsLink">Settings</a></nav>
+</div></header>
 
-  <details id="settings">
-    <summary>Settings (kept in this browser only)</summary>
-    <div class="row" style="margin-top:10px">
-      <label>Network<select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
-      <label>Treasury (policy contract)<input id="treasury" placeholder="treasury.you.testnet" autocomplete="off"></label>
-      <label>Agent account<input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
-      <label>Agent key (function-call key, ed25519:...)<input id="agentKey" type="password" placeholder="from ~/.near-credentials/testnet/agent.you.testnet.json" autocomplete="off"></label>
-      <label>NEAR AI Cloud API key<input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
-      <label>Model<input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
+<section class="band hero">
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <div class="in">
+    <div class="eyebrow accent">[ 00 / CONSOLE <span id="netChip">testnet</span> ]</div>
+    <h1 class="display" style="margin-top:24px">
+      <span class="line">The AI reads.</span>
+      <span class="line">The contract <span class="accent">decides.</span></span>
+      <span class="line dim">A dumb executor moves the money.</span>
+    </h1>
+    <p class="sub muted" style="max-width:62ch;margin-top:32px">This page is the agent, running in your browser. It reads the invoice inside a NEAR AI Cloud enclave, checks the enclave's signed receipt, then asks the policy contract with the agent's one key. The browser never chooses an address and never holds spending power.</p>
+    <div class="actions">
+      <a class="btn btn-signal" href="#read">Drop an invoice</a>
+      <a class="btn btn-ghost" href="dashboard.html" id="dashBtn">Open the dashboard</a>
     </div>
-    <div class="row" style="margin-top:10px">
-      <button id="save" type="button">Save</button>
-      <button id="forget" type="button" class="quiet">Forget keys</button>
-      <span class="note">The agent key can only call <span class="mono">request_payment</span> on the treasury; it cannot move funds. Gas for the direct call comes from the agent account's own small balance (the CLI agent uses a relayer instead).</span>
-    </div>
-  </details>
-
-  <h2>1. Read an invoice in the enclave</h2>
-  <div class="drop" id="drop">
-    <input id="file" type="file" accept="application/pdf">
-    Drop a PDF invoice here, or click to choose one. Try the four samples in <span class="mono">invoices/samples</span>.
+    <div class="hero-stats" id="heroStats"></div>
   </div>
-  <div id="readErr" class="err" hidden></div>
-  <div class="two" id="readOut" hidden>
-    <div>
-      <canvas class="page" id="preview"></canvas>
-      <p class="note" id="fileInfo"></p>
-    </div>
-    <div>
-      <ul class="steps" id="readSteps"></ul>
-      <div id="extraction" hidden>
-        <h2 style="margin-top:14px">What the model read</h2>
-        <div class="kv" id="exKv"></div>
-        <div id="flags" style="margin-top:6px"></div>
+</section>
+
+<div class="ticker" aria-hidden="true"><span>Read in a TEE <b>✳</b></span><span>The contract decides <b>✳</b></span><span>No keys in the AI <b>✳</b></span><span>Every decision on chain <b>✳</b></span><span>Receipts anyone can verify <b>✳</b></span><span>Read in a TEE <b>✳</b></span><span>The contract decides <b>✳</b></span><span>No keys in the AI <b>✳</b></span><span>Every decision on chain <b>✳</b></span><span>Receipts anyone can verify <b>✳</b></span></div>
+
+<section class="band" id="settings">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ SETTINGS ]</div><div class="muted">Kept in this browser's local storage only. Nothing is sent anywhere but the NEAR RPC and NEAR AI Cloud.</div></div>
+    <div class="card">
+      <div class="grid cols-3">
+        <label><span>Network</span><select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
+        <label><span>Treasury (policy contract)</span><input id="treasury" placeholder="treasury.you.testnet" autocomplete="off"></label>
+        <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
+        <label><span>Agent account</span><input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
+        <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
+        <label><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
       </div>
-      <div id="verify" hidden>
-        <h2 style="margin-top:14px">Receipt checks</h2>
-        <ul class="steps" id="checks"></ul>
-        <p class="note">The Intel collateral check (quote_tcb) and the on-chain check need the CLI: download the receipt and run <span class="mono">npm run dev verify &lt;file&gt;</span>.</p>
-        <div class="row" style="margin-top:8px"><a id="dl" class="quiet" href="#" download>Download receipt JSON</a></div>
+      <div class="actions" style="margin-top:24px;align-items:center">
+        <button id="save" type="button" class="btn-signal">Save</button>
+        <button id="forget" type="button" class="btn-ghost">Forget keys</button>
+        <span class="muted" style="font-size:14px;max-width:60ch">The agent key can only call <span class="mono">request_payment</span> on the treasury; it cannot move funds. Gas for this direct call comes from the agent account's own small balance (the CLI agent goes through a relayer instead).</span>
       </div>
     </div>
   </div>
+</section>
 
-  <h2>2. Ask the contract</h2>
-  <div id="claimBox" class="card" hidden>
-    <div class="kv" id="claimKv"></div>
-    <div class="row" style="margin-top:10px">
-      <button id="submit" type="button">Request payment</button>
-      <span class="note" id="submitNote">The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address.</span>
+<section class="band" id="read">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ 01 / READ ]</div><h2 class="heading">The enclave reads it. Not us.</h2></div>
+    <div class="drop" id="drop">
+      <input id="file" type="file" accept="application/pdf">
+      <div class="big">Drop a PDF invoice here, or click to choose one.</div>
+      <div class="muted" style="margin-top:8px">The file is rendered to PNG in this browser; the model inside the TEE sees pixels, and its answer comes back signed.</div>
     </div>
-    <div id="submitErr" class="err" hidden></div>
-    <div id="decision" hidden>
-      <div class="decision"><span id="decStatus" class="s"></span> <span id="decReason" class="mono"></span></div>
-      <div id="decWhy"></div>
-      <p class="note" id="decTx"></p>
+    <div id="readErr" class="err" hidden></div>
+    <div class="two" id="readOut" hidden style="margin-top:32px">
+      <div>
+        <canvas class="page" id="preview"></canvas>
+        <p class="muted mono" id="fileInfo" style="margin-top:8px"></p>
+      </div>
+      <div>
+        <ul class="log" id="readSteps"></ul>
+        <div id="extraction" hidden style="margin-top:32px">
+          <div class="eyebrow muted" style="margin-bottom:16px">What the model read</div>
+          <div class="kv" id="exKv"></div>
+          <div id="flags" style="margin-top:12px"></div>
+        </div>
+      </div>
     </div>
   </div>
-  <p class="muted" id="claimEmpty">Read an invoice first.</p>
+</section>
 
-  <h2>3. Treasury</h2>
-  <div class="row"><button id="refresh" type="button" class="quiet">Refresh</button><span class="note" id="foot"></span></div>
-  <div id="tErr" class="err" hidden></div>
-  <div class="grid" id="stats"></div>
-  <div class="wrap"><table id="vendors"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th></tr></thead><tbody></tbody></table></div>
-  <h2>Payments (every decision the contract made)</h2>
-  <div class="wrap"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
-</main>
+<section class="band mint" id="receipt" hidden>
+  <div class="in">
+    <div class="band-head">
+      <div class="receipt-head"><span class="ai-tile" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><div class="eyebrow">[ 02 / RECEIPT ]</div></div>
+      <h2 class="heading">Proof the answer came from an attested enclave.</h2>
+    </div>
+    <div class="card" id="verify">
+      <ul class="log" id="checks"></ul>
+      <div class="actions" style="margin-top:24px;align-items:center">
+        <a id="dl" class="btn btn-ghost" href="#" download>Download receipt JSON</a>
+        <span class="muted" style="font-size:14px;max-width:60ch">The Intel collateral check (quote_tcb) and the on-chain check need the CLI: run <span class="mono">npm run dev verify &lt;file&gt;</span> on the downloaded receipt.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="decide">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ 03 / DECIDE ]</div><h2 class="heading">Ask the contract. It answers in one transaction.</h2></div>
+    <p class="muted" id="claimEmpty">Read an invoice first.</p>
+    <div id="claimBox" hidden>
+      <div class="card">
+        <div class="kv" id="claimKv"></div>
+        <div class="actions" style="align-items:center">
+          <button id="submit" type="button" class="btn-signal">Request payment</button>
+          <span class="muted" style="font-size:14px;max-width:60ch" id="submitNote">The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address.</span>
+        </div>
+        <div id="submitErr" class="err" hidden></div>
+      </div>
+      <div id="decision" hidden class="decision-row">
+        <div>
+          <div class="eyebrow muted">Decision <span id="decId" class="chip"></span> <span id="decReason" class="chip bad" hidden></span></div>
+          <div id="decStatus" class="stamp"></div>
+          <div id="decWhy" class="sub" style="margin-top:16px;max-width:60ch"></div>
+        </div>
+        <p class="muted mono" id="decTx"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band light" id="treasury">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ 04 / TREASURY ]</div><h2 class="heading">Every decision the contract made, read from the chain.</h2></div>
+    <div class="actions" style="margin:0 0 24px;align-items:center"><button id="refresh" type="button" class="btn-ghost">Refresh</button><span class="muted" style="font-size:14px" id="foot"></span></div>
+    <div id="tErr" class="err" hidden></div>
+    <div class="grid stats" id="stats"></div>
+    <h3 class="heading-sm" style="margin:40px 0 16px">Vendors, allowlisted by the owner</h3>
+    <div class="wrap"><table id="vendors"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th></tr></thead><tbody></tbody></table></div>
+    <h3 class="heading-sm" style="margin:40px 0 16px">Payments</h3>
+    <div class="wrap"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys.</footer>
 
 <script type="module">
 import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -160,11 +178,18 @@ function loadSettings() {
   if (q.get("network")) $("#network").value = q.get("network");
   if (q.get("agent")) $("#agent").value = q.get("agent");
   for (const f of FIELDS) settings[f] = $("#" + f).value.trim();
+  reflectSettings();
+}
+function reflectSettings() {
+  $("#netChip").textContent = settings.network || "testnet";
+  const dash = `dashboard.html?network=${encodeURIComponent(settings.network || "testnet")}&treasury=${encodeURIComponent(settings.treasury || "")}`;
+  $("#dashLink").href = dash; $("#dashBtn").href = dash;
 }
 function saveSettings() {
   for (const f of FIELDS) { settings[f] = $("#" + f).value.trim(); try { localStorage.setItem("bursar." + f, settings[f]); } catch {} }
-  $("#settings").open = false;
+  reflectSettings();
   loadTreasury();
+  location.hash = "#read";
 }
 $("#save").addEventListener("click", saveSettings);
 $("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
@@ -263,11 +288,16 @@ const sha256hex = (s) => toHex(sha256(te.encode(s)));
 async function readInTee(pngPages, textFallback, step) {
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)));
   step("attestation", "wait", "fetching the model attestation for a fresh nonce");
-  let attestation;
-  try {
-    const r = await fetch(`${AI_BASE}/attestation/report?model=${encodeURIComponent(settings.model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
-    attestation = r.ok ? await r.json() : { error: `attestation ${r.status}: ${(await r.text()).slice(0, 200)}` };
-  } catch (e) { attestation = { error: String(e) }; }
+  let attestation = { error: "not fetched" };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(`${AI_BASE}/attestation/report?model=${encodeURIComponent(settings.model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
+      attestation = r.ok ? await r.json() : { error: `attestation ${r.status}: ${(await r.text()).slice(0, 200)}` };
+    } catch (e) { attestation = { error: String(e) }; } // a gateway hiccup answers without CORS headers: the browser sees a network error
+    if (!attestation.error) break;
+    step("attestation", "wait", `${attestation.error}, retrying`);
+    await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
+  }
   step("attestation", attestation.error ? "fail" : "ok", attestation.error ?? `${attestation.model_attestations?.length ?? 0} model attestation(s), TDX quote bound to our nonce`);
 
   const content = [{ type: "text", text: "Read this invoice." }];
@@ -276,14 +306,20 @@ async function readInTee(pngPages, textFallback, step) {
   const body = { model: settings.model, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false };
   const requestBody = JSON.stringify(body);
   step("model", "wait", `asking ${settings.model} inside the enclave`);
-  let r, responseBody = "";
-  for (let attempt = 0; ; attempt++) {
-    r = await fetch(`${AI_BASE}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
-    responseBody = await r.text();
-    if (r.ok || attempt >= 3 || ![429, 502, 503, 504].includes(r.status)) break;
-    step("model", "wait", `gateway answered ${r.status}, retrying`);
+  // The gateway answers 502 now and then, and an error response carries no CORS headers, so the browser
+  // reports it as a network error: retry on both before giving up.
+  let r = null, responseBody = "", lastErr = "";
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      r = await fetch(`${AI_BASE}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
+      responseBody = await r.text();
+      if (r.ok || ![429, 502, 503, 504].includes(r.status)) break;
+      lastErr = `gateway answered ${r.status}`;
+    } catch (e) { r = null; lastErr = `network error (${e.message})`; }
+    step("model", "wait", `${lastErr}, retrying`);
     await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
   }
+  if (!r) throw new Error(`chat: ${lastErr}`);
   if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 300)}`);
   const completion = JSON.parse(responseBody);
   const extraction = JSON.parse(completion.choices?.[0]?.message?.content ?? "{}");
@@ -291,10 +327,13 @@ async function readInTee(pngPages, textFallback, step) {
 
   step("signature", "wait", "fetching the enclave's signature over the exact bytes");
   let sig = null;
-  try {
-    const s = await fetch(`${AI_BASE}/signature/${encodeURIComponent(completion.id)}?signing_algo=ecdsa`, { headers: aiHeaders() });
-    if (s.ok) { const j = await s.json(); if (j.signature && j.text && j.signing_address) sig = j; }
-  } catch {}
+  for (let attempt = 0; attempt < 3 && !sig; attempt++) {
+    try {
+      const s = await fetch(`${AI_BASE}/signature/${encodeURIComponent(completion.id)}?signing_algo=ecdsa`, { headers: aiHeaders() });
+      if (s.ok) { const j = await s.json(); if (j.signature && j.text && j.signing_address) sig = j; }
+    } catch {}
+    if (!sig) await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
+  }
   step("signature", sig ? "ok" : "fail", sig ? `${sig.signature_kind} by ${sig.signing_address}` : "the gateway returned no signature");
   const receipt = {
     model: settings.model, inference_id: completion.id,
@@ -373,7 +412,7 @@ function stepper(list) {
   return (name, state, detail) => {
     let li = stepEl[list.id + name];
     if (!li) { li = document.createElement("li"); stepEl[list.id + name] = li; list.appendChild(li); }
-    const mark = state === "ok" ? "ok" : state === "fail" ? "FAIL" : state === "skip" ? "-" : "...";
+    const mark = state === "ok" ? "OK" : state === "fail" ? "FAIL" : state === "skip" ? "SKIP" : "...";
     li.innerHTML = `<span class="st ${state}">${mark}</span><span><b>${esc(name)}</b> ${esc(detail)}</span>`;
   };
 }
@@ -395,7 +434,7 @@ async function rasterize(bytes) {
 async function handleFile(file) {
   if (!file) return;
   for (const k in stepEl) delete stepEl[k];
-  $("#readErr").hidden = true; $("#readOut").hidden = false; $("#extraction").hidden = true; $("#verify").hidden = true;
+  $("#readErr").hidden = true; $("#readOut").hidden = false; $("#extraction").hidden = true; $("#receipt").hidden = true;
   $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true;
   const step = stepper($("#readSteps"));
   try {
@@ -418,9 +457,9 @@ async function handleFile(file) {
     showExtraction(extraction);
     const v = verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
     const checks = $("#checks"); checks.innerHTML = "";
-    for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "-" : c.ok ? "ok" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
-    const li = document.createElement("li"); li.innerHTML = `<span class="st ${v.ok ? "ok" : "fail"}"></span><span class="s">${v.ok ? "verified: the decision will be made on this model output, inside an attested TEE" : "NOT verified: do not submit"}</span>`; checks.appendChild(li);
-    $("#verify").hidden = false;
+    for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "SKIP" : c.ok ? "OK" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
+    const li = document.createElement("li"); li.innerHTML = `<div class="verdict ${v.ok ? "" : "fail"}">${v.ok ? "Verified: the decision will be made on this model output, inside an attested TEE." : "Not verified: this page will not submit it."}</div>`; checks.appendChild(li);
+    $("#receipt").hidden = false;
     const blob = new Blob([JSON.stringify({ file: file.name, extraction, claim, tx: null, payment: null, ai: { receipt, attestation } }, null, 2)], { type: "application/json" });
     $("#dl").href = URL.createObjectURL(blob); $("#dl").download = `receipt-${file.name.replace(/\.pdf$/i, "")}.json`;
     showClaim(claim, vendors, v.ok);
@@ -438,14 +477,14 @@ function matchVendor(ex, vendors) {
 const payoutText = (p) => p?.Near ? `NEAR ${p.Near.account}` : p?.Chain ? `${p.Chain.chain} ${p.Chain.address}` : "?";
 function showExtraction(ex) {
   const rows = [["vendor", ex.vendor_name], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
-  $("#exKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="mono">${esc(v)}</span>`).join("");
-  $("#flags").innerHTML = (ex.flags?.length ? ex.flags.map((f) => `<span class="chip bad">${esc(f)}</span>`).join("") : `<span class="chip">no flags</span>`);
+  $("#exKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+  $("#flags").innerHTML = (ex.flags?.length ? ex.flags.map((f) => `<span class="flag">${esc(f)}</span>`).join("") : `<span class="flag none">no flags</span>`);
   $("#extraction").hidden = false;
 }
 function showClaim(claim, vendors, verified) {
   const known = vendors.some(([id]) => id === claim.vendor_id);
   const rows = [["vendor id", `${claim.vendor_id}${known ? "" : " (not in the allowlist)"}`], ["invoice", claim.invoice_number], ["amount", usdc(claim.amount)], ["payout on the invoice", payoutText(claim.payout_seen)], ["invoice hash", claim.invoice_hash], ["attestation ref", claim.attestation_ref], ["flags", claim.flags.join(", ") || "none"]];
-  $("#claimKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="mono">${esc(v)}</span>`).join("");
+  $("#claimKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
   $("#submit").disabled = !verified;
   $("#submitNote").textContent = verified ? "The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address." : "The receipt did not verify: this page will not submit it.";
   $("#claimBox").hidden = false; $("#claimEmpty").hidden = true;
@@ -462,8 +501,11 @@ $("#submit").addEventListener("click", async () => {
     const id = Number(value);
     let p = null;
     for (let i = 0; i < 6 && !p; i++) { p = await view(settings.treasury, "get_payment", { id }); if (!p) await new Promise((r) => setTimeout(r, 1500)); }
-    $("#decStatus").textContent = `#${id} ${p?.status ?? "?"}`; $("#decStatus").className = `s ${p?.status ?? ""}`;
-    $("#decReason").textContent = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");
+    const status = p?.status ?? "?";
+    $("#decId").textContent = `#${id}`;
+    const st = $("#decStatus"); st.textContent = status; st.className = `stamp ${status}`; void st.offsetWidth; st.classList.add("in");
+    const reason = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");
+    $("#decReason").textContent = reason; $("#decReason").hidden = !reason;
     $("#decWhy").innerHTML = p ? why(p) : "";
     $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, signed by the agent's function-call key`;
     $("#decision").hidden = false;
@@ -473,7 +515,7 @@ $("#submit").addEventListener("click", async () => {
   } finally { btn.disabled = false; btn.textContent = "Request payment"; }
 });
 
-// ---------- treasury (same as index.html) ----------
+// ---------- treasury (same as dashboard.html) ----------
 const REASON = {
   payout_changed: "payout on the invoice differs from the vendor record: the new bank details fraud",
   duplicate_invoice: "same vendor and invoice number already accepted",
@@ -497,18 +539,40 @@ function why(p) {
 }
 async function loadTreasury() {
   $("#tErr").hidden = true;
-  if (!settings.treasury) { $("#foot").textContent = "Set the treasury account in Settings."; $("#settings").open = true; return; }
+  if (!settings.treasury) { $("#foot").textContent = "Set the treasury account in Settings."; $("#heroStats").innerHTML = ""; return; }
   try {
     const t = settings.treasury;
     const [stats, limits, roles, vendors, payments] = await Promise.all([view(t, "get_stats"), view(t, "get_limits"), view(t, "get_roles"), view(t, "list_vendors"), view(t, "list_payments", { from: 0, limit: 200 })]);
-    const card = (k, v) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-    $("#stats").innerHTML = card("balance", usdc(stats.balance)) + card("spent today", usdc(stats.spent_today)) + card("per payment cap", usdc(limits.per_payment_cap)) + card("daily cap", usdc(limits.daily_cap)) + card("approval from", usdc(limits.approval_threshold)) + card("payments", stats.payments) + (stats.paused ? card("paused", "yes") : "");
-    $("#vendors tbody").innerHTML = vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month); const pct = b > 0n ? Number(s * 100n / b) : 0; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td></tr>`; }).join("") || `<tr><td colspan="4" class="muted">no vendors</td></tr>`;
-    $("#payments tbody").innerHTML = payments.slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="s ${esc(p.status)}">${esc(p.status)}${p.reason && p.status === "Blocked" ? `<div class="mono">${esc(p.reason)}</div>` : ""}</td><td>${why(p)}</td><td class="mono">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
+    const stat = (k, v) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent today", usdc(stats.spent_today)) + stat("per payment cap", usdc(limits.per_payment_cap)) + stat("daily cap", usdc(limits.daily_cap)) + stat("approval from", usdc(limits.approval_threshold)) + stat("payments", stats.payments) + (stats.paused ? stat("paused", "yes") : "");
+    const blocked = payments.filter((p) => p.status === "Blocked").length;
+    $("#heroStats").innerHTML = `<div><div class="k">treasury</div><div class="v mono" style="font-size:16px">${esc(t)}</div></div><div><div class="k">balance</div><div class="v">${usdc(stats.balance)}</div></div><div><div class="k">decisions</div><div class="v">${stats.payments}</div></div><div><div class="k">blocked</div><div class="v">${blocked}</div></div>`;
+    $("#vendors tbody").innerHTML = vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month); const pct = b > 0n ? Number(s * 100n / b) : 0; return `<tr><td class="mono id">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td></tr>`; }).join("") || `<tr><td colspan="4" class="muted">no vendors</td></tr>`;
+    $("#payments tbody").innerHTML = payments.slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono id">${esc(p.vendor_id)}</td><td class="mono id">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td><span class="s ${esc(p.status)}">${esc(p.status)}</span>${p.reason && p.status === "Blocked" ? `<div class="mono">${esc(p.reason)}</div>` : ""}</td><td>${why(p)}</td><td class="mono">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
     $("#foot").innerHTML = `owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(t)}" target="_blank" rel="noopener">${esc(t)}</a> on ${esc(settings.network)}.`;
   } catch (e) { $("#tErr").textContent = `could not read ${settings.treasury} on ${settings.network}: ${e.message}`; $("#tErr").hidden = false; }
 }
 $("#refresh").addEventListener("click", loadTreasury);
+
+// ---------- star field (NEAR's star-cross particles), still under reduced motion ----------
+(function stars() {
+  const c = $("#stars"); const ctx = c.getContext("2d");
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let pts = [], w = 0, h = 0;
+  function size() { const r = c.parentElement.getBoundingClientRect(); w = c.width = Math.floor(r.width * devicePixelRatio); h = c.height = Math.floor(r.height * devicePixelRatio); pts = Array.from({ length: Math.round(w * h / 28000) }, () => ({ x: Math.random() * w, y: Math.random() * h, s: (2 + Math.random() * 6) * devicePixelRatio, p: Math.random() * 6.28, v: 0.2 + Math.random() * 0.6 })); }
+  function draw(t) {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of pts) {
+      const a = reduce ? 0.6 : 0.35 + 0.45 * Math.sin(t / 900 * p.v + p.p);
+      ctx.strokeStyle = `rgba(0, 236, 151, ${a.toFixed(2)})`; ctx.lineWidth = devicePixelRatio;
+      ctx.beginPath(); ctx.moveTo(p.x - p.s, p.y); ctx.lineTo(p.x + p.s, p.y); ctx.moveTo(p.x, p.y - p.s); ctx.lineTo(p.x, p.y + p.s); ctx.stroke();
+      if (!reduce) { p.y -= 0.03 * p.v * devicePixelRatio; if (p.y < -p.s) p.y = h + p.s; }
+    }
+    if (!reduce) requestAnimationFrame(draw);
+  }
+  size(); draw(0);
+  addEventListener("resize", () => { size(); if (reduce) draw(0); });
+})();
 
 // ---------- wiring ----------
 const drop = $("#drop");
@@ -518,7 +582,6 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files?.[0]); });
 $("#file").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
 loadSettings();
-if (!settings.treasury) $("#settings").open = true;
 loadTreasury();
 </script>
 </body>

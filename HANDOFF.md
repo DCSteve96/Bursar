@@ -98,6 +98,16 @@ Stefano vuole provare Bursar dal web senza mettere nulla sul suo Mac. Le pagine 
 - Hosting: `.github/workflows/pages.yml` pubblica `web/` con GitHub Pages a ogni push su `main` o a mano (`workflow_dispatch`). Va abilitato una volta in Settings, Pages, source "GitHub Actions". Su una repo privata Pages richiede un piano a pagamento (Pro o Team); il sito pubblicato è comunque raggiungibile da chi ha l'URL, ma la pagina non contiene segreti: le chiavi le inserisce l'utente nel suo browser. Se il piano non lo permette, alternativa: repo pubblica solo per `web/`, oppure aprire il file in locale.
 - README: passo 9 "Do it all from a browser".
 
+### 2.7 Grafica delle pagine web (20 ottobre, stessa sessione)
+
+Stefano ha chiesto un'estetica "intuitiva ed esplosiva" studiando NEAR. Riferimenti usati: i token di near.org (Obsidian `#000`, Paper White, Signal Green `#00ec97` come unico colore saturo, Mint Sage `#c7f5d8`, bordi sottili, raggi 4px, niente ombre, bande alternate scure e chiare, particelle a stella verdi sul nero, il riquadro "AI" a scacchiera come firma), il carattere FK Grotesk (sostituto ufficiale: Space Grotesk, da Google Fonts) e le etichette di sezione `[ 01 / ... ]` del sito dell'hackathon. Carattere mono: IBM Plex Mono per hash e indirizzi.
+
+- `web/style.css` condiviso. `web/index.html` è ora la landing (hero con la frase guida, tre ruoli, ultime 5 decisioni lette dal contratto `treasury.bursar-c34d05b8.testnet` o da `?treasury=`, verifica, come provarlo). La dashboard è diventata `web/dashboard.html`. `web/app.html` ridisegnata a bande numerate: 00 console, 01 read, 02 receipt (banda mint con il riquadro AI), 03 decide con il timbro grande PAID/BLOCKED, 04 treasury. Logica invariata; stessi id DOM, così lo script di test Playwright funziona ancora.
+- Tema unico scuro con bande chiare, scelto apposta: niente toggle light/dark. Animazioni ridotte con `prefers-reduced-motion` (particelle ferme, niente timbro animato).
+- Retry nel browser: il gateway NEAR AI risponde 502 a tratti sulle richieste con immagine (nel pomeriggio del 20 ottobre circa una su due, anche dalla CLI che ritenta 3 volte), e una risposta d'errore arriva senza header CORS, quindi il browser la vede come "Failed to fetch". `app.html` ritenta attestazione (3), completion (6, backoff 2-12 s) e firma (3). Se la serie di 502 dura più dei tentativi, la pagina mostra l'errore e si riprova.
+- Screenshot desktop e telefono di landing e dashboard: nessun overflow orizzontale, nessun errore in console.
+- La repo pubblica `DCSteve96/treasury-console` (GitHub Pages da `main`, root) contiene una copia di `web/`: `https://dcsteve96.github.io/treasury-console/`. Va riallineata a mano quando `web/` cambia (copia dei quattro file e push). Da cancellare dopo i test o quando Bursar diventa pubblica.
+
 ## 3. Decisioni prese
 
 - Separato da Epoch, sempre. Niente brand, niente Sui.
