@@ -222,7 +222,7 @@ const rpcOverride = q.get("rpc");
 const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode"];
 // Bursar's reading relay (relay/worker.js) holds the NEAR AI Cloud key server-side and forwards the bytes untouched.
 // ?relay=https://... overrides it (local testing). Empty until one is deployed.
-const RELAY = (q.get("relay") || "").replace(/\/$/, "");
+const RELAY = (q.get("relay") || "https://bursar-relay.pupazzipunkapi.workers.dev").replace(/\/$/, "");
 const useOwnKey = () => settings.readMode === "own";
 const aiBase = () => useOwnKey() ? AI_BASE : `${RELAY}/v1`;
 const settings = {};
