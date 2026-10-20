@@ -130,7 +130,11 @@ $("#wGo").addEventListener("click", async () => {
     const accounts = await wallet.getAccounts({ network });
     if (!accounts?.length) throw new Error("the wallet did not return an account");
     await afterIdentify(accounts[0].accountId);
-  } catch (e) { $("#wErr").textContent = e.message || "the wallet did not complete the sign-in"; $("#wErr").hidden = false; }
+  } catch (e) {
+    const m = String(e?.message || e || "the wallet did not complete the sign-in");
+    const hint = /reject|cancel|denied/i.test(m) && network === "testnet" ? " The wallet refused the sign-in. On testnet the wallet must have a testnet account selected; a wallet app's built-in browser may be mainnet only. Try the wallet's web version from the picker, or open this page in your phone's browser." : "";
+    $("#wErr").textContent = m + hint; $("#wErr").hidden = false;
+  }
   finally { $("#wGo").disabled = false; }
 });
 $("#another").addEventListener("click", async (e) => { e.preventDefault(); try { await connect().disconnect(); } catch {} location.href = `login.html?network=${network}`; });
