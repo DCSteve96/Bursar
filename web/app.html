@@ -86,6 +86,23 @@
   #settings .wrap table th { background: var(--bone); }
   /* ai tile keeps the brand signature on the receipt band */
   .ai-tile { background: repeating-conic-gradient(var(--signal) 0 25%, var(--paper) 0 50%) 0 0 / 20px 20px; }
+  /* a small "?" that explains a field to a non-technical user: hover, focus or tap */
+  .help { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid currentColor; font: 600 10px/1 var(--mono); font-style: normal; margin-left: 6px; cursor: help; position: relative; text-transform: none; letter-spacing: 0; vertical-align: middle; opacity: 0.65; flex: none; }
+  .help:hover, .help:focus { opacity: 1; outline: none; }
+  .help::after { content: attr(data-help); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); width: 280px; max-width: calc(100vw - 48px); background: var(--void); color: var(--paper); font: 400 13px/1.5 var(--display); letter-spacing: 0; text-transform: none; padding: 10px 12px; border-radius: 4px; z-index: 30; display: none; text-align: left; white-space: normal; box-shadow: 0 0 0 1px var(--line-dark); }
+  .help:hover::after, .help:focus::after { display: block; }
+  @media (max-width: 640px) { .help::after { position: fixed; left: 16px; right: 16px; top: 72px; bottom: auto; width: auto; max-width: none; transform: none; } }
+  label > span { display: flex; align-items: center; }
+  .eyebrow .help { margin-left: 8px; }
+  .kv .help { margin-left: 6px; }
+  .companies { display: flex; flex-direction: column; gap: 8px; }
+  .companies .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line-light); border-radius: 4px; background: var(--bone); flex-wrap: wrap; }
+  .companies .row.on { border-color: var(--void); background: var(--paper); }
+  .companies .n { font-weight: 600; }
+  .companies .m { font: 500 12px var(--mono); color: var(--mute-light); overflow-wrap: anywhere; }
+  .companies .r { font-size: 13px; color: var(--mute-light); margin-left: auto; }
+  details.adv > summary { cursor: pointer; font: 600 12px/1.17 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); list-style: none; }
+  details.adv > summary::before { content: "+ "; } details.adv[open] > summary::before { content: "- "; }
   .who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--mint); border-radius: 4px; color: var(--fg-light); }
   .who .av { width: 36px; height: 36px; border-radius: 4px; background: var(--void); color: var(--signal); display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
   .who .n { font-weight: 600; font-size: 14px; word-break: break-all; }
@@ -279,11 +296,11 @@
     <div class="card" style="margin-top:32px">
       <div class="eyebrow muted" style="margin-bottom:16px">Add a vendor</div>
       <div class="grid cols-3">
-        <label><span>Vendor id (slug)</span><input id="vId" placeholder="acmehosting" autocomplete="off"></label>
-        <label><span>Name</span><input id="vName" placeholder="Acme Hosting" autocomplete="off"></label>
-        <label><span>Monthly budget, USDC (0 = none)</span><input id="vBudget" placeholder="3000" autocomplete="off"></label>
-        <label><span>Paid on</span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
-        <label style="grid-column: span 2"><span>Account or address</span><input id="vPayout" placeholder="vendor.testnet or 0x..." autocomplete="off"></label>
+        <label><span>Vendor id (slug) <i class="help" tabindex="0" data-help="A short handle in lowercase letters and digits, for example acmehosting. The AI reads the vendor name on the invoice and the contract matches it to this id. It cannot be changed later.">?</i></span><input id="vId" placeholder="acmehosting" autocomplete="off"></label>
+        <label><span>Name <i class="help" tabindex="0" data-help="The vendor's name as printed on its invoices.">?</i></span><input id="vName" placeholder="Acme Hosting" autocomplete="off"></label>
+        <label><span>Monthly budget, USDC (0 = none) <i class="help" tabindex="0" data-help="The most this vendor is paid in one calendar month. Invoices past it are refused. 0 means no monthly limit.">?</i></span><input id="vBudget" placeholder="3000" autocomplete="off"></label>
+        <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
+        <label style="grid-column: span 2"><span>Account or address <i class="help" tabindex="0" data-help="The only place this vendor will ever be paid. An invoice that asks for a different account or address is refused, not paid: this is what stops the new bank details fraud. Confirm it with the vendor by phone before saving.">?</i></span><input id="vPayout" placeholder="vendor.testnet or 0x..." autocomplete="off"></label>
       </div>
       <div class="actions" style="margin-top:16px;align-items:center"><button id="vAdd" type="button" class="btn-signal">Add vendor</button><span class="muted" style="font-size:14px;max-width:60ch">Check the address with the vendor by phone or in person. An invoice can never change it; only you can.</span></div>
       <div id="vErr" class="err" hidden></div>
@@ -301,8 +318,8 @@
         <div class="eyebrow muted" style="margin-bottom:16px">Purchase order</div>
         <div class="grid cols-2">
           <label><span>Vendor</span><select id="oVendor"></select></label>
-          <label><span>Reference printed on invoices</span><input id="oRef" placeholder="PO-2026-118" autocomplete="off"></label>
-          <label><span>Total, USDC</span><input id="oAmount" placeholder="1250" autocomplete="off"></label>
+          <label><span>Reference printed on invoices <i class="help" tabindex="0" data-help="Your purchase order number. Tell the vendor to print it on the invoice: the AI reads it and the contract matches it to this order.">?</i></span><input id="oRef" placeholder="PO-2026-118" autocomplete="off"></label>
+          <label><span>Total, USDC <i class="help" tabindex="0" data-help="How much this order is worth in all. Invoices consume it until it is spent; any more waits for a person.">?</i></span><input id="oAmount" placeholder="1250" autocomplete="off"></label>
           <label><span>Description</span><input id="oDesc" placeholder="Landing page redesign" autocomplete="off"></label>
         </div>
         <div class="actions" style="margin-top:16px"><button id="oAdd" type="button" class="btn-signal">Add purchase order</button></div>
@@ -311,8 +328,8 @@
         <div class="eyebrow muted" style="margin-bottom:16px">Standing order</div>
         <div class="grid cols-2">
           <label><span>Vendor</span><select id="rVendor"></select></label>
-          <label><span>Per period, USDC</span><input id="rAmount" placeholder="500" autocomplete="off"></label>
-          <label><span>Period, days (30 = calendar month)</span><input id="rDays" value="30" autocomplete="off"></label>
+          <label><span>Per period, USDC <i class="help" tabindex="0" data-help="The most one invoice may ask for in each period, for a recurring service like hosting or rent.">?</i></span><input id="rAmount" placeholder="500" autocomplete="off"></label>
+          <label><span>Period, days (30 = calendar month) <i class="help" tabindex="0" data-help="One invoice per period is covered. 30 means one per calendar month.">?</i></span><input id="rDays" value="30" autocomplete="off"></label>
           <label><span>Description</span><input id="rDesc" placeholder="Dedicated server, monthly" autocomplete="off"></label>
         </div>
         <div class="actions" style="margin-top:16px"><button id="rAdd" type="button" class="btn-signal">Add standing order</button></div>
@@ -341,37 +358,60 @@
 <section class="band view" id="settings" hidden>
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ SETTINGS ]</div><h2 class="heading">Keys stay in this browser. Policy lives in the contract.</h2></div>
+
     <div class="card">
-      <div class="eyebrow muted" style="margin-bottom:16px">This treasury</div>
-      <div class="grid cols-3">
-        <label><span>Network</span><select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
-        <label><span>Treasury (policy contract)</span><input id="treasury" placeholder="treasury.you.testnet" autocomplete="off"></label>
-        <label><span>Label</span><input id="label" placeholder="Northwind Studio" autocomplete="off"></label>
-        <label><span>Agent account</span><input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
-        <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
-        <label><span>Owner account</span><input id="owner" placeholder="you.testnet" autocomplete="off"></label>
-        <label><span>Owner key (full access)</span><input id="ownerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
-        <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
-        <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
-        <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
-        <label><span>Owner key kind</span><select id="ownerKeyKind"><option value="">full access (downloaded keys)</option><option value="wallet">function-call key added by the wallet</option></select></label>
-        <label><span>Payer account (funds new accounts and the DAO; set at creation)</span><input id="payer" placeholder="bursar-1a2b3c4d.testnet" autocomplete="off"></label>
-        <label><span>Payer key (full access)</span><input id="payerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
-        <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (hackathon demo)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
-        <label id="aiKeyRow"><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
-        <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
+      <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Your companies <i class="help" tabindex="0" data-help="Each company has its own treasury: a contract on NEAR that holds its USDC and its rules. This browser can hold several; the switcher at the top of the sidebar jumps between them.">?</i></div>
+      <div class="companies" id="companiesList"></div>
+      <div class="actions" style="margin-top:16px;align-items:center">
+        <a class="btn btn-signal" href="#start">Create another treasury</a>
+        <button id="addExisting" type="button" class="btn-ghost">Add an existing treasury</button>
+        <a class="btn btn-ghost" href="login.html">Sign in as someone else</a>
       </div>
-      <div class="actions" style="margin-top:24px;align-items:center">
-        <button id="save" type="button" class="btn-signal">Save</button>
-        <button id="demo" type="button" class="btn-ghost">Use the demo treasury</button>
-        <button id="forget" type="button" class="btn-ghost">Forget keys</button>
-        <button id="removeProfile" type="button" class="btn-ghost">Remove this treasury</button>
-      </div>
-      <div class="muted" style="font-size:14px;max-width:80ch;margin-top:16px"><b>Two ways to read.</b> "Bursar reading" is for the NEAR HACKATHON demo: the page sends the invoice through Bursar's relay, which holds a NEAR AI Cloud key paid by the team, forwards the bytes untouched and keeps nothing; the invoice is in transit on that relay before it enters the enclave, and daily caps apply. A company using Bursar brings its own NEAR AI Cloud key: the invoice then goes from this browser straight to the enclave and never passes through Bursar. The receipt and its checks are identical either way. The agent key can only call <span class="mono">request_payment</span>; the owner key signs vendors, orders, limits and approvals.</div>
     </div>
+
+    <div class="card" style="margin-top:24px">
+      <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">This treasury <i class="help" tabindex="0" data-help="What was created for this company. These names are fixed: the contract cannot be renamed, and the accounts below are the only ones allowed to act on it.">?</i></div>
+      <div class="kv" id="treasuryKv"></div>
+      <div class="grid cols-2" style="margin-top:20px">
+        <label><span>Reading <i class="help" tabindex="0" data-help="Who reads your invoices inside the secure enclave. Bursar reading is a hackathon demo convenience: your PDF goes through Bursar's relay to the enclave, with daily caps. With your own NEAR AI Cloud key, the PDF goes from this browser straight to the enclave and never touches Bursar. The receipt and its checks are the same either way.">?</i></span><select id="readMode"><option value="relay">Bursar reading (hackathon demo)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
+        <label id="aiKeyRow"><span>NEAR AI Cloud API key <i class="help" tabindex="0" data-help="From cloud.near.ai. Stays in this browser; it is sent only to NEAR AI Cloud, with each invoice.">?</i></span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
+      </div>
+      <div class="actions" style="margin-top:20px;align-items:center">
+        <button id="save" type="button" class="btn-signal">Save</button>
+        <button id="dlKeysNow" type="button" class="btn-ghost">Download a backup of the keys</button>
+        <button id="forget" type="button" class="btn-ghost">Forget keys</button>
+        <button id="removeProfile" type="button" class="btn-ghost">Remove from this browser</button>
+      </div>
+      <p class="muted" style="font-size:13px;margin:12px 0 0;max-width:80ch">Forget keys clears the keys from this browser and leaves the treasury untouched on chain: sign in again with your wallet to get them back. Remove takes the company out of the switcher; the contract and its USDC stay where they are.</p>
+      <details class="adv" id="advanced" style="margin-top:20px">
+        <summary>Advanced: connection details</summary>
+        <p class="muted" style="font-size:13px;margin:12px 0 16px;max-width:80ch">For developers and judges: point this page at any treasury by pasting its accounts and keys (from <span class="mono">~/.near-credentials</span> after <span class="mono">bursar setup</span>). Everything stays in this browser. A normal customer never needs this.</p>
+        <div class="grid cols-3">
+          <label><span>Network</span><select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
+          <label><span>Treasury (policy contract)</span><input id="treasury" placeholder="treasury.you.testnet" autocomplete="off"></label>
+          <label><span>Label (shown in the switcher)</span><input id="label" placeholder="Northwind Studio" autocomplete="off"></label>
+          <label><span>Agent account</span><input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
+          <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
+          <label><span>Owner account</span><input id="owner" placeholder="you.testnet" autocomplete="off"></label>
+          <label><span>Owner key</span><input id="ownerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+          <label><span>Owner key kind</span><select id="ownerKeyKind"><option value="">full access (downloaded keys)</option><option value="wallet">function-call key added by the wallet</option></select></label>
+          <label><span>Payer account (set at creation)</span><input id="payer" placeholder="bursar-1a2b3c4d.testnet" autocomplete="off"></label>
+          <label><span>Payer key (full access)</span><input id="payerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+          <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
+          <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+          <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
+        </div>
+        <input id="model" type="hidden" value="z-ai/glm-5.3-flash">
+        <div class="actions" style="margin-top:16px;align-items:center">
+          <button id="demo" type="button" class="btn-ghost">Use the README demo treasury</button>
+          <span class="muted" style="font-size:13px">Loads the treasury of the README walkthrough, read-only.</span>
+        </div>
+      </details>
+    </div>
+
     <div class="grid cols-2" style="margin-top:24px">
       <div class="card">
-        <div class="eyebrow muted" style="margin-bottom:16px">Company (stored in the contract)</div>
+        <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Company <i class="help" tabindex="0" data-help="The company's name and a line about it, stored in the contract. The name shows in the sidebar, in invites and in the explorer.">?</i></div>
         <div class="grid">
           <label><span>Name</span><input id="cName" placeholder="Northwind Studio Srl" autocomplete="off"></label>
           <label><span>Description</span><input id="cDesc" placeholder="Design studio, Milano" autocomplete="off"></label>
@@ -379,32 +419,24 @@
         <div class="actions" style="margin-top:16px"><button id="cSave" type="button" class="btn-inverse">Save company</button></div>
       </div>
       <div class="card">
-        <div class="eyebrow muted" style="margin-bottom:16px">Limits (owner only)</div>
+        <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Limits <i class="help" tabindex="0" data-help="The rules the contract enforces on every invoice. Only the owner can change them; the AI cannot.">?</i></div>
         <div class="grid cols-3">
-          <label><span>Per payment cap, USDC</span><input id="lCap" autocomplete="off"></label>
-          <label><span>Daily cap, USDC</span><input id="lDay" autocomplete="off"></label>
-          <label><span>A person decides from, USDC</span><input id="lThr" autocomplete="off"></label>
+          <label><span>Per payment cap, USDC <i class="help" tabindex="0" data-help="No single invoice above this amount is paid, whatever it says. Above it, the contract refuses.">?</i></span><input id="lCap" autocomplete="off"></label>
+          <label><span>Daily cap, USDC <i class="help" tabindex="0" data-help="The most the treasury pays out in one day, all vendors together. Past it, invoices are refused until tomorrow.">?</i></span><input id="lDay" autocomplete="off"></label>
+          <label><span>A person decides from, USDC <i class="help" tabindex="0" data-help="Invoices at or above this amount are never paid automatically: they wait for you, an approver, or the council if there is a DAO.">?</i></span><input id="lThr" autocomplete="off"></label>
         </div>
-        <label style="margin-top:12px"><span>Orders</span><select id="lStrict"><option value="false">Vendors with orders are held to them</option><option value="true">Strict: every invoice needs an order or a person</option></select></label>
+        <label style="margin-top:12px"><span>Orders <i class="help" tabindex="0" data-help="An order is what you agreed to buy from a vendor: a purchase order with a total, or a standing order per month. By default only vendors that have orders are held to them. Strict mode: every invoice must match an order, or it waits for a person.">?</i></span><select id="lStrict"><option value="false">Vendors with orders are held to them</option><option value="true">Strict: every invoice needs an order or a person</option></select></label>
         <div class="actions" style="margin-top:16px"><button id="lSave" type="button" class="btn-inverse">Save limits</button></div>
       </div>
     </div>
-    <div class="card" style="margin-top:24px">
-      <div class="eyebrow muted" style="margin-bottom:16px">Operators (on chain, revocable)</div>
-      <div class="wrap" style="border-color:var(--line-dark)"><table id="opsTable"><thead><tr><th>account</th><th>approve</th><th>vendors</th><th>orders</th><th></th></tr></thead><tbody></tbody></table></div>
-      <div class="grid cols-3" style="margin-top:16px">
-        <label><span>Account</span><input id="opAccount" placeholder="anna.testnet" autocomplete="off"></label>
-        <label><span>May</span><div class="row" style="display:flex;gap:16px;padding-top:10px"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opApprove" style="width:auto"> approve</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opVendors" style="width:auto"> vendors</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opOrders" style="width:auto"> orders</label></div></label>
-        <label><span>&nbsp;</span><button id="opAdd" type="button" class="btn-inverse">Add operator</button></label>
-      </div>
-      <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">Roles and DAO: <span class="mono" id="rolesLine"></span></p>
-    </div>
+
     <div class="card" style="margin-top:24px" id="inviteCard">
-      <div class="eyebrow muted" style="margin-bottom:8px">Invite a collaborator</div>
-      <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:70ch">The owner creates an account for the collaborator with one key limited to the methods of the role, records the role in the contract, and gets a link that carries the key after the hash sign: it never reaches a server. Send it as you like. Revoke the role on chain at any time; the key can then do nothing.</p>
+      <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Collaborators <i class="help" tabindex="0" data-help="People who help run the treasury with a limited role: approve held invoices, manage vendors, manage orders. Their role is recorded in the contract and you can remove it any time. They never get your keys.">?</i></div>
+      <div class="wrap" style="border-color:var(--line-dark)"><table id="opsTable"><thead><tr><th>account</th><th>approve</th><th>vendors</th><th>orders</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="eyebrow muted" style="margin:24px 0 8px;display:flex;align-items:center">Invite a collaborator <i class="help" tabindex="0" data-help="Bursar creates an account for them with one key limited to their role, records the role in the contract and gives you a link. Whoever opens the link is signed in as that person with that role and nothing else. Send it on a channel you trust: the link contains the key.">?</i></div>
       <div class="grid cols-3">
-        <label><span>Name (letters and digits)</span><input id="invName" placeholder="anna" autocomplete="off"></label>
-        <label><span>May</span><div style="display:flex;gap:16px;padding-top:10px;flex-wrap:wrap"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invApprove" checked style="width:auto"> approve</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invVendors" style="width:auto"> vendors</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invOrders" style="width:auto"> orders</label></div></label>
+        <label><span>Name (letters and digits) <i class="help" tabindex="0" data-help="Becomes their account name, for example anna.yourcompany.testnet.">?</i></span><input id="invName" placeholder="anna" autocomplete="off"></label>
+        <label><span>May <i class="help" tabindex="0" data-help="Approve: decide on invoices that wait for a person. Vendors: add and change vendors and their payouts. Orders: record what the company agreed to buy.">?</i></span><div style="display:flex;gap:16px;padding-top:10px;flex-wrap:wrap"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invApprove" checked style="width:auto"> approve</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invVendors" style="width:auto"> vendors</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invOrders" style="width:auto"> orders</label></div></label>
         <label><span>&nbsp;</span><button id="invCreate" type="button" class="btn-signal">Create the invite</button></label>
       </div>
       <ul class="log" id="invSteps" style="margin-top:16px"></ul>
@@ -412,16 +444,26 @@
         <label><span>Invite link (contains the key: share it only with the collaborator)</span><input id="invLink" readonly></label>
         <div class="actions" style="margin-top:12px;align-items:center"><button id="invCopy" type="button" class="btn-inverse">Copy link</button><a id="invMail" class="btn btn-ghost" href="#">Send by email</a><span class="muted" style="font-size:14px" id="invNote"></span></div>
       </div>
+      <details class="adv" style="margin-top:20px">
+        <summary>Already has a NEAR account? Give it a role directly</summary>
+        <div class="grid cols-3" style="margin-top:12px">
+          <label><span>Account <i class="help" tabindex="0" data-help="Their own NEAR account. They sign in with their wallet; no invite link is needed.">?</i></span><input id="opAccount" placeholder="anna.testnet" autocomplete="off"></label>
+          <label><span>May</span><div class="row" style="display:flex;gap:16px;padding-top:10px"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opApprove" style="width:auto"> approve</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opVendors" style="width:auto"> vendors</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opOrders" style="width:auto"> orders</label></div></label>
+          <label><span>&nbsp;</span><button id="opAdd" type="button" class="btn-inverse">Add the role</button></label>
+        </div>
+      </details>
+      <p class="muted" style="font-size:13px;margin:16px 0 0;max-width:80ch">Roles and DAO: <span class="mono" id="rolesLine"></span></p>
     </div>
+
     <div class="card" style="margin-top:24px" id="govCard">
-      <div class="eyebrow muted" style="margin-bottom:8px">Governance</div>
+      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Governance <i class="help" tabindex="0" data-help="Optional. A DAO is a council of accounts that votes on the invoices that wait for a person, more than half approving. Without one, you or an approver decide alone.">?</i></div>
       <div id="govNone">
         <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:70ch">Without a DAO, the owner or an approver decides what is held. A Sputnik DAO gives the company a council: every held payment becomes a proposal the council votes on, in this console or in Trezu on mainnet. The treasury keeps a little NEAR for the proposal bonds.</p>
         <div class="grid cols-2">
-          <label><span>Council (the owner is always in)</span><div id="govCouncil" style="display:flex;flex-direction:column;gap:6px;padding-top:6px;font-size:14px"></div></label>
-          <label><span>More council accounts, comma separated</span><input id="govExtra" placeholder="cfo.testnet, partner.testnet" autocomplete="off"></label>
+          <label><span>Council (the owner is always in) <i class="help" tabindex="0" data-help="Who votes. Your collaborators are proposed; untick the ones who should not vote.">?</i></span><div id="govCouncil" style="display:flex;flex-direction:column;gap:6px;padding-top:6px;font-size:14px"></div></label>
+          <label><span>More council accounts, comma separated <i class="help" tabindex="0" data-help="Any NEAR account, for example a partner or an accountant with their own wallet.">?</i></span><input id="govExtra" placeholder="cfo.testnet, partner.testnet" autocomplete="off"></label>
         </div>
-        <div class="actions" style="margin-top:16px;align-items:center"><button id="govCreate" type="button" class="btn-signal">Create the DAO</button><span class="muted" style="font-size:14px;max-width:50ch">Sputnik v2 factory, 6 NEAR deposit on testnet. More than half of the council approves a proposal.</span></div>
+        <div class="actions" style="margin-top:16px;align-items:center"><button id="govCreate" type="button" class="btn-signal">Create the DAO</button><span class="muted" style="font-size:14px;max-width:50ch">Sputnik v2 factory, 6 NEAR deposit on testnet, paid by the payer account. More than half of the council approves a proposal.</span></div>
         <ul class="log" id="govSteps" style="margin-top:16px"></ul>
       </div>
       <div id="govHas" hidden>
@@ -477,7 +519,15 @@ function renderProfiles() {
   const sel = $("#profile");
   sel.innerHTML = profiles.map((p) => `<option value="${esc(p.treasury)}">${esc(p.label || p.treasury)}</option>`).join("") + `<option value="">+ new treasury</option>`;
   sel.value = profiles.some((p) => p.treasury === settings.treasury) ? settings.treasury : "";
+  const roleOf = (p) => p.ownerKey ? (p.ownerKeyKind === "wallet" ? "owner, signed in with the wallet" : "owner, keys in this browser") : p.operator ? `collaborator ${p.operator.split(".")[0]}` : "read-only";
+  $("#companiesList").innerHTML = profiles.map((p) => `<div class="row${p.treasury === settings.treasury ? " on" : ""}"><div><div class="n">${esc(p.label || p.treasury)}</div><div class="m">${esc(p.treasury)} on ${esc(p.network)}</div></div><span class="r">${esc(roleOf(p))}</span>${p.treasury === settings.treasury ? `<span class="s Paid" style="font-size:12px">open now</span>` : `<button type="button" class="btn-ghost small" data-open="${esc(p.treasury)}">Open</button>`}</div>`).join("") || `<p class="muted" style="margin:0;font-size:14px">No company in this browser yet. Create one, or sign in with your wallet.</p>`;
 }
+$("#companiesList").addEventListener("click", (e) => { const b = e.target.closest("button[data-open]"); if (!b) return; $("#profile").value = b.dataset.open; $("#profile").dispatchEvent(new Event("change")); });
+$("#addExisting").addEventListener("click", () => { const d = $("#advanced"); d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" }); });
+$("#dlKeysNow").addEventListener("click", () => {
+  const k = { network: settings.network, label: settings.label, treasury: { account_id: settings.treasury }, owner: { account_id: settings.owner, ...(settings.ownerKey && settings.ownerKeyKind !== "wallet" ? { private_key: settings.ownerKey } : {}), ...(settings.ownerKeyKind === "wallet" ? { note: "wallet account; the key in this browser is a function-call key", browser_key: settings.ownerKey } : {}) }, agent: { account_id: settings.agent, private_key: settings.agentKey, note: "function-call key: request_payment on the treasury only" }, ...(settings.payer ? { payer: { account_id: settings.payer, private_key: settings.payerKey, note: "funds invites and the DAO" } } : {}), ...(settings.operator ? { operator: { account_id: settings.operator, private_key: settings.operatorKey, role: settings.operatorRole } } : {}) };
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(k, null, 2)], { type: "application/json" })); a.download = `${settings.treasury || "bursar"}-keys.json`; a.click();
+});
 $("#profile").addEventListener("change", () => {
   const t = $("#profile").value;
   if (!t) { location.hash = "#start"; renderProfiles(); return; }
@@ -970,6 +1020,8 @@ async function loadTreasury() {
       view(t, "list_orders", { vendor_id: null }).catch(() => []), view(t, "get_company").catch(() => null), view(t, "list_operators").catch(() => []),
     ]);
     state = { stats, limits, roles, vendors, payments, orders, company, operators };
+    // the switcher shows the company's name once it is set in the contract
+    if (company?.name && settings.label !== company.name) { $("#label").value = company.name; settings.label = company.name; try { localStorage.setItem("bursar.label", company.name); } catch {} upsertProfile(); }
     await loadDao();
     renderOverview(); renderAttention(); renderVendors(); renderOrders(); renderAnalytics(); renderSettings();
   } catch (e) { $("#tErr").textContent = `could not read ${settings.treasury} on ${settings.network}: ${e.message}`; $("#tErr").hidden = false; }
@@ -1094,6 +1146,18 @@ function renderSettings() {
   $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || "";
   $("#lCap").value = Number(BigInt(limits.per_payment_cap) / 1000000n); $("#lDay").value = Number(BigInt(limits.daily_cap) / 1000000n); $("#lThr").value = Number(BigInt(limits.approval_threshold) / 1000000n); $("#lStrict").value = String(!!limits.require_orders);
   $("#rolesLine").textContent = `owner ${roles[0]}, agent ${roles[1]}, executor ${roles[2]}, DAO ${roles[3] ?? "none"}, token ${roles[4]}`;
+  const help = (t) => `<i class="help" tabindex="0" data-help="${esc(t)}">?</i>`;
+  const signedAs = settings.ownerKey ? (settings.ownerKeyKind === "wallet" ? "you, signed in with your wallet (a key limited to this contract lives in this browser)" : "you, with the keys in this browser") : settings.operator ? `you act as ${settings.operator}` : "nobody: this browser only reads";
+  $("#treasuryKv").innerHTML = [
+    ["company", esc(company?.name || "not set yet, see Company below"), "The name stored in the contract."],
+    ["treasury", `<a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}`, "The contract that holds the USDC and the rules. Created for you; it cannot be renamed."],
+    ["owner", `${esc(roles[0])} <span class="muted">(${esc(signedAs)})</span>`, "The account that owns the treasury: only it changes vendors, limits and approvals. The key in this browser can manage, never move USDC."],
+    ["agent", esc(roles[1]), "The account that reads invoices and asks the contract to pay. It holds one key that can only call request_payment: it cannot approve or move anything."],
+    ...(settings.payer ? [["payer", esc(settings.payer), "A testnet account Bursar funded to create everything. Its key stays here to pay for invites and the DAO. It has no power over the treasury."]] : []),
+    ["dao", esc(roles[3] ?? "none"), "The council that votes on held invoices, if the company created one."],
+    ["token", esc(roles[4]), "The USDC contract the treasury holds and pays with. On testnet, a test token."],
+    ["model", esc(settings.model || "z-ai/glm-5.3-flash"), "The model that reads the invoices inside the enclave. Fixed: the receipt names it and the verifier checks it."],
+  ].map(([k, v, h]) => `<span class="k">${k}${help(h)}</span><span class="v mono">${v}</span>`).join("");
   $("#govNone").hidden = !!dao(); $("#govHas").hidden = !dao();
   if (dao()) {
     $("#govKv").innerHTML = [["dao", dao()], ["council", daoInfo.council.join(", ") || "(could not read the policy)"], ["open proposals", held().filter((p) => p.dao_proposal_id !== null).length]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
