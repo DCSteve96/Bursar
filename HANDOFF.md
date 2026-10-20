@@ -1,4 +1,4 @@
-# Bursar: stato del progetto e decisioni (handoff del 20 ottobre 2026)
+# Bursar: stato del progetto e decisioni (handoff del 20 ottobre 2026, aggiornato nella sessione cloud dello stesso giorno)
 
 Questo file passa a Claude Code tutto quello che è stato deciso e verificato in chat. Non è per i giudici. Quando una cosa qui cambia, aggiorna questo file.
 
@@ -27,6 +27,19 @@ Verificato on chain:
 
 Non ancora provato con chiavi vere: NEAR AI Cloud (`ai.ts` è scritto sulle docs), Intents (solo mainnet), Trezu (solo mainnet).
 
+### 2.1 Fatto nella sessione cloud del 20 ottobre (solo offline: la rete del container bloccava RPC NEAR, NEAR AI e Intents)
+
+- Contratto: callback su `add_proposal` che salva `dao_proposal_id` (evento `dao_proposal_opened`) e, se la DAO rifiuta di aprire la proposta, blocca il pagamento con `dao_proposal_failed` e libera il budget. Nuovo metodo `sync_dao_proposal(id)` (chiunque può chiamarlo): legge `get_proposal` dalla DAO e, solo sulla risposta della DAO (`Rejected`, `Expired`, `Removed`, `Failed`, `Moved`), cancella il pagamento con motivo `dao_<stato>`. Callback `on_ft_transfer` su ogni `ft_transfer`: se fallisce, il saldo torna indietro (`Paid` -> `Blocked transfer_failed`, `Settling` -> `Queued`, withdraw ripristinato). 11 unit test. Firme pubbliche invariate (nessuna modifica a `near.ts`), solo metodi nuovi.
+- Wasm: `strip = true` nel profilo release porta il wasm da 502 KB (con i callback) a 303 KB; con `wasm-opt -Oz` 249 KB. `contracts/policy/build.sh` applica wasm-opt se presente. Il contratto va rideployato (le strutture di stato non sono cambiate, `Payment.dao_proposal_id` esisteva già).
+- `ai.ts` non usa più l'SDK OpenAI: chiama l'API con `fetch` e conserva i byte esatti di richiesta e risposta, perché il gateway firma `<model>:<sha256(req)>:<sha256(res)>` sui byte, e una riserializzazione rompeva la firma. Il receipt in `.bursar/receipts/<id>.json` contiene tutto: byte, firma, report di attestazione con quote TDX, nonce.
+- `verify.ts` e `bursar verify <id>`: verifica indipendente senza API key. Controlli: hash dei byte, testo firmato, recupero ECDSA (EIP-191, come `ethers.verifyMessage`), `signature_kind == provider_tee`, report con lo stesso signer e il nostro nonce, `report_data` del quote TDX (signer nei byte 0..20, nonce nei byte 32..64), quote verificato contro il collateral Intel con `@phala/dcap-qvl` (rete necessaria, `--no-collateral` per saltare), estrazione identica all'output del modello, `attestation_ref` on chain. Formati presi dal sorgente di `@nearai/inference-sdk` 0.1.0 (che richiede Node 24, per questo non lo usiamo). Non fa ancora il replay dell'event log su RTMR3 né la verifica GPU.
+- Test app con vitest (`npm test`): recupero firma su vettore noto, receipt manomesso (risposta modificata, firma di un'altra chiave, nonce diverso, firma del gateway), parser offline sulle 4 fatture.
+- `bursar sync` e tool MCP `sync_dao_approvals`, `verify_attestation`; l'executor chiama `syncApprovals` a ogni tick e salta Intents fuori da mainnet.
+- Dashboard statica `web/index.html`: legge il contratto via RPC, nessun build.
+- README aggiornato con i passi "do X, see Y" per verify, sync, dashboard, test. Gli output di esempio di `verify` sono il formato del comando, non un run reale: va rifatto con un receipt vero.
+
+Da rifare appena c'è rete e chiavi: rideploy su testnet, i 4 passi del README, poi `verify` su un receipt vero (primo punto in cui il formato dell'API può smentire il codice).
+
 ## 3. Decisioni prese
 
 - Separato da Epoch, sempre. Niente brand, niente Sui.
@@ -36,6 +49,7 @@ Non ancora provato con chiavi vere: NEAR AI Cloud (`ai.ts` è scritto sulle docs
 - Nessun database: la chain è lo stato, la dashboard legge l'RPC.
 - Data: Stefano chiede nel Discord di NEAR se il lavoro preparatorio è ammesso. In mancanza di risposta, la repo pubblica parte dal 1° novembre con history pulita; quanto fatto prima è un prototipo privato.
 - Monetizzazione (futura, non per l'hackathon): fee in bps nel contratto, `appFees` di Intents (già previsto nel codice con `referral: "bursar"`), abbonamento per la parte hostata (lettura, relayer, export), grant NEAR. Non servizio di pagamento.
+- Parte hostata, confine da tenere (ragionamento del 20 ottobre, da confermare con Stefano): si può ospitare l'agente (chiave limitata a `request_payment`, nessun potere di spesa), il relayer (paga solo gas, un account nostro), monitoraggio, notifiche, export, connettori. Non va ospitata la chiave dell'executor con potere di `settle`: anche se il contratto vincola il destinatario, è l'unica chiave che fa uscire USDC e tenerla noi assomiglia a custodia. Se un giorno serve, la chiave dell'executor diventa una function-call key limitata a `settle` e `mark_settled` sul contratto dell'azienda (il contratto già controlla il destinatario), e resta comunque nelle mani dell'azienda. Non è un parere legale.
 
 ## 4. Regole dell'hackathon (da HACKATHON.md, rileggerlo prima della submission)
 
@@ -49,6 +63,7 @@ Non ancora provato con chiavi vere: NEAR AI Cloud (`ai.ts` è scritto sulle docs
 ## 5. API verificate (fonte: docs ufficiali, 19-20 ottobre)
 
 ### NEAR AI Cloud
+- Firma della risposta (verificato nel sorgente dell'SDK 0.1.0): `text` = `<model id canonico dalla richiesta>:<sha256 hex dei byte della richiesta>:<sha256 hex dei byte della risposta>`; `signature` ECDSA 65 byte, verificata con `ethers.verifyMessage` (EIP-191) e confrontata con `signing_address` (20 byte). `signature_kind` `provider_tee` = firmato nel TEE del modello; `gateway` = firmato dal gateway (quando riscrive la risposta), non prova l'esecuzione nel TEE del modello. `GET /v1/attestation/report` risponde `{ model_attestations: [ { request_nonce, signing_algo, signing_address, intel_quote (hex), event_log, info, nvidia_payload?, report_data? } ] }`; nel quote TDX `report_data` = signer (20 byte, zero-padded a 32) + nonce (32 byte). Le firme restano sul gateway 60 minuti: `fetchSignature` va chiamato subito dopo la completion, come fa `ai.ts`.
 - Base URL `https://cloud-api.near.ai/v1`, compatibile OpenAI. Chiave da cloud.near.ai (crediti prepagati, spend limit per chiave).
 - Modelli in TEE con visione: `z-ai/glm-5.3-flash` (scelto, structured outputs, 1M ctx, economico), `Qwen/Qwen3.8-27B`, `Qwen/Qwen3-VL-30B-A3B-Instruct`. Niente PDF in input: rasterizzare con `pdftoppm` e mandare PNG base64 in `image_url`.
 - Attestazione: `GET /v1/attestation/report?model=<id>&provider=near&signing_algo=ecdsa&nonce=<32 byte hex>` con header `x-no-aliasing: true`, da chiamare prima della completion. Firma della risposta: `GET /v1/signature/<completion id>?signing_algo=ecdsa` restituisce `text`, `signature`, `signing_address`, `signature_kind` (`provider_tee` = `<model>:<sha256(req)>:<sha256(res)>`). Usare richieste non streaming con l'id canonico del modello. SDK alternativo: `@nearai/inference-sdk` (Node 24+).
@@ -74,11 +89,11 @@ Non ancora provato con chiavi vere: NEAR AI Cloud (`ai.ts` è scritto sulle docs
 
 ## 6. Cosa resta (ordine consigliato)
 
-1. **Setup con account di Stefano** su testnet e verifica del README passo per passo.
-2. **NEAR AI Cloud con chiave vera**: provare `npm run agent -- --once` senza `--offline` sulle 4 fatture; sistemare il prompt finché l'estrazione è giusta; controllare che `fetchSignature` risponda e che l'`attestation_ref` sia completo.
+1. **Setup con account di Stefano** su testnet (rideploy del contratto nuovo) e verifica del README passo per passo, compresi `sync` dopo un `VoteReject` e la dashboard.
+2. **NEAR AI Cloud con chiave vera**: `npm run agent -- --once` senza `--offline` sulle 4 fatture; sistemare il prompt finché l'estrazione è giusta; poi `npm run dev verify <id>` su un receipt vero e correggere `verify.ts` se il formato reale differisce. Se un check fallisce per un motivo di formato va capito, non allentato.
 3. **Mainnet**: `setup --root <account>.near --mainnet` (usa USDC vero `17208628...`, niente faucet; serve storage_deposit del treasury sul contratto USDC, da aggiungere a setup se manca), fondi: 50-100 USDC e circa 12 NEAR. Un indirizzo Base di Stefano come fornitore "DesignCo". Provare l'executor: quote, `settle`, `mark_settled`. Proposta sopra soglia vista e approvata in Trezu.
-4. **Contratto**: salvare `dao_proposal_id` (callback su `add_proposal`); valutare `cancel` quando la DAO rifiuta; ridurre il wasm se possibile.
-5. **Dashboard** statica (una pagina, legge l'RPC): inbox, decisioni con motivo, registro con link a tx e attestazione, budget per fornitore. Hostabile su GitHub Pages, non obbligatoria.
+4. **Contratto** (fatto il 20 ottobre: `dao_proposal_id`, cancel su rifiuto DAO, rollback dei transfer, wasm 303 KB). Resta: replay RTMR3 nel verifier, eventuale `storage_deposit` automatico per i fornitori NEAR.
+5. **Dashboard** statica fatta (`web/index.html`); da provare su un contratto vero e, se piace, pubblicare su GitHub Pages.
 6. **Video demo** (2-3 minuti): le 4 fatture, l'approvazione in Trezu, il pagamento su Base, il blocco della frode, l'MCP da Claude. Post su X.
 7. **README finale** con indirizzi mainnet, e **submission** via form o API dopo conferma del payload.
 
@@ -89,3 +104,4 @@ Non ancora provato con chiavi vere: NEAR AI Cloud (`ai.ts` è scritto sulle docs
 - Conferma del nome.
 - Risposta del Discord NEAR sul lavoro preparatorio (o decisione di ripartire dal 1° novembre).
 - Account X da cui pubblicare il post demo (nuovo, separato da Epoch).
+- Per le sessioni cloud di Claude Code: nelle impostazioni dell'ambiente, rete con dominii consentiti `rpc.testnet.near.org`, `rpc.mainnet.near.org`, `helper.nearprotocol.com`, `cloud-api.near.ai`, `1click.chaindefuser.com`, `pccs.phala.network` (collateral Intel per `verify`), `docs.near.ai`; e `NEAR_AI_API_KEY` come variabile d'ambiente segreta, mai in chat.

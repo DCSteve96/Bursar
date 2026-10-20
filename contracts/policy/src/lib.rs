@@ -18,13 +18,15 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::{IterableMap, LookupSet};
 use near_sdk::{
     env, ext_contract, log, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise,
-    PromiseOrValue,
+    PromiseError, PromiseOrValue,
 };
 
 const USDC_DECIMALS_HINT: &str = "amounts are in the token's smallest unit (USDC: 6 decimals)";
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_DAO_PROPOSAL: Gas = Gas::from_tgas(30);
+const GAS_DAO_VIEW: Gas = Gas::from_tgas(10);
+const GAS_CALLBACK: Gas = Gas::from_tgas(10);
 const DAY_NS: u64 = 86_400_000_000_000;
 const EVENT_STANDARD: &str = "bursar";
 const EVENT_VERSION: &str = "1.0.0";
@@ -135,14 +137,25 @@ pub struct Stats {
 
 // ---------- external contracts ----------
 
+#[allow(dead_code)]
 #[ext_contract(ext_ft)]
 trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
 }
 
+#[allow(dead_code)]
 #[ext_contract(ext_dao)]
 trait SputnikDao {
     fn add_proposal(&mut self, proposal: ProposalInput) -> u64;
+    fn get_proposal(&self, id: u64) -> ProposalStatusView;
+}
+
+/// The part of Sputnik's `get_proposal` output we care about. Unknown fields are ignored.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ProposalStatusView {
+    /// InProgress | Approved | Rejected | Removed | Expired | Moved | Failed
+    pub status: String,
 }
 
 /// Minimal Sputnik DAO v2 proposal input: a FunctionCall back into this contract.
@@ -307,6 +320,7 @@ impl Bursar {
         self.balance -= amount.0;
         self.emit("withdraw", &amount.0.to_string());
         self.ft_transfer(self.owner.clone(), amount.0, "bursar withdraw".into())
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(None, amount))
     }
 
     pub fn cancel_payment(&mut self, id: u64) {
@@ -387,6 +401,98 @@ impl Bursar {
         self.execute(p);
     }
 
+    /// Callback of `add_proposal`: records the Sputnik proposal id on the payment.
+    /// If the DAO refused the proposal (bond missing, DAO misconfigured), the payment is blocked and
+    /// its budget reservation released, so the owner can fix the DAO and the agent can resubmit.
+    #[private]
+    pub fn on_dao_proposal(&mut self, id: u64, #[callback_result] result: Result<u64, PromiseError>) {
+        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        if p.status != Status::Approval {
+            return;
+        }
+        match result {
+            Ok(proposal_id) => {
+                p.dao_proposal_id = Some(proposal_id);
+                p.updated_at = env::block_timestamp();
+                self.payments.insert(id, p);
+                self.emit("dao_proposal_opened", &format!("{id}:{proposal_id}"));
+            }
+            Err(_) => {
+                self.release_reservation(&p);
+                p.status = Status::Blocked;
+                p.reason = Some("dao_proposal_failed".into());
+                p.updated_at = env::block_timestamp();
+                self.payments.insert(id, p);
+                self.emit("payment_blocked", &format!("{id}:dao_proposal_failed"));
+            }
+        }
+    }
+
+    /// Sputnik does not call back when a proposal is rejected or expires. Anyone can ask this contract
+    /// to read the proposal status from the DAO; if the DAO said no, the payment is cancelled and its
+    /// reservation released. Only the DAO's own answer can trigger that, never the caller.
+    pub fn sync_dao_proposal(&mut self, id: u64) -> Promise {
+        let dao = self.dao.clone().expect("no dao");
+        let p = self.payments.get(&id).expect("unknown payment");
+        require!(p.status == Status::Approval, "not waiting for approval");
+        let proposal_id = p.dao_proposal_id.expect("proposal id not recorded yet");
+        ext_dao::ext(dao)
+            .with_static_gas(GAS_DAO_VIEW)
+            .get_proposal(proposal_id)
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_dao_status(id))
+    }
+
+    #[private]
+    pub fn on_dao_status(&mut self, id: u64, #[callback_result] result: Result<ProposalStatusView, PromiseError>) -> String {
+        let view = result.expect("dao did not answer");
+        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        if p.status != Status::Approval {
+            return view.status;
+        }
+        if matches!(view.status.as_str(), "Rejected" | "Removed" | "Expired" | "Failed" | "Moved") {
+            self.release_reservation(&p);
+            p.status = Status::Cancelled;
+            p.reason = Some(format!("dao_{}", view.status.to_lowercase()));
+            p.updated_at = env::block_timestamp();
+            self.payments.insert(id, p);
+            self.emit("payment_cancelled", &format!("{id}:dao_{}", view.status.to_lowercase()));
+        }
+        view.status
+    }
+
+    /// Callback of every USDC transfer this contract makes. A failed transfer (vendor not registered on
+    /// the token, token paused) puts the money back on the books instead of silently losing track of it.
+    #[private]
+    pub fn on_ft_transfer(&mut self, id: Option<u64>, amount: U128, #[callback_result] result: Result<(), PromiseError>) -> bool {
+        if result.is_ok() {
+            return true;
+        }
+        self.balance += amount.0;
+        if let Some(id) = id {
+            if let Some(mut p) = self.payments.get(&id).cloned() {
+                match p.status {
+                    Status::Paid => {
+                        self.release_reservation(&p);
+                        p.status = Status::Blocked;
+                        p.reason = Some("transfer_failed".into());
+                    }
+                    Status::Settling => {
+                        p.status = Status::Queued;
+                        p.quote_id = None;
+                        p.deposit_address = None;
+                    }
+                    _ => {}
+                }
+                p.updated_at = env::block_timestamp();
+                self.payments.insert(id, p);
+                self.emit("transfer_failed", &id.to_string());
+            }
+        } else {
+            self.emit("transfer_failed", "withdraw");
+        }
+        false
+    }
+
     // ----- executor -----
 
     /// The executor got an Intents quote whose recipient it reports here.
@@ -407,6 +513,7 @@ impl Bursar {
         self.payments.insert(id, p.clone());
         self.emit("payment_settling", &format!("{id}:{quote_id}"));
         self.ft_transfer(deposit_address, p.amount, format!("bursar payment {id} invoice {}", p.invoice_number))
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(p.amount)))
     }
 
     pub fn mark_settled(&mut self, id: u64, dest_tx: String) {
@@ -535,7 +642,9 @@ impl Bursar {
                 let memo = format!("bursar payment {id} invoice {}", p.invoice_number);
                 self.payments.insert(id, p.clone());
                 self.emit("payment_paid", &id.to_string());
-                let _ = self.ft_transfer(account, p.amount, memo);
+                let _ = self
+                    .ft_transfer(account, p.amount, memo)
+                    .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(p.amount)));
             }
             Payout::Chain { .. } => {
                 p.status = Status::Queued;
@@ -568,7 +677,8 @@ impl Bursar {
         let _ = ext_dao::ext(dao)
             .with_attached_deposit(self.dao_bond)
             .with_static_gas(GAS_DAO_PROPOSAL)
-            .add_proposal(proposal);
+            .add_proposal(proposal)
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_dao_proposal(id));
     }
 
     fn reserve(&mut self, vendor_id: &str, amount: u128) {
@@ -582,12 +692,16 @@ impl Bursar {
         self.spent_today += amount;
     }
 
+    /// Undo what `reserve` did for a payment that will not happen: monthly budget, daily cap, duplicate index.
     fn release_reservation(&mut self, p: &Payment) {
         if let Some(mut v) = self.vendors.get(&p.vendor_id).cloned() {
             if v.month == Self::month_key() {
                 v.spent_this_month = v.spent_this_month.saturating_sub(p.amount);
                 self.vendors.insert(p.vendor_id.clone(), v);
             }
+        }
+        if self.day == Self::day_key() {
+            self.spent_today = self.spent_today.saturating_sub(p.amount);
         }
         self.invoice_index.remove(&Self::invoice_key(&p.vendor_id, &p.invoice_number));
     }
@@ -684,7 +798,7 @@ mod tests {
         );
         // fund
         testing_env!(ctx(accounts(4)).build());
-        c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
+        let _ = c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
         c
     }
 
@@ -761,9 +875,86 @@ mod tests {
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, Payout::Chain { chain: "base".into(), address: "0xabc".into() }));
         testing_env!(ctx(accounts(2)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            c.settle(id, "q1".into(), accounts(5), Payout::Chain { chain: "base".into(), address: "0xevil".into() });
+            let _ = c.settle(id, "q1".into(), accounts(5), Payout::Chain { chain: "base".into(), address: "0xevil".into() });
         }));
         assert!(r.is_err());
+    }
+
+    fn as_self() -> VMContextBuilder {
+        let mut b = VMContextBuilder::new();
+        b.current_account_id(accounts(0)).predecessor_account_id(accounts(0)).block_timestamp(1_760_000_000_000_000_000);
+        b
+    }
+
+    fn approval_payment(c: &mut Bursar) -> u64 {
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "2210", 3_000_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
+        id
+    }
+
+    #[test]
+    fn dao_proposal_id_is_recorded_by_callback() {
+        let mut c = setup();
+        let id = approval_payment(&mut c);
+        assert_eq!(c.get_payment(id).unwrap().dao_proposal_id, None);
+        testing_env!(as_self().build());
+        c.on_dao_proposal(id, Ok(7));
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.dao_proposal_id, Some(7));
+        assert_eq!(p.status, Status::Approval);
+    }
+
+    #[test]
+    fn failed_dao_proposal_blocks_and_releases_budget() {
+        let mut c = setup();
+        let id = approval_payment(&mut c);
+        testing_env!(as_self().build());
+        c.on_dao_proposal(id, Err(PromiseError::Failed));
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Blocked);
+        assert_eq!(p.reason.as_deref(), Some("dao_proposal_failed"));
+        assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 0);
+        // the same invoice can be submitted again once the DAO is fixed
+        testing_env!(ctx(accounts(1)).build());
+        let again = c.request_payment(claim("hosting", "2210", 3_000_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(again).unwrap().status, Status::Approval);
+    }
+
+    #[test]
+    fn dao_rejection_cancels_payment() {
+        let mut c = setup();
+        let id = approval_payment(&mut c);
+        testing_env!(as_self().build());
+        c.on_dao_proposal(id, Ok(3));
+        // still in progress: nothing changes
+        c.on_dao_status(id, Ok(ProposalStatusView { status: "InProgress".into() }));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
+        c.on_dao_status(id, Ok(ProposalStatusView { status: "Rejected".into() }));
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Cancelled);
+        assert_eq!(p.reason.as_deref(), Some("dao_rejected"));
+        assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 0);
+        // a later DAO approval cannot pay a cancelled payment
+        testing_env!(ctx(accounts(3)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn failed_transfer_restores_balance() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "0923", 480_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 480_000_000);
+        testing_env!(as_self().build());
+        assert!(!c.on_ft_transfer(Some(id), U128(480_000_000), Err(PromiseError::Failed)));
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Blocked);
+        assert_eq!(p.reason.as_deref(), Some("transfer_failed"));
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+        assert_eq!(c.get_stats().spent_today.0, 0);
+        assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 0);
     }
 
     #[test]

@@ -7,6 +7,8 @@ import { resolve } from "node:path";
 import { processInvoice } from "./agent.js";
 import { view, call, fmtUsdc, txHash, type Payment, type Vendor } from "./near.js";
 import { config } from "./config.js";
+import { loadReceipt, verifyReceipt } from "./verify.js";
+import { syncApprovals } from "./executor.js";
 
 const text = (t: unknown) => ({ content: [{ type: "text" as const, text: typeof t === "string" ? t : JSON.stringify(t, null, 2) }] });
 
@@ -38,7 +40,7 @@ export async function runMcp() {
     const why: Record<string, string> = {
       Paid: "The vendor is on NEAR, the amount is under every cap, so the contract paid it in the same transaction.",
       Queued: "Policy passed. The vendor is on another chain, so the executor will route USDC through NEAR Intents. The contract will only release funds to a quote whose recipient equals the vendor's recorded payout.",
-      Approval: "The amount is at or above the approval threshold. A Sputnik DAO proposal was opened; a council member must approve it in Trezu.",
+      Approval: `The amount is at or above the approval threshold. Sputnik DAO proposal ${p.dao_proposal_id ?? "(id pending)"} was opened by the contract; a council member must approve it in Trezu.`,
       Settling: "USDC left the treasury towards the Intents deposit address. Waiting for the destination chain transaction.",
       Settled: "Delivered on the destination chain.",
       Blocked: `Refused by policy: ${p.reason}.` + (({
@@ -49,8 +51,10 @@ export async function runMcp() {
         over_monthly_budget: " The vendor's monthly budget would be exceeded.",
         over_daily_cap: " The daily cap would be exceeded.",
         insufficient_treasury: " Not enough USDC in the treasury.",
+        dao_proposal_failed: " The DAO refused to open the proposal (missing bond or wrong DAO account). Budget was released; fix the DAO and resubmit.",
+        transfer_failed: " The USDC transfer failed (vendor not registered on the token?). The balance was restored; nothing left the treasury.",
       } as Record<string, string | undefined>)[p.reason ?? ""] ?? ""),
-      Cancelled: "Cancelled by the owner or rejected by the DAO.",
+      Cancelled: p.reason?.startsWith("dao_") ? `The DAO answered ${p.reason.slice(4)} on proposal ${p.dao_proposal_id}; the contract cancelled the payment and released its budget.` : "Cancelled by the owner.",
     };
     return text(`Payment #${p.id}, ${fmtUsdc(p.amount)} to ${p.vendor_id} (invoice ${p.invoice_number}): ${p.status}. ${why[p.status] ?? ""}${p.flags.length ? ` Model flags: ${p.flags.join(", ")}.` : ""} Attestation: ${p.attestation_ref}`);
   });
@@ -65,6 +69,18 @@ export async function runMcp() {
     return text({ treasury: config.treasury, balance: fmtUsdc(stats.balance), spent_today: fmtUsdc(stats.spent_today), payments: stats.payments, paused: stats.paused,
       per_payment_cap: fmtUsdc(limits.per_payment_cap), daily_cap: fmtUsdc(limits.daily_cap), approval_threshold: fmtUsdc(limits.approval_threshold),
       owner: roles[0], agent: roles[1], executor: roles[2], dao: roles[3], usdc: roles[4] });
+  });
+
+  server.tool("verify_attestation", "Independently re-verify the TEE receipt behind a payment: exact bytes, ECDSA signature, attestation nonce, TDX quote report_data, Intel collateral, and the on-chain reference. Needs no API key.", {
+    id: z.number().describe("Payment id (reads .bursar/receipts/<id>.json)"),
+    collateral: z.boolean().optional().describe("Also check the TDX quote against Intel collateral over the network (default true)"),
+  }, async ({ id, collateral }) => {
+    const v = await verifyReceipt(await loadReceipt(String(id)), { collateral: collateral ?? true });
+    return text(v);
+  });
+
+  server.tool("sync_dao_approvals", "Ask the DAO about every payment waiting for approval. Payments the council rejected or let expire are cancelled by the contract.", {}, async () => {
+    return text(await syncApprovals());
   });
 
   server.tool("owner_cancel_payment", "Owner only: cancel a Queued or Approval payment. Requires the owner key in the local keystore.", { id: z.number() }, async ({ id }) => {
