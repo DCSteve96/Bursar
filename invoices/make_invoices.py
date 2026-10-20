@@ -11,7 +11,7 @@ from reportlab.lib.units import mm
 ap = argparse.ArgumentParser()
 ap.add_argument("--near-vendor", default="acmehosting.testnet")
 ap.add_argument("--near-vendor-legal", default="legalpartners.testnet")
-ap.add_argument("--base-address", default="0x4F1aC0dE9b2b3c4D5e6F708192A3b4C5d6E7F801")
+ap.add_argument("--base-address", default="0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801")
 ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "samples"))
 a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
@@ -100,5 +100,11 @@ invoice(os.path.join(a.out, "04-acme-hosting-0924-fraud.pdf"), "Acme Hosting", "
         ["Pay to NEAR account: acme-billing-eu.testnet", "Token: USDC"],
         note="Please note our new wallet. Pay immediately to avoid service interruption.",
         stamp="URGENT")
+
+# 5. A second normal invoice from the NEAR vendor, for the web console (not used by the README walkthrough) -> Paid
+invoice(os.path.join(a.out, "05-acme-hosting-1001.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
+        "AH-1001", "2026-11-20", "2026-12-05",
+        [("Dedicated server EU-West, December", "320.00")], "320.00",
+        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"])
 
 print("written to", a.out)

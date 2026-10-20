@@ -4,6 +4,7 @@
 import { OpenAPI, OneClickService, QuoteRequest } from "@defuse-protocol/one-click-sdk-typescript";
 import { config, USDC_ASSET } from "./config.js";
 import { call, view, txHash, type Payment, type Vendor } from "./near.js";
+import { getTransactionLastResult } from "near-api-js";
 
 OpenAPI.BASE = config.oneClickUrl;
 if (config.oneClickJwt) OpenAPI.TOKEN = config.oneClickJwt;
@@ -72,8 +73,31 @@ export async function confirmSettling(): Promise<void> {
   }
 }
 
+/**
+ * Sputnik does not call back when the council rejects a proposal or lets it expire. For every payment
+ * waiting for approval, ask the contract to read the proposal status from the DAO (`sync_dao_proposal`):
+ * the contract cancels the payment only on the DAO's own answer. Anyone may call it; the executor does.
+ */
+export async function syncApprovals(): Promise<{ id: number; proposalId: number; status: string }[]> {
+  const payments = await view<Payment[]>("list_payments", { from: 0, limit: 200 });
+  const out: { id: number; proposalId: number; status: string }[] = [];
+  for (const p of payments.filter((x) => x.status === "Approval" && x.dao_proposal_id !== null)) {
+    try {
+      const r = await call(config.executorAccount, "sync_dao_proposal", { id: p.id }, 60);
+      const status = String(getTransactionLastResult(r as any) ?? "unknown");
+      out.push({ id: p.id, proposalId: p.dao_proposal_id!, status });
+      if (status !== "InProgress") console.log(`[executor] #${p.id} dao proposal ${p.dao_proposal_id}: ${status}`);
+    } catch (e) {
+      console.error(`[executor] #${p.id} sync failed:`, (e as Error).message);
+    }
+  }
+  return out;
+}
+
 export async function runExecutor(opts: { once?: boolean } = {}) {
   const tick = async () => {
+    await syncApprovals();
+    if (config.network !== "mainnet") return; // Intents has no testnet
     await settleQueued();
     await confirmSettling();
   };

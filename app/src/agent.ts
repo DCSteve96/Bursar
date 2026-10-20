@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "./config.js";
-import { readInvoice, readInvoiceOffline, attestationRef, type Extraction } from "./ai.js";
+import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport } from "./ai.js";
 import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
 
 const exec = promisify(execFile);
@@ -65,39 +65,70 @@ async function matchVendor(ex: Extraction): Promise<string> {
   return ex.vendor_id_guess || "unknown";
 }
 
-export async function processInvoice(pdfPath: string, opts: { offline?: boolean; direct?: boolean } = {}): Promise<AgentResult> {
+export interface ReadResult {
+  file: string;
+  invoiceHash: string;
+  text: string;
+  extraction: Extraction;
+  /** `{ receipt, attestation }` from the TEE, or null when the offline parser was used. */
+  ai: { receipt: AiReceipt; attestation: AttestationReport } | null;
+  attestationRef: string;
+}
+
+/** The reading half: hash the PDF, rasterize it, read it in the TEE (or with the offline parser). No chain. */
+export async function readInvoiceFile(pdfPath: string, opts: { offline?: boolean } = {}): Promise<ReadResult> {
   const bytes = await readFile(pdfPath);
   const invoiceHash = createHash("sha256").update(bytes).digest("hex");
   const text = await pdfText(pdfPath);
-
-  let extraction: Extraction;
-  let ref: string;
-  let receipt: unknown = null;
   if (opts.offline || !config.aiApiKey) {
-    extraction = readInvoiceOffline(text);
-    ref = `offline:${invoiceHash.slice(0, 16)}`;
-  } else {
-    const pages = await rasterize(pdfPath);
-    const r = await readInvoice(pages, text);
-    extraction = r.extraction;
-    receipt = { receipt: r.receipt, attestation: r.attestation };
-    ref = attestationRef(r.receipt);
+    return { file: basename(pdfPath), invoiceHash, text, extraction: readInvoiceOffline(text), ai: null, attestationRef: `offline:${invoiceHash.slice(0, 16)}` };
   }
+  const pages = await rasterize(pdfPath);
+  const r = await readInvoice(pages, text);
+  return { file: basename(pdfPath), invoiceHash, text, extraction: r.extraction, ai: { receipt: r.receipt, attestation: r.attestation }, attestationRef: attestationRef(r.receipt) };
+}
 
-  const vendorId = await matchVendor(extraction);
-  const claim: InvoiceClaim = {
+function buildClaim(read: ReadResult, vendorId: string): InvoiceClaim {
+  const { extraction, invoiceHash } = read;
+  return {
     vendor_id: vendorId,
     invoice_number: extraction.invoice_number || "unknown",
     amount: toUnits(extraction.amount || "0"),
     due_date: extraction.due_date || "",
     invoice_hash: invoiceHash,
     payout_seen: extraction.payout_seen,
-    attestation_ref: ref,
+    attestation_ref: read.attestationRef,
     flags: extraction.flags ?? [],
   };
+}
+
+/**
+ * Read one invoice and write the receipt without asking the contract for anything.
+ * The receipt has the same shape as the ones the agent writes, minus `payment` and `tx`, so `bursar verify <path> --no-chain`
+ * checks it. The vendor id is the model's guess: matching it against the allowlist is the contract's job, not done here.
+ */
+export async function readOnly(pdfPath: string, opts: { offline?: boolean } = {}): Promise<{ read: ReadResult; claim: InvoiceClaim; receiptPath: string }> {
+  const read = await readInvoiceFile(pdfPath, opts);
+  const claim = buildClaim(read, read.extraction.vendor_id_guess || "unknown");
+  await mkdir(join(config.state, "receipts"), { recursive: true });
+  const receiptPath = join(config.state, "receipts", `read-${basename(pdfPath, ".pdf")}.json`);
+  await writeFile(receiptPath, JSON.stringify({ file: read.file, extraction: read.extraction, claim, tx: null, payment: null, ai: read.ai }, null, 2));
+  return { read, claim, receiptPath };
+}
+
+export async function processInvoice(pdfPath: string, opts: { offline?: boolean; direct?: boolean } = {}): Promise<AgentResult> {
+  const read = await readInvoiceFile(pdfPath, opts);
+  const { extraction } = read;
+  const receipt = read.ai;
+  const claim = buildClaim(read, await matchVendor(extraction));
 
   const sent = opts.direct ? await requestPaymentDirect(claim) : await requestPaymentViaRelayer(claim);
-  const payment = await view<Payment | null>("get_payment", { id: sent.paymentId });
+  // The view may lag the transaction by a block on some RPC nodes: retry briefly instead of recording null.
+  let payment: Payment | null = null;
+  for (let i = 0; i < 5 && !payment; i++) {
+    payment = await view<Payment | null>("get_payment", { id: sent.paymentId });
+    if (!payment) await new Promise((r) => setTimeout(r, 1500));
+  }
 
   await mkdir(join(config.state, "receipts"), { recursive: true });
   await writeFile(

@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar console</title>
+<meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the receipt, and ask the policy contract to pay. Everything runs in this browser against the NEAR RPC; keys never leave it.">
+<style>
+  /* Same tokens as index.html: a paper-like neutral, one blue accent, semantic colors for decisions. */
+  :root { --bg:#fbfaf7; --fg:#1c1c1a; --muted:#6b6a65; --line:#e3e1da; --card:#ffffff; --ok:#1f7a4d; --warn:#9a6b00; --bad:#b3261e; --accent:#2c5aa0; --accent-fg:#ffffff; --chip:#eef2f8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe6; --muted:#9b9a93; --line:#2b2b28; --card:#1d1d1b; --ok:#5ccf8a; --warn:#e3b341; --bad:#ff6b61; --accent:#7fa6e6; --accent-fg:#101010; --chip:#23262c; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe6; --muted:#9b9a93; --line:#2b2b28; --card:#1d1d1b; --ok:#5ccf8a; --warn:#e3b341; --bad:#ff6b61; --accent:#7fa6e6; --accent-fg:#101010; --chip:#23262c; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 28px 0 8px; }
+  .tag { color: var(--muted); font-size: 13px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  label { display:flex; flex-direction:column; gap:3px; font-size: 12px; color: var(--muted); flex: 1 1 240px; min-width: 0; }
+  input, select, button, textarea { font: inherit; padding: 8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
+  input, select { width: 100%; }
+  button { cursor:pointer; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  button.quiet { background: var(--card); color: var(--fg); border-color: var(--line); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  details { border:1px solid var(--line); border-radius: 8px; background: var(--card); padding: 10px 12px; margin: 14px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
+  .card { background: var(--card); border:1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  .card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .v { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; overflow-wrap: anywhere; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; color: var(--muted); background: var(--card); cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--fg); }
+  .drop input { display: none; }
+  .two { display:grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 14px; margin-top: 12px; }
+  @media (max-width: 640px) { .two { grid-template-columns: 1fr; } }
+  canvas.page { width: 100%; height: auto; border:1px solid var(--line); border-radius: 6px; background: #fff; }
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .steps li { display:flex; gap: 8px; align-items: baseline; font-size: 14px; }
+  .steps .st { width: 44px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; flex: none; }
+  .steps .ok { color: var(--ok); } .steps .fail { color: var(--bad); } .steps .skip, .steps .wait { color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .kv { display:grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font-size: 14px; }
+  .kv .k { color: var(--muted); }
+  .chip { display:inline-block; padding: 2px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; margin: 2px 4px 2px 0; }
+  .chip.bad { color: var(--bad); border: 1px solid var(--bad); background: transparent; }
+  .s { font-weight: 600; }
+  .Paid, .Settled { color: var(--ok); } .Queued, .Settling, .Approval { color: var(--warn); } .Blocked { color: var(--bad); } .Cancelled { color: var(--muted); }
+  table { width:100%; border-collapse: collapse; background: var(--card); border:1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align:left; padding: 8px 10px; border-top:1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+  .wrap { overflow-x: auto; }
+  .muted { color: var(--muted); }
+  .err { color: var(--bad); margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .note { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+  a { color: var(--accent); }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar i { display:block; height:100%; background: var(--accent); }
+  .decision { font-size: 18px; margin: 8px 0 4px; }
+  @media (prefers-reduced-motion: no-preference) { .drop { transition: border-color .15s; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bursar console</h1>
+  <div class="tag">The AI reads. The contract decides. A dumb executor moves the money. This page is the agent, running in your browser: it reads the invoice inside a NEAR AI Cloud enclave, checks the receipt, then asks the policy contract with the agent's one key.</div>
+
+  <details id="settings">
+    <summary>Settings (kept in this browser only)</summary>
+    <div class="row" style="margin-top:10px">
+      <label>Network<select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
+      <label>Treasury (policy contract)<input id="treasury" placeholder="treasury.you.testnet" autocomplete="off"></label>
+      <label>Agent account<input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
+      <label>Agent key (function-call key, ed25519:...)<input id="agentKey" type="password" placeholder="from ~/.near-credentials/testnet/agent.you.testnet.json" autocomplete="off"></label>
+      <label>NEAR AI Cloud API key<input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
+      <label>Model<input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="save" type="button">Save</button>
+      <button id="forget" type="button" class="quiet">Forget keys</button>
+      <span class="note">The agent key can only call <span class="mono">request_payment</span> on the treasury; it cannot move funds. Gas for the direct call comes from the agent account's own small balance (the CLI agent uses a relayer instead).</span>
+    </div>
+  </details>
+
+  <h2>1. Read an invoice in the enclave</h2>
+  <div class="drop" id="drop">
+    <input id="file" type="file" accept="application/pdf">
+    Drop a PDF invoice here, or click to choose one. Try the four samples in <span class="mono">invoices/samples</span>.
+  </div>
+  <div id="readErr" class="err" hidden></div>
+  <div class="two" id="readOut" hidden>
+    <div>
+      <canvas class="page" id="preview"></canvas>
+      <p class="note" id="fileInfo"></p>
+    </div>
+    <div>
+      <ul class="steps" id="readSteps"></ul>
+      <div id="extraction" hidden>
+        <h2 style="margin-top:14px">What the model read</h2>
+        <div class="kv" id="exKv"></div>
+        <div id="flags" style="margin-top:6px"></div>
+      </div>
+      <div id="verify" hidden>
+        <h2 style="margin-top:14px">Receipt checks</h2>
+        <ul class="steps" id="checks"></ul>
+        <p class="note">The Intel collateral check (quote_tcb) and the on-chain check need the CLI: download the receipt and run <span class="mono">npm run dev verify &lt;file&gt;</span>.</p>
+        <div class="row" style="margin-top:8px"><a id="dl" class="quiet" href="#" download>Download receipt JSON</a></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>2. Ask the contract</h2>
+  <div id="claimBox" class="card" hidden>
+    <div class="kv" id="claimKv"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="submit" type="button">Request payment</button>
+      <span class="note" id="submitNote">The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address.</span>
+    </div>
+    <div id="submitErr" class="err" hidden></div>
+    <div id="decision" hidden>
+      <div class="decision"><span id="decStatus" class="s"></span> <span id="decReason" class="mono"></span></div>
+      <div id="decWhy"></div>
+      <p class="note" id="decTx"></p>
+    </div>
+  </div>
+  <p class="muted" id="claimEmpty">Read an invoice first.</p>
+
+  <h2>3. Treasury</h2>
+  <div class="row"><button id="refresh" type="button" class="quiet">Refresh</button><span class="note" id="foot"></span></div>
+  <div id="tErr" class="err" hidden></div>
+  <div class="grid" id="stats"></div>
+  <div class="wrap"><table id="vendors"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th></tr></thead><tbody></tbody></table></div>
+  <h2>Payments (every decision the contract made)</h2>
+  <div class="wrap"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
+</main>
+
+<script type="module">
+import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
+import { secp256k1 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/secp256k1.js/+esm";
+import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm";
+import { keccak_256 } from "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha3.js/+esm";
+import { sha256 } from "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha2.js/+esm";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+
+// ---------- config ----------
+const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
+const AI_BASE = "https://cloud-api.near.ai/v1";
+const DEC = 6;
+const $ = (s) => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+const rpcOverride = q.get("rpc");
+
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model"];
+const settings = {};
+function loadSettings() {
+  for (const f of FIELDS) { try { const v = localStorage.getItem("bursar." + f); if (v !== null) $("#" + f).value = v; } catch {} }
+  if (q.get("treasury")) $("#treasury").value = q.get("treasury");
+  if (q.get("network")) $("#network").value = q.get("network");
+  if (q.get("agent")) $("#agent").value = q.get("agent");
+  for (const f of FIELDS) settings[f] = $("#" + f).value.trim();
+}
+function saveSettings() {
+  for (const f of FIELDS) { settings[f] = $("#" + f).value.trim(); try { localStorage.setItem("bursar." + f, settings[f]); } catch {} }
+  $("#settings").open = false;
+  loadTreasury();
+}
+$("#save").addEventListener("click", saveSettings);
+$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
+
+// ---------- small codecs ----------
+const te = new TextEncoder(), td = new TextDecoder();
+const toHex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join("");
+const fromHex = (h) => { h = h.replace(/^0x/i, ""); const u = new Uint8Array(h.length / 2); for (let i = 0; i < u.length; i++) u[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16); return u; };
+const concat = (...parts) => { const n = parts.reduce((a, p) => a + p.length, 0); const u = new Uint8Array(n); let o = 0; for (const p of parts) { u.set(p, o); o += p.length; } return u; };
+const b64 = (u8) => btoa(String.fromCharCode(...u8));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58encode(u8) {
+  let n = 0n; for (const b of u8) n = n * 256n + BigInt(b);
+  let s = ""; while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; }
+  for (const b of u8) { if (b !== 0) break; s = "1" + s; }
+  return s;
+}
+function b58decode(s) {
+  let n = 0n; for (const c of s) { const i = B58.indexOf(c); if (i < 0) throw new Error("bad base58"); n = n * 58n + BigInt(i); }
+  const out = []; while (n > 0n) { out.unshift(Number(n % 256n)); n /= 256n; }
+  for (const c of s) { if (c !== "1") break; out.unshift(0); }
+  return new Uint8Array(out);
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const usdc = (u) => { const n = BigInt(u); const d = 10n ** BigInt(DEC); return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(DEC, "0").slice(0, 2)} USDC`; };
+function toUnits(amount) {
+  const [w, f = ""] = String(amount).replace(/,/g, "").split(".");
+  const frac = (f + "0".repeat(DEC)).slice(0, DEC);
+  return (BigInt(w || "0") * 10n ** BigInt(DEC) + BigInt(frac)).toString();
+}
+
+// Borsh writer for the one transaction shape this page sends (NEAR Transaction + FunctionCall).
+class Borsh {
+  constructor() { this.parts = []; }
+  u8(n) { this.parts.push(Uint8Array.of(n)); return this; }
+  uint(n, bytes) { const u = new Uint8Array(bytes); let v = BigInt(n); for (let i = 0; i < bytes; i++) { u[i] = Number(v & 255n); v >>= 8n; } this.parts.push(u); return this; }
+  bytes(u8) { this.parts.push(u8); return this; }
+  vec(u8) { return this.uint(u8.length, 4).bytes(u8); }
+  str(s) { return this.vec(te.encode(s)); }
+  out() { return concat(...this.parts); }
+}
+
+// ---------- NEAR RPC ----------
+async function rpc(method, params) {
+  const r = await fetch(rpcOverride || RPC[settings.network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method, params }) });
+  const j = await r.json();
+  if (j.error) { const d = j.error.data; throw new Error(typeof d === "string" ? d : d?.message ?? (d ? JSON.stringify(d) : j.error.message) ?? JSON.stringify(j.error)); }
+  return j.result;
+}
+async function view(contract, method, args = {}) {
+  const res = await rpc("query", { request_type: "call_function", finality: "final", account_id: contract, method_name: method, args_base64: b64(te.encode(JSON.stringify(args))) });
+  if (res.error) throw new Error(res.error);
+  return JSON.parse(td.decode(new Uint8Array(res.result)));
+}
+/** Sign and send one function call with an ed25519 key held in this page (no library: borsh + ed25519 + RPC send_tx). */
+async function functionCall({ signerId, secretKey, receiverId, method, args, gasTgas, deposit = 0n }) {
+  const raw = b58decode(secretKey.replace(/^ed25519:/, ""));
+  if (raw.length !== 64 && raw.length !== 32) throw new Error("the agent key must be an ed25519 secret key");
+  const seed = raw.subarray(0, 32);
+  const pub = ed25519.getPublicKey(seed);
+  const pubStr = "ed25519:" + b58encode(pub);
+  const ak = await rpc("query", { request_type: "view_access_key", finality: "final", account_id: signerId, public_key: pubStr });
+  if (ak.error) throw new Error(ak.error);
+  const tx = new Borsh().str(signerId).u8(0).bytes(pub).uint(BigInt(ak.nonce) + 1n, 8).str(receiverId).bytes(b58decode(ak.block_hash))
+    .uint(1, 4).u8(2).str(method).vec(te.encode(JSON.stringify(args))).uint(BigInt(gasTgas) * 10n ** 12n, 8).uint(deposit, 16).out();
+  const sig = ed25519.sign(sha256(tx), seed);
+  const signed = concat(tx, Uint8Array.of(0), sig);
+  const res = await rpc("send_tx", { signed_tx_base64: b64(signed), wait_until: "EXECUTED_OPTIMISTIC" });
+  const st = res.status ?? {};
+  if (st.Failure) throw new Error("transaction failed: " + JSON.stringify(st.Failure).slice(0, 400));
+  const value = st.SuccessValue ? td.decode(unb64(st.SuccessValue)) : "";
+  return { hash: res.transaction?.hash, value };
+}
+
+// ---------- NEAR AI Cloud (same prompt and body as app/src/ai.ts, so the receipt verifies the same way) ----------
+const SYSTEM = `You are the reading half of an AI treasurer. You read one invoice and return JSON only.
+You never decide whether to pay: a smart contract does that. Report exactly what the document says.
+Fields:
+- vendor_name: the company issuing the invoice
+- vendor_id_guess: lowercase slug of the vendor name, letters and digits only (e.g. "acmehosting")
+- invoice_number: as printed
+- amount: total due as a decimal string, no currency symbol
+- currency: ISO code (USDC, USD, EUR...)
+- due_date: YYYY-MM-DD
+- payout_seen: where the invoice asks to be paid. Either {"Near":{"account":"name.near"}} for a NEAR account,
+  or {"Chain":{"chain":"base|arb|sol|sui|eth","address":"0x..."}} for another chain. Copy the address exactly.
+- flags: list any of: "new_payment_details" (text like new bank details, updated wallet, please note our new address),
+  "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
+  "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
+- confidence: 0 to 1
+Return only the JSON object.`;
+const aiHeaders = () => settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
+const sha256hex = (s) => toHex(sha256(te.encode(s)));
+
+async function readInTee(pngPages, textFallback, step) {
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)));
+  step("attestation", "wait", "fetching the model attestation for a fresh nonce");
+  let attestation;
+  try {
+    const r = await fetch(`${AI_BASE}/attestation/report?model=${encodeURIComponent(settings.model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
+    attestation = r.ok ? await r.json() : { error: `attestation ${r.status}: ${(await r.text()).slice(0, 200)}` };
+  } catch (e) { attestation = { error: String(e) }; }
+  step("attestation", attestation.error ? "fail" : "ok", attestation.error ?? `${attestation.model_attestations?.length ?? 0} model attestation(s), TDX quote bound to our nonce`);
+
+  const content = [{ type: "text", text: "Read this invoice." }];
+  for (const p of pngPages) content.push({ type: "image_url", image_url: { url: `data:image/png;base64,${p}` } });
+  if (textFallback) content.push({ type: "text", text: `Extracted text, in case the image is unclear:\n${textFallback.slice(0, 12000)}` });
+  const body = { model: settings.model, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false };
+  const requestBody = JSON.stringify(body);
+  step("model", "wait", `asking ${settings.model} inside the enclave`);
+  let r, responseBody = "";
+  for (let attempt = 0; ; attempt++) {
+    r = await fetch(`${AI_BASE}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
+    responseBody = await r.text();
+    if (r.ok || attempt >= 3 || ![429, 502, 503, 504].includes(r.status)) break;
+    step("model", "wait", `gateway answered ${r.status}, retrying`);
+    await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
+  }
+  if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 300)}`);
+  const completion = JSON.parse(responseBody);
+  const extraction = JSON.parse(completion.choices?.[0]?.message?.content ?? "{}");
+  step("model", "ok", `completion ${completion.id}, ${completion.usage?.total_tokens ?? "?"} tokens`);
+
+  step("signature", "wait", "fetching the enclave's signature over the exact bytes");
+  let sig = null;
+  try {
+    const s = await fetch(`${AI_BASE}/signature/${encodeURIComponent(completion.id)}?signing_algo=ecdsa`, { headers: aiHeaders() });
+    if (s.ok) { const j = await s.json(); if (j.signature && j.text && j.signing_address) sig = j; }
+  } catch {}
+  step("signature", sig ? "ok" : "fail", sig ? `${sig.signature_kind} by ${sig.signing_address}` : "the gateway returned no signature");
+  const receipt = {
+    model: settings.model, inference_id: completion.id,
+    request_sha256: sha256hex(requestBody), response_sha256: sha256hex(responseBody),
+    attestation_nonce: nonce,
+    signing_address: sig?.signing_address ?? null, signing_algo: sig?.signing_algo ?? null,
+    signature: sig?.signature ?? null, signature_kind: sig?.signature_kind ?? null, signed_text: sig?.text ?? null,
+    request_body: requestBody, response_body: responseBody,
+  };
+  return { extraction, receipt, attestation };
+}
+const attestationRef = (r) => `nearai:${r.model}:${r.inference_id}:${r.request_sha256.slice(0, 16)}:${r.response_sha256.slice(0, 16)}:${r.signing_address ?? "-"}`;
+
+// ---------- receipt verification (the browser half of app/src/verify.ts) ----------
+function eip191Hash(text) { const m = te.encode(text); return keccak_256(concat(te.encode(`\x19Ethereum Signed Message:\n${m.length}`), m)); }
+function recoverAddress(text, sigHex) {
+  const sig = fromHex(sigHex);
+  if (sig.length !== 65) throw new Error(`signature is ${sig.length} bytes, expected 65`);
+  let v = sig[64]; if (v >= 27) v -= 27;
+  const s = secp256k1.Signature.fromBytes(sig.subarray(0, 64), "compact").addRecoveryBit(v);
+  const pub = s.recoverPublicKey(eip191Hash(text)).toBytes(false);
+  return "0x" + toHex(keccak_256(pub.subarray(1)).subarray(12));
+}
+function verifyReceipt(rf) {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+  const r = rf.ai.receipt;
+  let model = r.model; try { model = JSON.parse(r.request_body).model ?? r.model; } catch {}
+  const expected = `${model}:${sha256hex(r.request_body)}:${sha256hex(r.response_body)}`;
+  add("bytes", r.request_sha256 === sha256hex(r.request_body) && r.response_sha256 === sha256hex(r.response_body), "request and response hashes match the stored bytes");
+  if (!r.signed_text || !r.signature || !r.signing_address) add("signature", false, "no signature in the receipt");
+  else {
+    add("signed_text", r.signed_text === expected, r.signed_text === expected ? `signed text is ${expected.slice(0, 40)}...` : "the gateway signed different bytes");
+    try { const rec = recoverAddress(r.signed_text, r.signature); const ok = rec.toLowerCase() === r.signing_address.toLowerCase(); add("signature", ok, ok ? `ECDSA signature recovers to ${rec}` : `recovers to ${rec}, receipt says ${r.signing_address}`); }
+    catch (e) { add("signature", false, `cannot recover signer: ${e.message}`); }
+    add("signer_kind", r.signature_kind === "provider_tee", r.signature_kind === "provider_tee" ? "signed inside the model TEE (provider_tee)" : `signature kind is ${r.signature_kind}: the gateway signed, not the enclave`);
+  }
+  const att = rf.ai.attestation;
+  const want = (r.signing_address ?? "").toLowerCase().replace(/^0x/, "");
+  const m = att.model_attestations?.find((x) => x.signing_address.toLowerCase().replace(/^0x/, "") === want);
+  if (!m) add("attestation", false, att.error ? `attestation fetch failed: ${att.error}` : "no model attestation carries the signing address");
+  else {
+    add("attestation_signer", true, `attestation report lists signer ${m.signing_address}`);
+    const nonceOk = m.request_nonce.toLowerCase() === r.attestation_nonce.toLowerCase();
+    add("attestation_nonce", nonceOk, nonceOk ? "report echoes our fresh nonce" : "nonce mismatch: the report was not produced for this request");
+    try {
+      // TDX quote v4: 48-byte header, then the TD report; report_data is the last 64 bytes of a TD10 body (offset 568), mr_td at 184.
+      const qb = fromHex(m.intel_quote);
+      const version = qb[0] | (qb[1] << 8), teeType = qb[4] | (qb[5] << 8) | (qb[6] << 16) | (qb[7] << 24);
+      if (version !== 4 && version !== 5) add("quote_report_data", false, `unexpected quote version ${version}`);
+      else if (teeType !== 0x81) add("quote_report_data", false, `quote tee type ${teeType} is not TDX`);
+      else {
+        const rd = qb.subarray(568, 632);
+        const addrOk = toHex(rd.subarray(0, 20)) === want && rd.subarray(20, 32).every((b) => b === 0);
+        const nonceInQuote = toHex(rd.subarray(32, 64)) === r.attestation_nonce.toLowerCase();
+        add("quote_report_data", addrOk && nonceInQuote, addrOk && nonceInQuote ? `TDX quote report_data binds signer and nonce (mrtd ${toHex(qb.subarray(184, 232)).slice(0, 16)}...)` : `report_data does not bind ${addrOk ? "nonce" : "signer"}`);
+      }
+    } catch (e) { add("quote_report_data", false, `cannot parse intel_quote: ${e.message}`); }
+    add("quote_tcb", null, "skipped in the browser: the CLI checks the quote against Intel collateral");
+  }
+  try {
+    const completion = JSON.parse(r.response_body);
+    const said = JSON.parse(completion.choices?.[0]?.message?.content ?? "{}");
+    add("extraction", JSON.stringify(said) === JSON.stringify(rf.extraction), "the claim is built from exactly this model output");
+    add("completion_id", completion.id === r.inference_id, `completion id ${completion.id}`);
+  } catch (e) { add("extraction", false, `cannot parse response: ${e.message}`); }
+  add("attestation_ref", rf.claim?.attestation_ref === attestationRef(r), `claim carries ${attestationRef(r).slice(0, 48)}...`);
+  return { ok: checks.every((c) => c.ok !== false), checks };
+}
+
+// ---------- the reading flow ----------
+let current = null; // { file, invoiceHash, extraction, receipt, attestation, claim }
+const stepEl = {};
+function stepper(list) {
+  list.innerHTML = "";
+  return (name, state, detail) => {
+    let li = stepEl[list.id + name];
+    if (!li) { li = document.createElement("li"); stepEl[list.id + name] = li; list.appendChild(li); }
+    const mark = state === "ok" ? "ok" : state === "fail" ? "FAIL" : state === "skip" ? "-" : "...";
+    li.innerHTML = `<span class="st ${state}">${mark}</span><span><b>${esc(name)}</b> ${esc(detail)}</span>`;
+  };
+}
+async function rasterize(bytes) {
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const pages = []; let text = "";
+  for (let i = 1; i <= Math.min(2, pdf.numPages); i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 110 / 72 });
+    const canvas = i === 1 ? $("#preview") : document.createElement("canvas");
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    pages.push(canvas.toDataURL("image/png").split(",")[1]);
+    const tc = await page.getTextContent();
+    text += tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("") + "\n";
+  }
+  return { pages, text };
+}
+async function handleFile(file) {
+  if (!file) return;
+  for (const k in stepEl) delete stepEl[k];
+  $("#readErr").hidden = true; $("#readOut").hidden = false; $("#extraction").hidden = true; $("#verify").hidden = true;
+  $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true;
+  const step = stepper($("#readSteps"));
+  try {
+    if (!settings.treasury) throw new Error("set the treasury account in Settings first");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const invoiceHash = toHex(sha256(bytes));
+    $("#fileInfo").textContent = `${file.name}, ${(bytes.length / 1024).toFixed(0)} KB, sha256 ${invoiceHash.slice(0, 16)}...`;
+    step("pdf", "wait", "rasterizing the PDF in this browser");
+    const { pages, text } = await rasterize(bytes);
+    step("pdf", "ok", `${pages.length} page(s) rendered to PNG; the enclave sees images, not the file`);
+    const { extraction, receipt, attestation } = await readInTee(pages, text, step);
+    const vendors = await view(settings.treasury, "list_vendors");
+    const vendorId = matchVendor(extraction, vendors);
+    const claim = {
+      vendor_id: vendorId, invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
+      due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
+      attestation_ref: attestationRef(receipt), flags: extraction.flags ?? [],
+    };
+    current = { file: file.name, invoiceHash, extraction, receipt, attestation, claim };
+    showExtraction(extraction);
+    const v = verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
+    const checks = $("#checks"); checks.innerHTML = "";
+    for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "-" : c.ok ? "ok" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
+    const li = document.createElement("li"); li.innerHTML = `<span class="st ${v.ok ? "ok" : "fail"}"></span><span class="s">${v.ok ? "verified: the decision will be made on this model output, inside an attested TEE" : "NOT verified: do not submit"}</span>`; checks.appendChild(li);
+    $("#verify").hidden = false;
+    const blob = new Blob([JSON.stringify({ file: file.name, extraction, claim, tx: null, payment: null, ai: { receipt, attestation } }, null, 2)], { type: "application/json" });
+    $("#dl").href = URL.createObjectURL(blob); $("#dl").download = `receipt-${file.name.replace(/\.pdf$/i, "")}.json`;
+    showClaim(claim, vendors, v.ok);
+  } catch (e) {
+    $("#readErr").textContent = e.message; $("#readErr").hidden = false;
+  }
+}
+function matchVendor(ex, vendors) {
+  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const guess = norm(ex.vendor_id_guess || ex.vendor_name);
+  for (const [id, v] of vendors) if (norm(id) === guess || norm(v.name) === guess) return id;
+  for (const [id, v] of vendors) if (guess.includes(norm(id)) || norm(v.name).includes(guess) || guess.includes(norm(v.name))) return id;
+  return ex.vendor_id_guess || "unknown"; // unknown vendors are still submitted: the contract records the block
+}
+const payoutText = (p) => p?.Near ? `NEAR ${p.Near.account}` : p?.Chain ? `${p.Chain.chain} ${p.Chain.address}` : "?";
+function showExtraction(ex) {
+  const rows = [["vendor", ex.vendor_name], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
+  $("#exKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="mono">${esc(v)}</span>`).join("");
+  $("#flags").innerHTML = (ex.flags?.length ? ex.flags.map((f) => `<span class="chip bad">${esc(f)}</span>`).join("") : `<span class="chip">no flags</span>`);
+  $("#extraction").hidden = false;
+}
+function showClaim(claim, vendors, verified) {
+  const known = vendors.some(([id]) => id === claim.vendor_id);
+  const rows = [["vendor id", `${claim.vendor_id}${known ? "" : " (not in the allowlist)"}`], ["invoice", claim.invoice_number], ["amount", usdc(claim.amount)], ["payout on the invoice", payoutText(claim.payout_seen)], ["invoice hash", claim.invoice_hash], ["attestation ref", claim.attestation_ref], ["flags", claim.flags.join(", ") || "none"]];
+  $("#claimKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="mono">${esc(v)}</span>`).join("");
+  $("#submit").disabled = !verified;
+  $("#submitNote").textContent = verified ? "The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address." : "The receipt did not verify: this page will not submit it.";
+  $("#claimBox").hidden = false; $("#claimEmpty").hidden = true;
+}
+
+// ---------- submit ----------
+$("#submit").addEventListener("click", async () => {
+  if (!current) return;
+  $("#submitErr").hidden = true; $("#decision").hidden = true;
+  const btn = $("#submit"); btn.disabled = true; btn.textContent = "Asking the contract...";
+  try {
+    if (!settings.agent || !settings.agentKey) throw new Error("set the agent account and its key in Settings");
+    const { hash, value } = await functionCall({ signerId: settings.agent, secretKey: settings.agentKey, receiverId: settings.treasury, method: "request_payment", args: { claim: current.claim }, gasTgas: 150 });
+    const id = Number(value);
+    let p = null;
+    for (let i = 0; i < 6 && !p; i++) { p = await view(settings.treasury, "get_payment", { id }); if (!p) await new Promise((r) => setTimeout(r, 1500)); }
+    $("#decStatus").textContent = `#${id} ${p?.status ?? "?"}`; $("#decStatus").className = `s ${p?.status ?? ""}`;
+    $("#decReason").textContent = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");
+    $("#decWhy").innerHTML = p ? why(p) : "";
+    $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, signed by the agent's function-call key`;
+    $("#decision").hidden = false;
+    loadTreasury();
+  } catch (e) {
+    $("#submitErr").textContent = e.message; $("#submitErr").hidden = false;
+  } finally { btn.disabled = false; btn.textContent = "Request payment"; }
+});
+
+// ---------- treasury (same as index.html) ----------
+const REASON = {
+  payout_changed: "payout on the invoice differs from the vendor record: the new bank details fraud",
+  duplicate_invoice: "same vendor and invoice number already accepted",
+  unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner",
+  over_payment_cap: "above the per-payment cap", over_monthly_budget: "vendor monthly budget exceeded", over_daily_cap: "daily cap exceeded",
+  insufficient_treasury: "not enough USDC in the treasury", zero_amount: "zero amount", paused: "treasury paused",
+  dao_proposal_failed: "the DAO refused to open the proposal; budget released",
+  transfer_failed: "USDC transfer failed on the token contract; balance restored",
+};
+function why(p) {
+  const parts = [];
+  if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
+  if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
+  if (p.status === "Approval") parts.push(p.dao_proposal_id === null ? "DAO proposal being opened" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`);
+  if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
+  if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
+  if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
+  if (p.status === "Paid") parts.push(p.dao_proposal_id === null ? "paid on NEAR in the same transaction" : `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR`);
+  if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
+  return esc(parts.join(". "));
+}
+async function loadTreasury() {
+  $("#tErr").hidden = true;
+  if (!settings.treasury) { $("#foot").textContent = "Set the treasury account in Settings."; $("#settings").open = true; return; }
+  try {
+    const t = settings.treasury;
+    const [stats, limits, roles, vendors, payments] = await Promise.all([view(t, "get_stats"), view(t, "get_limits"), view(t, "get_roles"), view(t, "list_vendors"), view(t, "list_payments", { from: 0, limit: 200 })]);
+    const card = (k, v) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $("#stats").innerHTML = card("balance", usdc(stats.balance)) + card("spent today", usdc(stats.spent_today)) + card("per payment cap", usdc(limits.per_payment_cap)) + card("daily cap", usdc(limits.daily_cap)) + card("approval from", usdc(limits.approval_threshold)) + card("payments", stats.payments) + (stats.paused ? card("paused", "yes") : "");
+    $("#vendors tbody").innerHTML = vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month); const pct = b > 0n ? Number(s * 100n / b) : 0; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td></tr>`; }).join("") || `<tr><td colspan="4" class="muted">no vendors</td></tr>`;
+    $("#payments tbody").innerHTML = payments.slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="s ${esc(p.status)}">${esc(p.status)}${p.reason && p.status === "Blocked" ? `<div class="mono">${esc(p.reason)}</div>` : ""}</td><td>${why(p)}</td><td class="mono">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
+    $("#foot").innerHTML = `owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(t)}" target="_blank" rel="noopener">${esc(t)}</a> on ${esc(settings.network)}.`;
+  } catch (e) { $("#tErr").textContent = `could not read ${settings.treasury} on ${settings.network}: ${e.message}`; $("#tErr").hidden = false; }
+}
+$("#refresh").addEventListener("click", loadTreasury);
+
+// ---------- wiring ----------
+const drop = $("#drop");
+drop.addEventListener("click", () => $("#file").click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files?.[0]); });
+$("#file").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
+loadSettings();
+if (!settings.treasury) $("#settings").open = true;
+loadTreasury();
+</script>
+</body>
+</html>

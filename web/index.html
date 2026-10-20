@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar treasury</title>
+<meta name="description" content="Read-only dashboard for a Bursar policy contract: balance, caps, vendors and every payment decision, straight from the NEAR RPC.">
+<style>
+  :root { --bg:#fbfaf7; --fg:#1c1c1a; --muted:#6b6a65; --line:#e3e1da; --card:#ffffff; --ok:#1f7a4d; --warn:#9a6b00; --bad:#b3261e; --info:#2c5aa0; --accent:#2c5aa0; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe6; --muted:#9b9a93; --line:#2b2b28; --card:#1d1d1b; --ok:#5ccf8a; --warn:#e3b341; --bad:#ff6b61; --info:#7fa6e6; --accent:#7fa6e6; } }
+  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe6; --muted:#9b9a93; --line:#2b2b28; --card:#1d1d1b; --ok:#5ccf8a; --warn:#e3b341; --bad:#ff6b61; --info:#7fa6e6; --accent:#7fa6e6; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .tag { color: var(--muted); font-size: 13px; }
+  form { display:flex; flex-wrap:wrap; gap:8px; margin: 16px 0; }
+  input, select, button { font: inherit; padding: 8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
+  input { flex: 1 1 260px; }
+  button { cursor:pointer; background: var(--accent); color:#fff; border-color: var(--accent); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 12px 0 20px; }
+  .card { background: var(--card); border:1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .v { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; }
+  table { width:100%; border-collapse: collapse; background: var(--card); border:1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align:left; padding: 8px 10px; border-top:1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+  .wrap { overflow-x: auto; }
+  .s { font-weight: 600; }
+  .Paid, .Settled { color: var(--ok); } .Queued, .Settling, .Approval { color: var(--warn); } .Blocked { color: var(--bad); } .Cancelled { color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  td.id { white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .err { color: var(--bad); margin: 8px 0; }
+  a { color: var(--accent); }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar i { display:block; height:100%; background: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bursar treasury</h1>
+  <div class="tag">The AI reads. The contract decides. A dumb executor moves the money. Everything below is read from the policy contract over RPC; there is no database.</div>
+  <form id="f">
+    <select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select>
+    <input id="treasury" placeholder="treasury account, e.g. treasury.you.testnet" required>
+    <button type="submit">Load</button>
+  </form>
+  <div id="err" class="err" hidden></div>
+  <div id="out" hidden>
+    <div class="grid" id="stats"></div>
+    <h2>Vendors (allowlisted by the owner)</h2>
+    <div class="wrap"><table id="vendors"><thead><tr><th>id</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th><th>active</th></tr></thead><tbody></tbody></table></div>
+    <h2>Payments (every decision the contract made)</h2>
+    <div class="wrap"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
+    <p class="muted" id="foot"></p>
+  </div>
+</main>
+<script>
+const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+// ?rpc=https://... overrides the RPC endpoint (own node, FastNEAR, local sandbox).
+const rpcOverride = new URLSearchParams(location.search).get("rpc");
+const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
+const DEC = 6;
+const $ = (s) => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+if (q.get("treasury")) $("#treasury").value = q.get("treasury");
+if (q.get("network")) $("#network").value = q.get("network");
+
+async function view(network, contract, method, args = {}) {
+  const r = await fetch(rpcOverride || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "final", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.data?.message ?? j.error.message ?? JSON.stringify(j.error));
+  if (j.result.error) throw new Error(j.result.error);
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+}
+const usdc = (u) => { const n = BigInt(u); const d = 10n ** BigInt(DEC); return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(DEC, "0").slice(0, 2)} USDC`; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const payout = (p) => p.Near ? `NEAR ${esc(p.Near.account)}` : `${esc(p.Chain.chain)} ${esc(p.Chain.address)}`;
+const REASON = {
+  payout_changed: "payout on the invoice differs from the vendor record: the new bank details fraud",
+  duplicate_invoice: "same vendor and invoice number already accepted",
+  unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner",
+  over_payment_cap: "above the per-payment cap", over_monthly_budget: "vendor monthly budget exceeded", over_daily_cap: "daily cap exceeded",
+  insufficient_treasury: "not enough USDC in the treasury", zero_amount: "zero amount", paused: "treasury paused",
+  dao_proposal_failed: "the DAO refused to open the proposal; budget released",
+  transfer_failed: "USDC transfer failed on the token contract; balance restored",
+};
+function why(p, network) {
+  const parts = [];
+  if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
+  if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
+  if (p.status === "Approval") parts.push(p.dao_proposal_id === null ? "DAO proposal being opened" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`);
+  if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
+  if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
+  if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
+  if (p.status === "Paid") parts.push(p.dao_proposal_id === null ? "paid on NEAR in the same transaction" : `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR`);
+  if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
+  return esc(parts.join(". "));
+}
+async function load(e) {
+  e?.preventDefault();
+  const network = $("#network").value, treasury = $("#treasury").value.trim();
+  if (!treasury) return;
+  history.replaceState(null, "", `?network=${network}&treasury=${encodeURIComponent(treasury)}${rpcOverride ? `&rpc=${encodeURIComponent(rpcOverride)}` : ""}`);
+  $("#err").hidden = true; $("#out").hidden = true;
+  try {
+    const [stats, limits, roles, vendors, payments] = await Promise.all([
+      view(network, treasury, "get_stats"), view(network, treasury, "get_limits"), view(network, treasury, "get_roles"),
+      view(network, treasury, "list_vendors"), view(network, treasury, "list_payments", { from: 0, limit: 200 }),
+    ]);
+    const card = (k, v) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+    $("#stats").innerHTML = card("balance", usdc(stats.balance)) + card("spent today", usdc(stats.spent_today)) + card("per payment cap", usdc(limits.per_payment_cap)) + card("daily cap", usdc(limits.daily_cap)) + card("approval from", usdc(limits.approval_threshold)) + card("payments", stats.payments) + card("paused", stats.paused ? "yes" : "no");
+    $("#vendors tbody").innerHTML = vendors.map(([id, v]) => {
+      const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month);
+      const pct = b > 0n ? Number(s * 100n / b) : 0;
+      return `<tr><td class="mono id">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${payout(v.payout)}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td><td>${v.active ? "yes" : "no"}</td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">no vendors</td></tr>`;
+    $("#payments tbody").innerHTML = payments.map((p) => `<tr><td>${p.id}</td><td class="mono id">${esc(p.vendor_id)}</td><td class="mono id">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="s ${esc(p.status)}">${esc(p.status)}${p.reason && p.status === "Blocked" ? `<div class="mono">${esc(p.reason)}</div>` : ""}</td><td>${why(p, network)}</td><td class="mono">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
+    $("#foot").innerHTML = `owner ${esc(roles[0])}, agent ${esc(roles[1])} (one function-call key), executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}, token ${esc(roles[4])}. Contract <a href="${EXPLORER[network]}/address/${encodeURIComponent(treasury)}">${esc(treasury)}</a> on ${network}.`;
+    $("#out").hidden = false;
+  } catch (err) {
+    $("#err").textContent = `could not read ${treasury} on ${network}: ${err.message}`;
+    $("#err").hidden = false;
+  }
+}
+$("#f").addEventListener("submit", load);
+if ($("#treasury").value) load();
+</script>
+</body>
+</html>

@@ -31,7 +31,7 @@ async function loadSigner(network: string, accountId: string) {
 }
 
 export async function setup(o: Opts) {
-  const rpc = o.network === "mainnet" ? "https://rpc.mainnet.near.org" : "https://rpc.testnet.near.org";
+  const rpc = process.env.NEAR_RPC ?? (o.network === "mainnet" ? "https://free.rpc.fastnear.com" : "https://test.rpc.fastnear.com");
   const provider = new JsonRpcProvider({ url: rpc });
   const root = new Account(o.root, provider, await loadSigner(o.network, o.root));
   const sub = (name: string) => `${name}.${o.root}`;
@@ -68,7 +68,7 @@ export async function setup(o: Opts) {
 
   // 1. accounts
   const treasury = await create(names.treasury, o.dao ? 8 : 6); // ~4.7 NEAR of contract storage + DAO bonds
-  const agent = await create(names.agent, 0.1);
+  const agent = await create(names.agent, 0.5); // enough gas for a few direct calls from the web console; the relayer path needs none
   const executor = await create(names.executor, 1);
   const vendorHosting = await create(names.vendorHosting, 0.1);
   const vendorLegal = await create(names.vendorLegal, 0.1);
@@ -131,7 +131,7 @@ export async function setup(o: Opts) {
   if (!vendors.some(([id]) => id === "acmehosting")) {
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: names.vendorHosting } }, monthly_budget: "3000000000" }, gas: TGAS(30) });
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: names.vendorLegal } }, monthly_budget: "0" }, gas: TGAS(30) });
-    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4F1aC0dE9b2b3c4D5e6F708192A3b4C5d6E7F801" } }, monthly_budget: "0" }, gas: TGAS(30) });
+    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" }, gas: TGAS(30) });
     log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base)");
   }
 
@@ -148,7 +148,9 @@ export async function setup(o: Opts) {
     const hasFc = keys.keys.some((k: any) => k.access_key.permission !== "FullAccess");
     if (!hasFc) {
       const fc = KeyPair.fromRandom("ed25519");
-      await agent.addFunctionCallAccessKey({ publicKey: fc.getPublicKey(), contractId: names.treasury, methodNames: ["request_payment"], allowance: NEAR(0.05) });
+      // The allowance only caps gas paid from the agent's own balance (0.1 NEAR here); it is not spending power.
+      // 1 NEAR lets the key also sign direct calls (web page, `--direct`) when the relayer is not running.
+      await agent.addFunctionCallAccessKey({ publicKey: fc.getPublicKey(), contractId: names.treasury, methodNames: ["request_payment"], allowance: NEAR(1) });
       const full = keys.keys.find((k: any) => k.access_key.permission === "FullAccess");
       await saveKey(o.network, names.agent, fc);
       if (full) {

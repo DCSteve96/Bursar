@@ -1,7 +1,11 @@
 // NEAR AI Cloud: private inference in a TEE, with attestation and a signed receipt for every decision.
 // Docs: https://docs.near.ai/cloud/quickstart.md, /cloud/verification/cloud-api/model-attestations.md,
 //       /cloud/verification/cloud-api/response-signatures.md
-import OpenAI from "openai";
+//
+// The gateway signs `<model>:<sha256(request bytes)>:<sha256(response bytes)>`, so this file talks to the
+// API with plain fetch and keeps the exact bytes it sent and received. Anything that re-serializes the
+// JSON (an SDK, a pretty printer) would break the signature. `verify.ts` checks the receipt later,
+// without this API key and without trusting this process.
 import { createHash, randomBytes } from "node:crypto";
 import { config } from "./config.js";
 import type { Payout } from "./near.js";
@@ -18,6 +22,7 @@ export interface Extraction {
   confidence: number;
 }
 
+/** Everything needed to re-verify one inference independently. Stored next to the payment, never on chain. */
 export interface AiReceipt {
   model: string;
   inference_id: string;
@@ -25,8 +30,42 @@ export interface AiReceipt {
   response_sha256: string;
   attestation_nonce: string;
   signing_address: string | null;
+  signing_algo: string | null;
   signature: string | null;
   signature_kind: string | null;
+  signed_text: string | null;
+  /** Exact bytes sent and received, as UTF-8 strings. The signature covers these. */
+  request_body: string;
+  response_body: string;
+}
+
+/** Shape of `GET /v1/signature/{id}` on the Cloud API. */
+export interface SignatureRecord {
+  text: string;
+  signature: string;
+  signing_address: string;
+  signing_algo?: string;
+  signature_kind: string;
+}
+
+/** One entry of `model_attestations` in `GET /v1/attestation/report`. Other fields are kept as is. */
+export interface ModelAttestation {
+  request_nonce: string;
+  signing_algo: string;
+  signing_address: string;
+  intel_quote: string;
+  event_log?: unknown;
+  info?: unknown;
+  nvidia_payload?: string | null;
+  report_data?: string | null;
+  tls_cert_fingerprint?: string | null;
+  [k: string]: unknown;
+}
+
+export interface AttestationReport {
+  model_attestations?: ModelAttestation[];
+  error?: string;
+  [k: string]: unknown;
 }
 
 const SYSTEM = `You are the reading half of an AI treasurer. You read one invoice and return JSON only.
@@ -46,39 +85,41 @@ Fields:
 - confidence: 0 to 1
 Return only the JSON object.`;
 
-function sha256(s: string | Buffer) {
+export function sha256(s: string | Buffer | Uint8Array) {
   return createHash("sha256").update(s).digest("hex");
 }
 
-const client = () =>
-  new OpenAI({ baseURL: config.aiBaseUrl, apiKey: config.aiApiKey || "missing", defaultHeaders: { "x-no-aliasing": "true" } });
+// `NEAR_AI_API_KEY=proxy`: send no Authorization header, an egress proxy that holds the key adds it (cloud dev sessions).
+const headers = (): Record<string, string> =>
+  config.aiApiKey === "proxy" ? { "x-no-aliasing": "true" } : { Authorization: `Bearer ${config.aiApiKey}`, "x-no-aliasing": "true" };
 
 /** Preflight: fetch the model attestation bound to a fresh nonce. We keep the nonce in the receipt. */
-export async function fetchAttestation(nonce: string): Promise<unknown> {
+export async function fetchAttestation(nonce: string): Promise<AttestationReport> {
   const url = `${config.aiBaseUrl}/attestation/report?model=${encodeURIComponent(config.aiModel)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${config.aiApiKey}`, "x-no-aliasing": "true" } });
+  const r = await fetch(url, { headers: headers() });
   if (!r.ok) throw new Error(`attestation ${r.status}: ${await r.text()}`);
-  return r.json();
+  return (await r.json()) as AttestationReport;
 }
 
 /** Ask the gateway for the signature over (request, response) of a completion id. */
-export async function fetchSignature(id: string): Promise<{ text: string; signature: string; signing_address: string; signature_kind: string } | null> {
-  const r = await fetch(`${config.aiBaseUrl}/signature/${encodeURIComponent(id)}?signing_algo=ecdsa`, {
-    headers: { Authorization: `Bearer ${config.aiApiKey}` },
-  });
+export async function fetchSignature(id: string): Promise<SignatureRecord | null> {
+  const r = await fetch(`${config.aiBaseUrl}/signature/${encodeURIComponent(id)}?signing_algo=ecdsa`, { headers: headers() });
   if (!r.ok) return null;
-  return r.json();
+  const j = (await r.json()) as Partial<SignatureRecord>;
+  if (!j.signature || !j.text || !j.signing_address) return null;
+  return j as SignatureRecord;
 }
 
 /**
  * Read an invoice. `pngPages` are rasterized pages (the TEE models accept images, not PDFs).
  * Returns the extraction and a receipt that ties this exact decision to the TEE.
  */
-export async function readInvoice(pngPages: Buffer[], textFallback?: string): Promise<{ extraction: Extraction; receipt: AiReceipt; attestation: unknown }> {
+export async function readInvoice(pngPages: Buffer[], textFallback?: string): Promise<{ extraction: Extraction; receipt: AiReceipt; attestation: AttestationReport }> {
+  if (!config.aiApiKey) throw new Error("NEAR_AI_API_KEY is not set");
   const nonce = randomBytes(32).toString("hex");
-  const attestation = await fetchAttestation(nonce).catch((e) => ({ error: String(e) }));
+  const attestation = await fetchAttestation(nonce).catch((e) => ({ error: String(e) }) as AttestationReport);
 
-  const content: any[] = [{ type: "text", text: "Read this invoice." }];
+  const content: unknown[] = [{ type: "text", text: "Read this invoice." }];
   for (const p of pngPages) content.push({ type: "image_url", image_url: { url: `data:image/png;base64,${p.toString("base64")}` } });
   if (textFallback) content.push({ type: "text", text: `Extracted text, in case the image is unclear:\n${textFallback.slice(0, 12000)}` });
 
@@ -86,28 +127,45 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
     model: config.aiModel,
     temperature: 0,
     messages: [
-      { role: "system" as const, content: SYSTEM },
-      { role: "user" as const, content },
+      { role: "system", content: SYSTEM },
+      { role: "user", content },
     ],
-    response_format: { type: "json_object" as const },
-    stream: false as const,
+    response_format: { type: "json_object" },
+    stream: false,
   };
-  const reqJson = JSON.stringify(body);
-  const completion = await client().chat.completions.create(body);
-  const resJson = JSON.stringify(completion);
-  const text = completion.choices[0]?.message?.content ?? "{}";
+  const requestBody = JSON.stringify(body);
+  // The gateway answers 502 now and then ("upstream request failed"): retry a few times before giving up.
+  let r!: Response;
+  let responseBody = "";
+  for (let attempt = 0; ; attempt++) {
+    r = await fetch(`${config.aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: requestBody,
+    });
+    responseBody = await r.text();
+    if (r.ok || attempt >= 3 || ![429, 502, 503, 504].includes(r.status)) break;
+    await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
+  }
+  if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 500)}`);
+  const completion = JSON.parse(responseBody);
+  const text: string = completion.choices?.[0]?.message?.content ?? "{}";
   const extraction = JSON.parse(text) as Extraction;
 
   const sig = await fetchSignature(completion.id).catch(() => null);
   const receipt: AiReceipt = {
     model: config.aiModel,
     inference_id: completion.id,
-    request_sha256: sha256(reqJson),
-    response_sha256: sha256(resJson),
+    request_sha256: sha256(requestBody),
+    response_sha256: sha256(responseBody),
     attestation_nonce: nonce,
     signing_address: sig?.signing_address ?? null,
+    signing_algo: sig?.signing_algo ?? null,
     signature: sig?.signature ?? null,
     signature_kind: sig?.signature_kind ?? null,
+    signed_text: sig?.text ?? null,
+    request_body: requestBody,
+    response_body: responseBody,
   };
   return { extraction, receipt, attestation };
 }
