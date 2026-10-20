@@ -155,7 +155,7 @@
       <ul class="log" id="checks"></ul>
       <div class="actions" style="margin-top:24px;align-items:center">
         <a id="dl" class="btn btn-ghost" href="#" download>Download receipt JSON</a>
-        <span class="muted" style="font-size:14px;max-width:60ch">The Intel collateral check (quote_tcb) and the on-chain check need the CLI: run <span class="mono">npm run dev verify &lt;file&gt;</span> on the downloaded receipt.</span>
+        <span class="muted" style="font-size:14px;max-width:60ch">Same checks as <span class="mono">npm run dev verify &lt;file&gt;</span> in the CLI, which also compares the reference stored on chain.</span>
       </div>
     </div>
   </div>
@@ -461,7 +461,7 @@ function recoverAddress(text, sigHex) {
   const pub = s.recoverPublicKey(eip191Hash(text)).toBytes(false);
   return "0x" + toHex(keccak_256(pub.subarray(1)).subarray(12));
 }
-function verifyReceipt(rf) {
+async function verifyReceipt(rf) {
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
   const r = rf.ai.receipt;
@@ -483,9 +483,11 @@ function verifyReceipt(rf) {
     add("attestation_signer", true, `attestation report lists signer ${m.signing_address}`);
     const nonceOk = m.request_nonce.toLowerCase() === r.attestation_nonce.toLowerCase();
     add("attestation_nonce", nonceOk, nonceOk ? "report echoes our fresh nonce" : "nonce mismatch: the report was not produced for this request");
+    let quoteBytes = null;
     try {
       // TDX quote v4: 48-byte header, then the TD report; report_data is the last 64 bytes of a TD10 body (offset 568), mr_td at 184.
       const qb = fromHex(m.intel_quote);
+      quoteBytes = qb;
       const version = qb[0] | (qb[1] << 8), teeType = qb[4] | (qb[5] << 8) | (qb[6] << 16) | (qb[7] << 24);
       if (version !== 4 && version !== 5) add("quote_report_data", false, `unexpected quote version ${version}`);
       else if (teeType !== 0x81) add("quote_report_data", false, `quote tee type ${teeType} is not TDX`);
@@ -496,7 +498,16 @@ function verifyReceipt(rf) {
         add("quote_report_data", addrOk && nonceInQuote, addrOk && nonceInQuote ? `TDX quote report_data binds signer and nonce (mrtd ${toHex(qb.subarray(184, 232)).slice(0, 16)}...)` : `report_data does not bind ${addrOk ? "nonce" : "signer"}`);
       }
     } catch (e) { add("quote_report_data", false, `cannot parse intel_quote: ${e.message}`); }
-    add("quote_tcb", null, "skipped in the browser: the CLI checks the quote against Intel collateral");
+    if (quoteBytes && RELAY) {
+      try {
+        // The same verifier the CLI uses, bundled for the browser by jsDelivr; the collateral comes through the relay (PCCS has no CORS).
+        const qvl = await import("https://esm.sh/@phala/dcap-qvl@0.7.0?bundle"); // one bundle: jsDelivr splits it and the ASN.1 schema registry breaks
+        const collateral = await qvl.getCollateral(`${RELAY}/pccs`, quoteBytes);
+        const vr = qvl.verify(quoteBytes, collateral, Math.floor(Date.now() / 1000));
+        const good = vr.status === "UpToDate" || vr.status === "SWHardeningNeeded";
+        add("quote_tcb", good, `quote verified against Intel collateral: TCB ${vr.status}${vr.advisory_ids?.length ? ` (${vr.advisory_ids.join(", ")})` : ""}`);
+      } catch (e) { add("quote_tcb", null, `skipped: collateral check failed to run here (${String(e.message || e).slice(0, 80)}); the CLI checks it`); }
+    } else add("quote_tcb", null, "skipped in the browser: the CLI checks the quote against Intel collateral");
   }
   try {
     const completion = JSON.parse(r.response_body);
@@ -567,8 +578,10 @@ async function afterRead(read, vendors) {
   const { extraction, receipt, attestation, claim } = read;
   current = read;
   showExtraction(extraction);
-  const v = verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
-  const checks = $("#checks"); checks.innerHTML = "";
+  const checks = $("#checks"); checks.innerHTML = `<li><span class="st wait">...</span><span>verifying the receipt, fetching Intel collateral through the relay</span></li>`;
+  $("#receipt").hidden = false;
+  const v = await verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
+  checks.innerHTML = "";
   for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "SKIP" : c.ok ? "OK" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
   const li = document.createElement("li"); li.innerHTML = `<div class="verdict ${v.ok ? "" : "fail"}">${v.ok ? "Verified: the decision will be made on this model output, inside an attested TEE." : "Not verified: this page will not submit it."}</div>`; checks.appendChild(li);
   $("#receipt").hidden = false;

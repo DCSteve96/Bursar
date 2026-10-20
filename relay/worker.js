@@ -66,7 +66,14 @@ export default {
       const up = await fetch(`${UPSTREAM}${url.pathname}${url.search}`, { headers: auth });
       return new Response(up.body, { status: up.status, headers: { ...headers, "content-type": up.headers.get("content-type") || "application/json" } });
     }
-    if (request.method === "GET" && url.pathname === "/") return json(200, { relay: "bursar", upstream: UPSTREAM, routes: ["POST /v1/chat/completions", "GET /v1/attestation/report", "GET /v1/signature/{id}"] }, headers);
+    // Intel collateral for the TDX quote check, from Phala's PCCS mirror. Headers carry the issuer chains, so they are copied too.
+    if (request.method === "GET" && url.pathname.startsWith("/pccs/")) {
+      const up = await fetch(`https://pccs.phala.network${url.pathname.slice(5)}${url.search}`);
+      const h = new Headers(headers);
+      for (const [k, v] of up.headers) if (!/^(content-encoding|content-length|transfer-encoding|connection)$/i.test(k)) h.set(k, v);
+      return new Response(up.body, { status: up.status, headers: h });
+    }
+    if (request.method === "GET" && url.pathname === "/") return json(200, { relay: "bursar", upstream: UPSTREAM, routes: ["POST /v1/chat/completions", "GET /v1/attestation/report", "GET /v1/signature/{id}", "GET /pccs/{intel collateral path}"] }, headers);
     return json(404, { error: "not found" }, headers);
   },
 };

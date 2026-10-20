@@ -2,6 +2,8 @@
 
 A Cloudflare Worker that holds one NEAR AI Cloud API key and forwards the three calls the web console makes to the enclave: the completion, the attestation report and the signature. It forwards the bytes untouched, so the enclave's signature over the exact request and response still verifies in the browser and in `bursar verify`. It holds no NEAR key and cannot move funds: it is the hosted "reading" half of Bursar, the part a company would pay for per invoice.
 
+It also passes Intel collateral requests through to Phala's PCCS mirror (`/pccs/...`), so the browser can check the TDX quote's TCB status like the CLI does.
+
 What it enforces: one allowed model, no streaming, a 2 MB body cap, an origin allowlist, and daily caps per address and in total (when a KV namespace is bound).
 
 ## Deploy
