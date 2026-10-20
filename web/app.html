@@ -324,14 +324,33 @@ async function sendTx({ signerId, secretKey, receiverId, actions, gasTgas }) {
   const b = new Borsh().str(signerId).u8(0).bytes(pub).uint(nonce, 8).str(receiverId).bytes(b58decode(ak.block_hash)).uint(actions.length, 4);
   for (const a of actions) a(b);
   const tx = b.out();
-  const sig = ed25519.sign(sha256(tx), seed);
+  const hashBytes = sha256(tx);
+  const sig = ed25519.sign(hashBytes, seed);
   const signed = concat(tx, Uint8Array.of(0), sig);
-  const res = await rpc("send_tx", { signed_tx_base64: b64(signed), wait_until: "EXECUTED_OPTIMISTIC" });
+  const hash = b58encode(hashBytes);
+  let res;
+  try {
+    res = await rpc("send_tx", { signed_tx_base64: b64(signed), wait_until: "EXECUTED_OPTIMISTIC" });
+  } catch (e) {
+    // The RPC node gives up waiting after a few seconds on a busy network; the transaction is usually executed anyway.
+    if (!/timeout/i.test(e.message)) throw e;
+    res = await waitForTx(hash, signerId);
+  }
   const st = res.status ?? {};
   if (st.Failure) throw new Error("transaction failed: " + JSON.stringify(st.Failure).slice(0, 400));
   for (const ro of res.receipts_outcome ?? []) { const f = ro.outcome?.status?.Failure; if (f) throw new Error("receipt failed: " + JSON.stringify(f).slice(0, 400)); }
   const value = st.SuccessValue ? td.decode(unb64(st.SuccessValue)) : "";
   return { hash: res.transaction?.hash, value };
+}
+async function waitForTx(hash, signerId) {
+  for (let i = 0; i < 40; i++) {
+    try {
+      const r = await rpc("tx", { tx_hash: hash, sender_account_id: signerId, wait_until: "EXECUTED_OPTIMISTIC" });
+      if (r?.status && !("Unknown" in r.status)) return r;
+    } catch (e) { if (!/unknown|not found|does not exist|timeout/i.test(e.message)) throw e; }
+    await new Promise((res) => setTimeout(res, 2000));
+  }
+  throw new Error(`transaction ${hash} was sent but not seen executed after 80 seconds; press the button again to resume`);
 }
 const functionCall = ({ signerId, secretKey, receiverId, method, args, gasTgas, deposit = 0n }) => sendTx({ signerId, secretKey, receiverId, actions: [A.functionCall(method, args, gasTgas, deposit)] });
 
@@ -479,11 +498,12 @@ let current = null; // { file, invoiceHash, extraction, receipt, attestation, cl
 const stepEl = {};
 function stepper(list) {
   list.innerHTML = "";
-  return (name, state, detail) => {
+  return (name, state, detail, tx) => {
     let li = stepEl[list.id + name];
     if (!li) { li = document.createElement("li"); stepEl[list.id + name] = li; list.appendChild(li); }
     const mark = state === "ok" ? "OK" : state === "fail" ? "FAIL" : state === "skip" ? "SKIP" : "...";
-    li.innerHTML = `<span class="st ${state}">${mark}</span><span><b>${esc(name)}</b> ${esc(detail)}</span>`;
+    const link = tx ? ` <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(tx)}" target="_blank" rel="noopener">tx ${esc(tx.slice(0, 8))}...</a>` : "";
+    li.innerHTML = `<span class="st ${state}">${mark}</span><span><b>${esc(name)}</b> ${esc(detail)}${link}</span>`;
   };
 }
 async function rasterize(bytes) {
@@ -656,30 +676,56 @@ async function createTreasury() {
   try {
     if ($("#network").value !== "testnet") { $("#network").value = "testnet"; }
     settings.network = "testnet";
-    const root = `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`;
-    const rootKey = newKey(), treasuryKey = newKey(), agentKey = newKey();
+    // An attempt that stopped halfway (a slow network, a closed tab) resumes from the missing step: the keys are kept here.
+    let ob = null;
+    try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
+    if (!ob) {
+      ob = { root: `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`, rootKey: newKey(), treasuryKey: newKey(), agentKey: newKey() };
+      try { localStorage.setItem("bursar.onboarding", JSON.stringify(ob)); } catch {}
+    }
+    const { root, rootKey, treasuryKey, agentKey } = ob;
+    rootKey.pub = keyOf(rootKey.secretKey).pub; treasuryKey.pub = keyOf(treasuryKey.secretKey).pub; agentKey.pub = keyOf(agentKey.secretKey).pub;
     const treasury = `treasury.${root}`, agent = `agent.${root}`;
-    step("account", "wait", `asking the testnet faucet for ${root}`);
-    const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: root, newAccountPublicKey: rootKey.pubStr }) });
-    if (!f.ok) throw new Error(`faucet ${f.status}: ${(await f.text()).slice(0, 200)}`);
-    for (let i = 0; i < 20 && !(await accountExists(root)); i++) await new Promise((r) => setTimeout(r, 1500));
-    if (!(await accountExists(root))) throw new Error("the faucet accepted the request but the account did not appear");
-    step("account", "ok", `${root} created with 10 NEAR; its key stays in this browser`);
-    step("contract", "wait", "fetching the policy contract (303 KB)");
-    const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
-    step("contract", "wait", `deploying to ${treasury}`);
-    const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
-    const t1 = await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: treasury, actions: [A.createAccount(), A.transfer(NEAR(4.5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)] });
-    step("contract", "ok", `policy contract live at ${treasury} (tx ${t1.hash.slice(0, 10)}...)`);
-    step("agent", "wait", `creating ${agent}`);
-    await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: agent, actions: [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(agentKey.pub, NEAR(1), treasury, ["request_payment"])] });
-    step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`);
-    step("usdc", "wait", "minting 15,000 test USDC into the treasury");
-    await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: TUSDC, actions: [A.functionCall("mint", { to: treasury, amount: "0" }, 30, NEAR(0.01)), A.functionCall("mint", { to: root, amount: "15000000000" }, 30, NEAR(0.01)), A.functionCall("ft_transfer_call", { receiver_id: treasury, amount: "15000000000", msg: "" }, 80, 1n)] });
-    step("usdc", "ok", "15,000.00 USDC in the treasury");
-    step("vendors", "wait", "registering the three demo vendors");
-    await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: treasury, actions: DEMO_VENDORS.map((v) => A.functionCall("add_vendor", v, 30)) });
-    step("vendors", "ok", "acmehosting, legalpartners (NEAR) and designco (Base) allowlisted with their payouts");
+    const send = (receiverId, actions) => sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId, actions });
+    if (await accountExists(root)) step("account", "ok", `${root} already exists; resuming`);
+    else {
+      step("account", "wait", `asking the testnet faucet for ${root}`);
+      const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: root, newAccountPublicKey: rootKey.pubStr }) });
+      if (!f.ok) throw new Error(`faucet ${f.status}: ${(await f.text()).slice(0, 200)}`);
+      for (let i = 0; i < 20 && !(await accountExists(root)); i++) await new Promise((r) => setTimeout(r, 1500));
+      if (!(await accountExists(root))) throw new Error("the faucet accepted the request but the account did not appear; press the button again");
+      step("account", "ok", `${root} created with 10 NEAR; its key stays in this browser`);
+    }
+    if (await accountExists(treasury)) step("contract", "ok", `policy contract already live at ${treasury}`);
+    else {
+      step("contract", "wait", "fetching the policy contract (303 KB)");
+      const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
+      step("contract", "wait", `deploying to ${treasury}`);
+      const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
+      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(4.5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)]);
+      step("contract", "ok", `policy contract live at ${treasury}`, t1.hash);
+    }
+    if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
+    else {
+      step("agent", "wait", `creating ${agent}`);
+      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(agentKey.pub, NEAR(1), treasury, ["request_payment"])]);
+      step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`, t2.hash);
+    }
+    const stats = await view(treasury, "get_stats");
+    if (BigInt(stats.balance) > 0n) step("usdc", "ok", `${usdc(stats.balance)} already in the treasury`);
+    else {
+      step("usdc", "wait", "minting 15,000 test USDC into the treasury");
+      const t3 = await send(TUSDC, [A.functionCall("mint", { to: treasury, amount: "0" }, 30, NEAR(0.01)), A.functionCall("mint", { to: root, amount: "15000000000" }, 30, NEAR(0.01)), A.functionCall("ft_transfer_call", { receiver_id: treasury, amount: "15000000000", msg: "" }, 80, 1n)]);
+      step("usdc", "ok", "15,000.00 USDC in the treasury", t3.hash);
+    }
+    const existing = await view(treasury, "list_vendors");
+    if (existing.length) step("vendors", "ok", `${existing.length} vendors already registered`);
+    else {
+      step("vendors", "wait", "registering the three demo vendors");
+      const t4 = await send(treasury, DEMO_VENDORS.map((v) => A.functionCall("add_vendor", v, 30)));
+      step("vendors", "ok", "acmehosting, legalpartners (NEAR) and designco (Base) allowlisted with their payouts", t4.hash);
+    }
+    try { localStorage.removeItem("bursar.onboarding"); } catch {}
     for (const [k, v] of Object.entries({ network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner: root, ownerKey: rootKey.secretKey })) $("#" + k).value = v;
     saveSettings();
     $("#createdKv").innerHTML = [["owner", root], ["treasury", treasury], ["agent", agent]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
@@ -693,6 +739,7 @@ async function createTreasury() {
   } finally { btn.disabled = false; }
 }
 $("#create").addEventListener("click", createTreasury);
+try { if (localStorage.getItem("bursar.onboarding")) $("#create").textContent = "Resume creating my treasury"; } catch {}
 let lastDecision = null;
 $("#approve").addEventListener("click", async () => {
   if (!lastDecision) return;
