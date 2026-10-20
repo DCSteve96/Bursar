@@ -60,6 +60,13 @@ Rete e RPC: `rpc.testnet.near.org` risponde 429 (rate limit) e `rpc.mainnet.near
 
 Da fare con chiavi: `verify` su un receipt vero (primo punto in cui il formato dell'API può smentire il codice).
 
+### 2.3 Sessione cloud del 20 ottobre, terza parte: tentativo con NEAR AI Cloud
+
+- La sessione aveva una credenziale per `cloud-api.near.ai` iniettata dal proxy dell'ambiente (connettore "Consenti + inietta"), non `NEAR_AI_API_KEY`. Ogni richiesta a `/v1/chat/completions` e `/v1/attestation/report` risponde `401 {"message":"Missing authorization header"}` con l'header `X-Proxy-Error: upstream auth failed`: il proxy prova a iniettare ma la credenziale non arriva come `Authorization: Bearer <chiave>`. `/v1/models` risponde 200 perché è pubblico. Da sistemare nelle impostazioni dell'ambiente: o la credenziale del connettore come header `Authorization` con valore `Bearer <chiave>`, o più semplicemente `NEAR_AI_API_KEY` come variabile d'ambiente segreta (vedi punto 7). Il test con chiave vera resta da fare.
+- Nuovo comando `bursar read <file.pdf> [--offline] [--no-collateral]`: legge una fattura nel TEE, scrive `.bursar/receipts/read-<nome>.json` (stesso formato dei receipt dell'agente, con `payment` e `tx` nulli) e lancia subito `verifyReceipt` senza il check on chain. Serve a provare NEAR AI Cloud senza treasury, relayer o account NEAR: è il primo comando da lanciare appena la chiave funziona, sulle 4 fatture, prima di `agent --once`. Nel README è alla fine del passo 6. `agent.ts` ora ha `readInvoiceFile` (lettura) separato da `processInvoice` (lettura + `request_payment`); la logica del claim è in `buildClaim`, invariata.
+- `NEAR_AI_API_KEY=proxy`: `ai.ts` non manda l'header `Authorization` e lascia che sia il proxy dell'ambiente ad aggiungerlo. Solo per le sessioni cloud; sul Mac si usa la chiave vera. Nelle sessioni cloud serve sempre `NODE_USE_ENV_PROXY=1`.
+- Provato offline: `read --offline` sulla fattura 4 produce l'estrazione con `new_payment_details` e `urgency`; `verify` sul receipt offline fallisce alla prima riga come deve. `tsc` e i 7 test vitest verdi.
+
 ## 3. Decisioni prese
 
 - Separato da Epoch, sempre. Niente brand, niente Sui.
@@ -110,7 +117,7 @@ Da fare con chiavi: `verify` su un receipt vero (primo punto in cui il formato d
 ## 6. Cosa resta (ordine consigliato)
 
 1. **Setup con account di Stefano** su testnet: fatto con un account usa e getta (2.2), da ripetere con il suo solo se vuole che il README punti a un account suo.
-2. **NEAR AI Cloud con chiave vera**: `npm run agent -- --once` senza `--offline` sulle 4 fatture; sistemare il prompt finché l'estrazione è giusta; poi `npm run dev verify <id>` su un receipt vero e correggere `verify.ts` se il formato reale differisce. Se un check fallisce per un motivo di formato va capito, non allentato.
+2. **NEAR AI Cloud con chiave vera**: prima `npm run dev read ../invoices/samples/<n>.pdf` sulle 4 fatture (nessuna chain, verifica immediata del receipt), poi `npm run agent -- --once` senza `--offline`; sistemare il prompt finché l'estrazione è giusta; poi `npm run dev verify <id>` su un receipt vero e correggere `verify.ts` se il formato reale differisce. Se un check fallisce per un motivo di formato va capito, non allentato.
 3. **Mainnet**: `setup --root <account>.near --mainnet` (usa USDC vero `17208628...`, niente faucet; serve storage_deposit del treasury sul contratto USDC, da aggiungere a setup se manca), fondi: 50-100 USDC e circa 12 NEAR. Un indirizzo Base di Stefano come fornitore "DesignCo". Provare l'executor: quote, `settle`, `mark_settled`. Proposta sopra soglia vista e approvata in Trezu.
 4. **Contratto** (fatto il 20 ottobre: `dao_proposal_id`, cancel su rifiuto DAO, rollback dei transfer, wasm 303 KB). Resta: replay RTMR3 nel verifier, eventuale `storage_deposit` automatico per i fornitori NEAR.
 5. **Dashboard** statica fatta (`web/index.html`); da provare su un contratto vero e, se piace, pubblicare su GitHub Pages.

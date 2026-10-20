@@ -40,7 +40,7 @@ app/src/              TypeScript, near-api-js 7
   executor.ts         NEAR Intents 1-Click per i fornitori su altre chain (solo mainnet)
   mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
   setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
-  cli.ts              bursar setup|agent|submit|executor|relayer|mcp|status
+  cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
 invoices/             make_invoices.py e 4 PDF di esempio
 ```
 

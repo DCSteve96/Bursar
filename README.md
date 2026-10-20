@@ -126,6 +126,13 @@ verified: the decision was made on this model output, inside an attested TEE
 ```
 Change one byte of the response in the receipt and run it again: `FAIL signed_text`, `FAIL extraction`. Receipts written with `--offline` have no AI receipt and fail at the first line, as they should.
 
+To try the enclave reading without a treasury, relayer or NEAR account, read one invoice and stop there:
+
+```bash
+NEAR_AI_API_KEY=... npm run dev read ../invoices/samples/04-acme-hosting-0924-fraud.pdf
+```
+See: the extraction as JSON (`"flags": ["new_payment_details", "urgency"]`), the claim the agent would have sent, the receipt path `app/.bursar/receipts/read-04-acme-hosting-0924-fraud.json`, and the same check list as above minus `on_chain`. Nothing is submitted: the vendor id is the model's guess, and only the contract matches it against the allowlist.
+
 **7. Drive it from an assistant (MCP).** Add to Claude Desktop, Claude Code or Codex:
 
 ```json

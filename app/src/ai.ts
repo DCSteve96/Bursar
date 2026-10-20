@@ -89,7 +89,9 @@ export function sha256(s: string | Buffer | Uint8Array) {
   return createHash("sha256").update(s).digest("hex");
 }
 
-const headers = () => ({ Authorization: `Bearer ${config.aiApiKey}`, "x-no-aliasing": "true" });
+// `NEAR_AI_API_KEY=proxy`: send no Authorization header, an egress proxy that holds the key adds it (cloud dev sessions).
+const headers = (): Record<string, string> =>
+  config.aiApiKey === "proxy" ? { "x-no-aliasing": "true" } : { Authorization: `Bearer ${config.aiApiKey}`, "x-no-aliasing": "true" };
 
 /** Preflight: fetch the model attestation bound to a fresh nonce. We keep the nonce in the receipt. */
 export async function fetchAttestation(nonce: string): Promise<AttestationReport> {

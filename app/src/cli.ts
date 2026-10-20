@@ -2,6 +2,8 @@
 // bursar <command>
 //   agent [--once] [--offline] [--direct]   watch the inbox and submit invoices
 //   submit <file.pdf> [--offline] [--direct] submit one invoice
+//   read <file.pdf> [--offline] [--no-collateral]
+//                                            read one invoice in the TEE, write and verify the receipt, no chain
 //   executor [--once]                        route Queued payments through NEAR Intents (mainnet)
 //   relayer                                  pay gas for the agent's meta transactions
 //   mcp                                      run the MCP server on stdio
@@ -27,6 +29,24 @@ async function main() {
       const { processInvoice } = await import("./agent.js");
       const r = await processInvoice(file, { offline: flag("--offline"), direct: flag("--direct") });
       console.log(JSON.stringify({ paymentId: r.paymentId, status: r.payment?.status, reason: r.payment?.reason, tx: r.txHash, claim: r.claim }, null, 2));
+      break;
+    }
+    case "read": {
+      const file = rest.find((a) => !a.startsWith("--"));
+      if (!file) throw new Error("usage: bursar read <file.pdf> [--offline] [--no-collateral]");
+      const { readOnly } = await import("./agent.js");
+      const { read, claim, receiptPath } = await readOnly(file, { offline: flag("--offline") });
+      console.log(JSON.stringify({ file: read.file, extraction: read.extraction, claim, receipt: receiptPath }, null, 2));
+      if (read.ai) {
+        const sig = read.ai.receipt;
+        console.log(`model ${sig.model}, completion ${sig.inference_id}, signature ${sig.signature_kind ?? "none"} by ${sig.signing_address ?? "-"}`);
+        const { loadReceipt, verifyReceipt, formatResult } = await import("./verify.js");
+        const v = await verifyReceipt(await loadReceipt(receiptPath), { collateral: !flag("--no-collateral"), chain: false, pccsUrl: process.env.PCCS_URL });
+        console.log(formatResult(v));
+        process.exitCode = v.ok ? 0 : 1;
+      } else {
+        console.log("offline parser used (no NEAR_AI_API_KEY or --offline): no TEE receipt to verify");
+      }
       break;
     }
     case "executor": {
@@ -84,7 +104,7 @@ async function main() {
       break;
     }
     default:
-      console.log("usage: bursar setup|agent|submit|executor|relayer|mcp|status|verify|sync");
+      console.log("usage: bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync");
       process.exit(cmd ? 1 : 0);
   }
 }
