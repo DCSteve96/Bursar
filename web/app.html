@@ -134,7 +134,7 @@
         <div id="created" hidden style="margin-top:24px">
           <div class="kv" id="createdKv"></div>
           <div class="actions" style="margin-top:16px"><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a><a class="btn btn-signal" href="#invoices" id="createdGo">Go to invoices</a><button type="button" class="btn-signal" id="createdWallet" hidden>Connect the wallet key</button></div>
-          <p class="muted" id="createdNote" hidden style="font-size:14px;margin:12px 0 0">The wallet adds a key limited to this treasury to the browser: it signs vendors, orders, limits and approvals, never a transfer. The payer account's key stays here to fund invites and the DAO.</p>
+          <p class="muted" id="createdNote" hidden style="font-size:14px;margin:12px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs vendors, orders, limits and approvals, never a transfer. The payer account's key stays here to fund invites and the DAO.</p>
         </div>
       </div>
       <div class="card">
@@ -1197,25 +1197,6 @@ $("#invCreate").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 $("#invCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#invLink").value); $("#invCopy").textContent = "Copied"; } catch { $("#invLink").select(); } setTimeout(() => { $("#invCopy").textContent = "Copy link"; }, 1500); });
-/** Back from the NEAR wallet: it added our function-call key (limited to the treasury) to the owner's account. */
-function acceptWalletReturn() {
-  const p = new URLSearchParams(location.search);
-  if (!p.get("account_id") || !p.get("public_key")) return false;
-  let pending = null;
-  try { pending = JSON.parse(localStorage.getItem("bursar.walletPending") || "null"); } catch {}
-  try {
-    if (!pending || pending.stage !== "key" || pending.pubStr !== p.get("public_key")) throw new Error("this browser did not start that wallet sign-in");
-    const known = profiles.find((x) => x.treasury === pending.treasury) || {};
-    for (const f of PROFILE_FIELDS) $("#" + f).value = known[f] ?? "";
-    $("#network").value = pending.network; $("#treasury").value = pending.treasury; $("#label").value = pending.label || known.label || pending.treasury;
-    $("#owner").value = p.get("account_id"); $("#ownerKey").value = pending.secretKey; $("#ownerKeyKind").value = "wallet";
-    $("#operator").value = ""; $("#operatorKey").value = ""; $("#operatorRole").value = "";
-    saveSettings();
-    try { localStorage.removeItem("bursar.walletPending"); } catch {}
-    history.replaceState(null, "", location.pathname); location.hash = "#overview";
-    return true;
-  } catch (e) { $("#sErr").textContent = `wallet sign-in not accepted: ${e.message}`; $("#sErr").hidden = false; history.replaceState(null, "", location.pathname); location.hash = "#settings"; return false; }
-}
 function acceptInvite() {
   const m = location.hash.match(/^#invite=([A-Za-z0-9_-]+)$/);
   if (!m) return false;
@@ -1251,7 +1232,6 @@ const DEMO_VENDORS = [
   { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" },
 ];
 async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
-const WALLET = { testnet: "https://testnet.mynearwallet.com", mainnet: "https://app.mynearwallet.com" };
 /** Set by login.html when a wallet account signed in and owns no treasury yet: the one created here belongs to it. */
 const walletOwner = () => { try { return JSON.parse(localStorage.getItem("bursar.walletOwner") || "null"); } catch { return null; } };
 function reflectWalletOwner() {
@@ -1264,16 +1244,24 @@ function reflectWalletOwner() {
   $("#startAside").textContent = "Only your wallet will be able to change vendors, limits and approvals.";
   $("#startOwned").textContent = "the policy contract, owned by your wallet account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person approves above 2,000";
 }
-/** Step 2 of the wallet sign-in for a treasury created here: the wallet adds a key limited to it. */
-function connectWalletKey(treasury, owner, label) {
-  const key = newKey();
-  const pending = { stage: "key", network: "testnet", treasury, label, owner, pubStr: key.pubStr, secretKey: key.secretKey };
-  try { localStorage.setItem("bursar.walletPending", JSON.stringify(pending)); localStorage.removeItem("bursar.walletOwner"); } catch {}
-  const u = new URL(`${WALLET.testnet}/login/`);
-  u.searchParams.set("title", "Bursar"); u.searchParams.set("contract_id", treasury); u.searchParams.set("public_key", key.pubStr);
-  u.searchParams.set("success_url", new URL("app.html", location.href).href);
-  u.searchParams.set("failure_url", new URL("login.html?network=testnet&wallet=failed", location.href).href);
-  location.href = u.href;
+/** The wallet adds a key limited to this treasury to the browser (NEAR Connect: Meteor, HOT, Intear, Nightly and the others). The key is generated here. */
+async function connectWalletKey(treasury, owner, label) {
+  const btn = $("#createdWallet"); btn.disabled = true; btn.textContent = "Waiting for the wallet...";
+  $("#createErr").hidden = true;
+  try {
+    const { NearConnector } = await import("https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js");
+    const connector = new NearConnector({ network: settings.network, footerBranding: null });
+    let wallet, accounts;
+    try { ({ wallet, accounts } = await connector.getConnectedWallet()); } catch { wallet = await connector.connect(); accounts = await wallet.getAccounts({ network: settings.network }); }
+    if (!accounts?.some((a) => a.accountId === owner)) throw new Error(`the wallet is signed in as ${accounts?.[0]?.accountId || "nobody"}, not ${owner}`);
+    const key = newKey();
+    await wallet.signAndSendTransaction({ network: settings.network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: key.pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: [] } } } }] });
+    $("#owner").value = owner; $("#ownerKey").value = key.secretKey; $("#ownerKeyKind").value = "wallet"; $("#label").value = label;
+    saveSettings();
+    try { localStorage.removeItem("bursar.walletOwner"); } catch {}
+    location.hash = "#overview";
+  } catch (e) { $("#createErr").textContent = `the wallet did not add the key: ${e.message || e}`; $("#createErr").hidden = false; }
+  finally { btn.disabled = false; btn.textContent = "Connect the wallet key"; }
 }
 /** List the treasury in the public registry so the explorer and the sign-in page find it. Entries are hints; readers verify the owner on the contract. */
 async function registerTreasury(signer, treasury, owner, step) {
@@ -1425,7 +1413,7 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files?.[0]); });
 $("#file").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
 loadSettings();
-if (!acceptInvite() && !acceptWalletReturn()) { route(); loadTreasury(); }
+if (!acceptInvite()) { route(); loadTreasury(); }
 </script>
 </body>
 </html>
