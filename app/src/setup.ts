@@ -134,6 +134,14 @@ export async function setup(o: Opts) {
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" }, gas: TGAS(30) });
     log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base)");
   }
+  // 5b. what the company agreed to buy: a standing order for hosting, purchase orders for the two projects
+  const orders = await provider.callFunction({ contractId: names.treasury, method: "list_orders", args: {} }) as unknown[];
+  if (orders.length === 0) {
+    await root.callFunction({ contractId: names.treasury, methodName: "add_recurring_order", args: { vendor_id: "acmehosting", description: "Dedicated server EU-West, monthly", amount_per_period: "500000000", period_days: 30, expires_at: null }, gas: TGAS(30) });
+    await root.callFunction({ contractId: names.treasury, methodName: "add_order", args: { vendor_id: "designco", reference: "PO-2026-118", description: "Landing page redesign", amount: "1250000000", expires_at: null }, gas: TGAS(30) });
+    await root.callFunction({ contractId: names.treasury, methodName: "add_order", args: { vendor_id: "legalpartners", reference: "PO-2026-104", description: "Trademark filing and advisory", amount: "9800000000", expires_at: null }, gas: TGAS(30) });
+    log("recorded orders: hosting 500 USDC/month, PO-2026-118 (designco, 1,250), PO-2026-104 (legalpartners, 9,800)");
+  }
 
   // 6. fund the treasury: 15,000 USDC on testnet, or whatever FUND_USDC says
   const fund = process.env.FUND_USDC ?? (o.network === "testnet" ? "15000000000" : "0");

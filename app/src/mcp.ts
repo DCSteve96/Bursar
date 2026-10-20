@@ -40,7 +40,7 @@ export async function runMcp() {
     const why: Record<string, string> = {
       Paid: "The vendor is on NEAR, the amount is under every cap, so the contract paid it in the same transaction.",
       Queued: "Policy passed. The vendor is on another chain, so the executor will route USDC through NEAR Intents. The contract will only release funds to a quote whose recipient equals the vendor's recorded payout.",
-      Approval: `The amount is at or above the approval threshold. Sputnik DAO proposal ${p.dao_proposal_id ?? "(id pending)"} was opened by the contract; a council member must approve it in Trezu.`,
+      Approval: `Policy passed the hard checks but a human decides: ${(p.reason ?? "over_threshold").split("+").map((r) => ({ over_threshold: "the amount is at or above the approval threshold", no_order: "no purchase order or standing order covers this invoice", flagged: "the model flagged the invoice" } as Record<string, string>)[r] ?? r).join("; ")}. ${p.dao_proposal_id !== null ? `Sputnik DAO proposal ${p.dao_proposal_id} was opened by the contract; a council member approves it in Trezu.` : "The owner or an approver settles it with approve_payment, or cancels it."}`,
       Settling: "USDC left the treasury towards the Intents deposit address. Waiting for the destination chain transaction.",
       Settled: "Delivered on the destination chain.",
       Blocked: `Refused by policy: ${p.reason}.` + (({
@@ -57,6 +57,11 @@ export async function runMcp() {
       Cancelled: p.reason?.startsWith("dao_") ? `The DAO answered ${p.reason.slice(4)} on proposal ${p.dao_proposal_id}; the contract cancelled the payment and released its budget.` : "Cancelled by the owner.",
     };
     return text(`Payment #${p.id}, ${fmtUsdc(p.amount)} to ${p.vendor_id} (invoice ${p.invoice_number}): ${p.status}. ${why[p.status] ?? ""}${p.flags.length ? ` Model flags: ${p.flags.join(", ")}.` : ""} Attestation: ${p.attestation_ref}`);
+  });
+
+  server.tool("orders", "Purchase orders and standing orders the owner recorded: what the company agreed to buy. Invoices outside them wait for a human.", { vendor_id: z.string().optional() }, async ({ vendor_id }) => {
+    const os = await view<unknown[]>("list_orders", { vendor_id: vendor_id ?? null });
+    return text(os);
   });
 
   server.tool("vendors", "Vendors the owner allowlisted, with payout and budget.", {}, async () => {

@@ -7,6 +7,11 @@
 //! - agent:    a sub-account whose only key is a function-call key limited to `request_payment`.
 //! - executor: a non-AI process run by the company that talks to NEAR Intents for cross-chain payouts.
 //! - dao:      a Sputnik DAO (Trezu) that approves payments above `approval_threshold`.
+//! - operators: accounts the owner trusts with a subset of its powers (approve, manage vendors, manage orders).
+//!
+//! Orders are what the company agreed to buy, recorded before the invoice arrives: a purchase order with a
+//! total, or a standing order (one invoice per period, up to an amount). An invoice that matches no order is
+//! never paid on the AI's word alone: it waits for a human. So do invoices the model flagged.
 //!
 //! Money only ever leaves this contract towards:
 //! - the vendor's NEAR account recorded by the owner (Paid), or
@@ -77,8 +82,11 @@ pub struct Vendor {
 pub struct Limits {
     pub per_payment_cap: u128,
     pub daily_cap: u128,
-    /// Payments at or above this amount need DAO approval.
+    /// Payments at or above this amount need a human: the DAO council, or the owner / an approver when there is no DAO.
     pub approval_threshold: u128,
+    /// When true, every invoice needs a matching order or a human. When false, only vendors that have
+    /// active orders are held to them.
+    pub require_orders: bool,
 }
 
 #[near(serializers = [borsh, json])]
@@ -116,6 +124,9 @@ pub struct InvoiceClaim {
     pub attestation_ref: String,
     /// Free-text flags raised by the model (urgency, new bank details, mismatched domain...).
     pub flags: Vec<String>,
+    /// Purchase order or reference printed on the invoice, if any.
+    #[serde(default)]
+    pub order_ref: Option<String>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -138,6 +149,49 @@ pub struct Payment {
     /// Destination-chain tx hash once delivered.
     pub dest_tx: Option<String>,
     pub dao_proposal_id: Option<u64>,
+    /// The order this payment consumed, if any.
+    pub order_id: Option<u64>,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug)]
+pub struct Company {
+    pub name: String,
+    pub description: String,
+}
+
+/// What an operator may do. The owner keeps everything else (limits, roles, withdraw, pause).
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, Default)]
+pub struct Role {
+    pub approve: bool,
+    pub manage_vendors: bool,
+    pub manage_orders: bool,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OrderKind {
+    /// A purchase order: invoices referencing it consume `remaining`.
+    Single { remaining: u128 },
+    /// A standing order: at most one invoice per period, up to `amount_per_period`.
+    /// Periods of 28 to 31 days follow the calendar month; others are counted from the epoch.
+    Recurring { amount_per_period: u128, period_days: u32, last_period: Option<u64> },
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug)]
+pub struct Order {
+    pub id: u64,
+    pub vendor_id: String,
+    /// The reference the invoice is expected to print (purchase order number). Empty for standing orders.
+    pub reference: String,
+    pub description: String,
+    pub kind: OrderKind,
+    /// Block timestamp after which the order no longer covers invoices. 0 = never.
+    pub expires_at: u64,
+    pub active: bool,
+    pub created_at: u64,
 }
 
 #[near(serializers = [json])]
@@ -216,6 +270,10 @@ pub struct Bursar {
     vendors: IterableMap<String, Vendor>,
     payments: IterableMap<u64, Payment>,
     invoice_index: LookupSet<String>,
+    orders: IterableMap<u64, Order>,
+    operators: IterableMap<AccountId, Role>,
+    company: Option<Company>,
+    next_order_id: u64,
     next_id: u64,
     balance: u128,
     spent_today: u128,
@@ -248,10 +306,15 @@ impl Bursar {
                 per_payment_cap: per_payment_cap.0,
                 daily_cap: daily_cap.0,
                 approval_threshold: approval_threshold.0,
+                require_orders: false,
             },
             vendors: IterableMap::new(b"v"),
             payments: IterableMap::new(b"p"),
             invoice_index: LookupSet::new(b"i"),
+            orders: IterableMap::new(b"o"),
+            operators: IterableMap::new(b"r"),
+            company: None,
+            next_order_id: 1,
             next_id: 1,
             balance: 0,
             spent_today: 0,
@@ -263,7 +326,7 @@ impl Bursar {
     // ----- owner -----
 
     pub fn add_vendor(&mut self, vendor_id: String, name: String, payout: Payout, monthly_budget: U128) {
-        self.assert_owner();
+        self.assert_can(|r| r.manage_vendors, "manage vendors");
         require!(!self.vendors.contains_key(&vendor_id), "vendor exists");
         self.vendors.insert(
             vendor_id.clone(),
@@ -281,7 +344,7 @@ impl Bursar {
 
     /// Changing a payout is an owner action, never something an invoice can do.
     pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>) {
-        self.assert_owner();
+        self.assert_can(|r| r.manage_vendors, "manage vendors");
         let mut v = self.vendors.get(&vendor_id).cloned().expect("unknown vendor");
         if let Some(p) = payout {
             v.payout = p;
@@ -302,8 +365,66 @@ impl Bursar {
             per_payment_cap: per_payment_cap.0,
             daily_cap: daily_cap.0,
             approval_threshold: approval_threshold.0,
+            require_orders: self.limits.require_orders,
         };
         self.emit("limits_set", "");
+    }
+
+    /// Strict mode: every invoice needs a matching order, or a human. Off by default: then only vendors
+    /// with active orders are held to them.
+    pub fn set_order_policy(&mut self, require_orders: bool) {
+        self.assert_owner();
+        self.limits.require_orders = require_orders;
+        self.emit("order_policy_set", if require_orders { "required" } else { "per_vendor" });
+    }
+
+    pub fn set_company(&mut self, name: String, description: String) {
+        self.assert_owner();
+        self.company = Some(Company { name: name.clone(), description });
+        self.emit("company_set", &name);
+    }
+
+    // ----- operators: the owner delegates parts of its power, on chain, revocably -----
+
+    pub fn add_operator(&mut self, account: AccountId, role: Role) {
+        self.assert_owner();
+        require!(account != self.owner, "the owner is not an operator");
+        self.operators.insert(account.clone(), role);
+        self.emit("operator_added", account.as_str());
+    }
+
+    pub fn remove_operator(&mut self, account: AccountId) {
+        self.assert_owner();
+        require!(self.operators.remove(&account).is_some(), "unknown operator");
+        self.emit("operator_removed", account.as_str());
+    }
+
+    // ----- orders: what the company agreed to buy, before the invoice -----
+
+    /// A purchase order with a total. Invoices that print `reference` consume it.
+    pub fn add_order(&mut self, vendor_id: String, reference: String, description: String, amount: U128, expires_at: Option<u64>) -> u64 {
+        self.assert_can(|r| r.manage_orders, "manage orders");
+        require!(self.vendors.contains_key(&vendor_id), "unknown vendor");
+        require!(!reference.trim().is_empty(), "a purchase order needs a reference");
+        require!(amount.0 > 0, "zero amount");
+        self.insert_order(vendor_id, reference, description, OrderKind::Single { remaining: amount.0 }, expires_at.unwrap_or(0))
+    }
+
+    /// A standing order: one invoice per period, up to `amount_per_period`. Matched by vendor, no reference needed.
+    pub fn add_recurring_order(&mut self, vendor_id: String, description: String, amount_per_period: U128, period_days: u32, expires_at: Option<u64>) -> u64 {
+        self.assert_can(|r| r.manage_orders, "manage orders");
+        require!(self.vendors.contains_key(&vendor_id), "unknown vendor");
+        require!(amount_per_period.0 > 0 && period_days > 0, "zero amount or period");
+        let kind = OrderKind::Recurring { amount_per_period: amount_per_period.0, period_days, last_period: None };
+        self.insert_order(vendor_id, String::new(), description, kind, expires_at.unwrap_or(0))
+    }
+
+    pub fn close_order(&mut self, id: u64) {
+        self.assert_can(|r| r.manage_orders, "manage orders");
+        let mut o = self.orders.get(&id).cloned().expect("unknown order");
+        o.active = false;
+        self.orders.insert(id, o);
+        self.emit("order_closed", &id.to_string());
     }
 
     pub fn set_roles(&mut self, agent: Option<AccountId>, executor: Option<AccountId>, dao: Option<AccountId>, dao_bond: Option<NearToken>) {
@@ -339,7 +460,7 @@ impl Bursar {
     }
 
     pub fn cancel_payment(&mut self, id: u64) {
-        self.assert_owner();
+        self.assert_can(|r| r.approve, "approve");
         let mut p = self.payments.get(&id).cloned().expect("unknown payment");
         require!(matches!(p.status, Status::Queued | Status::Approval), "cannot cancel in this state");
         self.release_reservation(&p);
@@ -376,6 +497,7 @@ impl Bursar {
             deposit_address: None,
             dest_tx: None,
             dao_proposal_id: None,
+            order_id: None,
         };
 
         match self.decide(&claim) {
@@ -390,14 +512,30 @@ impl Bursar {
                 self.reserve(&claim.vendor_id, amount);
                 let key = Self::invoice_key(&claim.vendor_id, &claim.invoice_number);
                 self.invoice_index.insert(key);
+                // What the company agreed to buy: consume the matching order, or note that there is none.
+                let (order_id, covered) = self.consume_order(&claim);
+                p.order_id = order_id;
+                // A human decides when: the amount is above the threshold; no order covers the invoice
+                // (always in strict mode, otherwise only for vendors that have orders); the model raised flags.
+                // The AI can add scrutiny through its flags, never remove it.
+                let mut holds: Vec<&str> = Vec::new();
                 if amount >= self.limits.approval_threshold {
-                    // Above the threshold a human decides: the DAO council through a Sputnik proposal,
-                    // or the owner directly when the company has no DAO.
+                    holds.push("over_threshold");
+                }
+                if !covered && (self.limits.require_orders || self.vendor_has_orders(&claim.vendor_id)) {
+                    holds.push("no_order");
+                }
+                if !claim.flags.is_empty() {
+                    holds.push("flagged");
+                }
+                if !holds.is_empty() {
+                    let reason = holds.join("+");
                     p.status = Status::Approval;
+                    p.reason = Some(reason.clone());
                     self.payments.insert(id, p);
-                    self.emit("payment_needs_approval", &id.to_string());
+                    self.emit("payment_needs_approval", &format!("{id}:{reason}"));
                     if self.dao.is_some() {
-                        self.open_dao_proposal(id, amount, &claim.vendor_id);
+                        self.open_dao_proposal(id, amount, &claim.vendor_id, &reason);
                     }
                     id
                 } else {
@@ -410,11 +548,11 @@ impl Bursar {
 
     // ----- dao -----
 
-    /// Called by the DAO when the council approves the proposal, or by the owner when there is no DAO.
+    /// Called by the DAO when the council approves the proposal, or by the owner or an approver when there is no DAO.
     pub fn approve_payment(&mut self, id: u64) {
         match &self.dao {
             Some(dao) => require!(env::predecessor_account_id() == *dao, "only the dao"),
-            None => require!(env::predecessor_account_id() == self.owner, "only the owner"),
+            None => self.assert_can(|r| r.approve, "approve"),
         }
         let p = self.payments.get(&id).cloned().expect("unknown payment");
         require!(p.status == Status::Approval, "not waiting for approval");
@@ -588,6 +726,26 @@ impl Bursar {
         self.limits.clone()
     }
 
+    pub fn get_company(&self) -> Option<Company> {
+        self.company.clone()
+    }
+
+    pub fn list_operators(&self) -> Vec<(AccountId, Role)> {
+        self.operators.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    pub fn get_order(&self, id: u64) -> Option<Order> {
+        self.orders.get(&id).cloned()
+    }
+
+    pub fn list_orders(&self, vendor_id: Option<String>) -> Vec<Order> {
+        self.orders
+            .iter()
+            .filter(|(_, o)| vendor_id.as_ref().map_or(true, |v| &o.vendor_id == v))
+            .map(|(_, o)| o.clone())
+            .collect()
+    }
+
     pub fn get_roles(&self) -> (AccountId, AccountId, AccountId, Option<AccountId>, AccountId) {
         (
             self.owner.clone(),
@@ -676,14 +834,14 @@ impl Bursar {
         }
     }
 
-    fn open_dao_proposal(&mut self, id: u64, amount: u128, vendor_id: &str) {
+    fn open_dao_proposal(&mut self, id: u64, amount: u128, vendor_id: &str, reason: &str) {
         let dao = self.dao.clone().unwrap();
         let args = near_sdk::base64::Engine::encode(
             &near_sdk::base64::prelude::BASE64_STANDARD,
             format!("{{\"id\":{id}}}"),
         );
         let proposal = ProposalInput {
-            description: format!("Bursar payment #{id}: {amount} to vendor {vendor_id} (above approval threshold)"),
+            description: format!("Bursar payment #{id}: {amount} to vendor {vendor_id} ({reason})"),
             kind: ProposalKind::FunctionCall {
                 receiver_id: env::current_account_id(),
                 actions: vec![ActionCall {
@@ -725,6 +883,93 @@ impl Bursar {
             self.spent_today = self.spent_today.saturating_sub(p.amount);
         }
         self.invoice_index.remove(&Self::invoice_key(&p.vendor_id, &p.invoice_number));
+        if let Some(oid) = p.order_id {
+            if let Some(mut o) = self.orders.get(&oid).cloned() {
+                match &mut o.kind {
+                    OrderKind::Single { remaining } => *remaining += p.amount,
+                    OrderKind::Recurring { last_period, period_days, .. } => {
+                        if *last_period == Some(Self::period_key(*period_days)) {
+                            *last_period = None;
+                        }
+                    }
+                }
+                self.orders.insert(oid, o);
+            }
+        }
+    }
+
+    fn insert_order(&mut self, vendor_id: String, reference: String, description: String, kind: OrderKind, expires_at: u64) -> u64 {
+        let id = self.next_order_id;
+        self.next_order_id += 1;
+        self.orders.insert(id, Order { id, vendor_id, reference: reference.trim().to_string(), description, kind, expires_at, active: true, created_at: env::block_timestamp() });
+        self.emit("order_added", &id.to_string());
+        id
+    }
+
+    fn order_is_open(o: &Order) -> bool {
+        o.active && (o.expires_at == 0 || env::block_timestamp() <= o.expires_at)
+    }
+
+    fn vendor_has_orders(&self, vendor_id: &str) -> bool {
+        self.orders.iter().any(|(_, o)| o.vendor_id == vendor_id && Self::order_is_open(o))
+    }
+
+    /// Find the order this claim fits and consume it. A purchase order is matched by the reference printed on
+    /// the invoice; a standing order by vendor, once per period. Returns the order id and whether one covered it.
+    fn consume_order(&mut self, c: &InvoiceClaim) -> (Option<u64>, bool) {
+        let amount = c.amount.0;
+        let reference = c.order_ref.as_deref().map(|r| r.trim().to_lowercase()).unwrap_or_default();
+        let candidates: Vec<Order> = self
+            .orders
+            .iter()
+            .filter(|(_, o)| o.vendor_id == c.vendor_id && Self::order_is_open(o))
+            .map(|(_, o)| o.clone())
+            .collect();
+        if !reference.is_empty() {
+            for mut o in candidates.iter().cloned() {
+                if let OrderKind::Single { remaining } = &mut o.kind {
+                    if o.reference.to_lowercase() == reference && *remaining >= amount {
+                        *remaining -= amount;
+                        let id = o.id;
+                        self.orders.insert(id, o);
+                        return (Some(id), true);
+                    }
+                }
+            }
+        }
+        for mut o in candidates.into_iter() {
+            if let OrderKind::Recurring { amount_per_period, period_days, last_period } = &mut o.kind {
+                let period = Self::period_key(*period_days);
+                if *amount_per_period >= amount && *last_period != Some(period) {
+                    *last_period = Some(period);
+                    let id = o.id;
+                    self.orders.insert(id, o);
+                    return (Some(id), true);
+                }
+            }
+        }
+        (None, false)
+    }
+
+    /// Calendar month for monthly orders, epoch-aligned periods otherwise.
+    fn period_key(period_days: u32) -> u64 {
+        if (28..=31).contains(&period_days) {
+            Self::month_key() as u64
+        } else {
+            env::block_timestamp() / (DAY_NS * period_days as u64)
+        }
+    }
+
+    /// The owner can do everything; an operator only what its role allows.
+    fn assert_can(&self, allowed: fn(&Role) -> bool, what: &str) {
+        let caller = env::predecessor_account_id();
+        if caller == self.owner {
+            return;
+        }
+        match self.operators.get(&caller) {
+            Some(role) if allowed(role) => {}
+            _ => env::panic_str(&format!("only the owner or an operator allowed to {what}")),
+        }
     }
 
     fn ft_transfer(&self, to: AccountId, amount: u128, memo: String) -> Promise {
@@ -825,6 +1070,7 @@ mod tests {
 
     fn claim(vendor: &str, number: &str, amount: u128, payout: Payout) -> InvoiceClaim {
         InvoiceClaim {
+            order_ref: None,
             vendor_id: vendor.into(),
             invoice_number: number.into(),
             amount: U128(amount),
@@ -916,6 +1162,121 @@ mod tests {
         testing_env!(ctx(accounts(0)).build());
         c.approve_payment(id);
         assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+    }
+
+    fn no_dao() -> Bursar {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000));
+        c.add_vendor("design".into(), "DesignCo".into(), Payout::Near { account: accounts(5) }, U128(0));
+        testing_env!(ctx(accounts(4)).build());
+        let _ = c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
+        testing_env!(ctx(accounts(0)).build());
+        c
+    }
+
+    fn with_ref(mut c: InvoiceClaim, r: &str) -> InvoiceClaim {
+        c.order_ref = Some(r.into());
+        c
+    }
+
+    #[test]
+    fn purchase_order_covers_invoices_until_spent_then_a_human_decides() {
+        let mut c = no_dao();
+        let oid = c.add_order("design".into(), "PO-118".into(), "landing page".into(), U128(1_500_000_000), None);
+        testing_env!(ctx(accounts(1)).build());
+        let a = c.request_payment(with_ref(claim("design", "1107", 1_250_000_000, Payout::Near { account: accounts(5) }), "po-118"));
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Paid);
+        assert_eq!(c.get_payment(a).unwrap().order_id, Some(oid));
+        assert_eq!(c.get_order(oid).unwrap().kind, OrderKind::Single { remaining: 250_000_000 });
+        // a second invoice on the same order, beyond what is left: not blocked, but not paid on the AI's word either
+        let b = c.request_payment(with_ref(claim("design", "1108", 400_000_000, Payout::Near { account: accounts(5) }), "PO-118"));
+        assert_eq!(c.get_payment(b).unwrap().status, Status::Approval);
+        assert_eq!(c.get_payment(b).unwrap().reason.as_deref(), Some("no_order"));
+        // an invoice with no reference at all, from a vendor that has orders: same
+        let d = c.request_payment(claim("design", "1109", 100_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(d).unwrap().reason.as_deref(), Some("no_order"));
+        // the owner cancels the held one: nothing consumed, budget released
+        testing_env!(ctx(accounts(0)).build());
+        c.cancel_payment(b);
+        assert_eq!(c.get_payment(b).unwrap().status, Status::Cancelled);
+        assert_eq!(c.get_order(oid).unwrap().kind, OrderKind::Single { remaining: 250_000_000 });
+    }
+
+    #[test]
+    fn standing_order_pays_one_invoice_per_month() {
+        let mut c = no_dao();
+        c.add_recurring_order("hosting".into(), "server, monthly".into(), U128(500_000_000), 30, None);
+        testing_env!(ctx(accounts(1)).build());
+        let a = c.request_payment(claim("hosting", "0923", 480_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Paid);
+        // the vendor invents a second invoice this month: a human has to look at it
+        let b = c.request_payment(claim("hosting", "0924", 320_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(b).unwrap().status, Status::Approval);
+        assert_eq!(c.get_payment(b).unwrap().reason.as_deref(), Some("no_order"));
+        // next month the standing order covers one invoice again
+        testing_env!(ctx(accounts(1)).block_timestamp(1_760_000_000_000_000_000 + 35 * DAY_NS).build());
+        let d = c.request_payment(claim("hosting", "1001", 500_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(d).unwrap().status, Status::Paid);
+    }
+
+    #[test]
+    fn vendors_without_orders_pay_as_before_unless_strict() {
+        let mut c = no_dao();
+        c.add_recurring_order("hosting".into(), "server".into(), U128(500_000_000), 30, None);
+        testing_env!(ctx(accounts(1)).build());
+        // design has no orders: the caps alone decide
+        let a = c.request_payment(claim("design", "1", 100_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Paid);
+        testing_env!(ctx(accounts(0)).build());
+        c.set_order_policy(true);
+        testing_env!(ctx(accounts(1)).build());
+        let b = c.request_payment(claim("design", "2", 100_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(b).unwrap().reason.as_deref(), Some("no_order"));
+    }
+
+    #[test]
+    fn model_flags_add_scrutiny_never_remove_it() {
+        let mut c = no_dao();
+        testing_env!(ctx(accounts(1)).build());
+        let mut cl = claim("hosting", "0923", 480_000_000, Payout::Near { account: accounts(5) });
+        cl.flags = vec!["urgency".into()];
+        let a = c.request_payment(cl);
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Approval);
+        assert_eq!(c.get_payment(a).unwrap().reason.as_deref(), Some("flagged"));
+        testing_env!(ctx(accounts(0)).build());
+        c.approve_payment(a);
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Paid);
+    }
+
+    #[test]
+    fn operators_do_only_what_their_role_allows() {
+        let mut c = no_dao();
+        c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: true });
+        c.set_company("Northwind Studio".into(), "design studio".into());
+        assert_eq!(c.get_company().unwrap().name, "Northwind Studio");
+        assert_eq!(c.list_operators().len(), 1);
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "2210", 3_000_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("over_threshold"));
+        // the approver approves
+        testing_env!(ctx(accounts(3)).build());
+        c.approve_payment(id);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        // the approver may add orders but not vendors
+        c.add_order("hosting".into(), "PO-1".into(), "".into(), U128(1), None);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_vendor("x".into(), "X".into(), Payout::Near { account: accounts(5) }, U128(0))));
+        assert!(r.is_err());
+        // a stranger can do neither
+        testing_env!(ctx(accounts(5)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_order("hosting".into(), "PO-2".into(), "".into(), U128(1), None)));
+        assert!(r.is_err());
+        // revoked
+        testing_env!(ctx(accounts(0)).build());
+        c.remove_operator(accounts(3));
+        testing_env!(ctx(accounts(3)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_order("hosting".into(), "PO-3".into(), "".into(), U128(1), None)));
+        assert!(r.is_err());
     }
 
     #[test]

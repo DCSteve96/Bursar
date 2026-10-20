@@ -108,7 +108,7 @@ npm run dev status</div><a class="btn btn-ghost" href="https://github.com/DCStev
 const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
 const q = new URLSearchParams(location.search);
 const network = q.get("network") || "testnet";
-const treasury = q.get("treasury") || "treasury.bursar-c34d05b8.testnet";
+const treasury = q.get("treasury") || "treasury.bursar-b48563e6.testnet";
 const $ = (s) => document.querySelector(s);
 $("#dashLink").href = $("#dashBtn").href = `dashboard.html?network=${network}&treasury=${encodeURIComponent(treasury)}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

@@ -15,6 +15,30 @@ export interface InvoiceClaim {
   payout_seen: Payout;
   attestation_ref: string;
   flags: string[];
+  /** Purchase order or reference printed on the invoice, if any. */
+  order_ref?: string | null;
+}
+
+export interface Order {
+  id: number;
+  vendor_id: string;
+  reference: string;
+  description: string;
+  kind: { Single: { remaining: string } } | { Recurring: { amount_per_period: string; period_days: number; last_period: number | null } };
+  expires_at: number;
+  active: boolean;
+  created_at: number;
+}
+
+export interface Role {
+  approve: boolean;
+  manage_vendors: boolean;
+  manage_orders: boolean;
+}
+
+export interface Company {
+  name: string;
+  description: string;
 }
 
 export interface Payment {
@@ -33,6 +57,7 @@ export interface Payment {
   deposit_address: string | null;
   dest_tx: string | null;
   dao_proposal_id: number | null;
+  order_id: number | null;
 }
 
 export interface Vendor {

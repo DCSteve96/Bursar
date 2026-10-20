@@ -72,6 +72,7 @@
         <div class="eyebrow muted" style="margin-bottom:12px">What you get</div>
         <div class="kv">
           <span class="k">treasury</span><span class="v">the policy contract, owned by your new account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, owner approval above 2,000</span>
+          <span class="k">orders</span><span class="v">what the company agreed to buy: hosting 500 USDC a month, two purchase orders. An invoice outside them waits for you</span>
           <span class="k">agent</span><span class="v">a sub-account with one key that can only call <span class="mono">request_payment</span></span>
           <span class="k">vendors</span><span class="v">Acme Hosting and Legal Partners on NEAR, DesignCo on Base, so the sample invoices and the recorded readings apply</span>
           <span class="k">not here</span><span class="v">a DAO (the README deployment shows the Sputnik path) and cross-chain settlement (NEAR Intents runs on mainnet only)</span>
@@ -124,6 +125,7 @@
         <button type="button" class="btn-ghost sample" data-file="02-designco-1107">DesignCo on Base, 1,250 USDC</button>
         <button type="button" class="btn-ghost sample" data-file="03-legalpartners-2210">Legal Partners, 9,800 USDC</button>
         <button type="button" class="btn-ghost sample" data-file="04-acme-hosting-0924-fraud">Acme with a new wallet</button>
+        <button type="button" class="btn-ghost sample" data-file="06-acme-hosting-1002">Acme, an invoice nobody ordered</button>
       </div>
       <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">The PDFs are in <a href="samples/">samples/</a> if you have a key and want the enclave to read them live. A recorded reading was already decided on chain, so asking again returns <span class="mono">Blocked duplicate_invoice</span>: the contract remembers.</p>
     </div>
@@ -251,7 +253,7 @@ $("#readMode").addEventListener("change", syncReadMode);
 $("#save").addEventListener("click", saveSettings);
 // The demo treasury from the README: a throwaway testnet deployment. The agent key is not filled in: paste your own, or
 // read the recorded samples below, which need no key at all.
-const DEMO = { network: "testnet", treasury: "treasury.bursar-c34d05b8.testnet", agent: "agent.bursar-c34d05b8.testnet", model: "z-ai/glm-5.3-flash" };
+const DEMO = { network: "testnet", treasury: "treasury.bursar-b48563e6.testnet", agent: "agent.bursar-b48563e6.testnet", model: "z-ai/glm-5.3-flash" };
 $("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); });
 $("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
@@ -381,6 +383,7 @@ Fields:
 - flags: list any of: "new_payment_details" (text like new bank details, updated wallet, please note our new address),
   "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
+- order_ref: the purchase order or reference number printed on the invoice (labels like "Purchase order", "PO", "Order ref"), as printed; empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 const aiHeaders = () => useOwnKey() && settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
@@ -566,7 +569,7 @@ async function handleFile(file) {
     const claim = {
       vendor_id: matchVendor(extraction, vendors), invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
       due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
-      attestation_ref: attestationRef(receipt), flags: extraction.flags ?? [],
+      attestation_ref: attestationRef(receipt), flags: extraction.flags ?? [], order_ref: (extraction.order_ref || "").trim() || null,
     };
     await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
   } catch (e) {
@@ -660,15 +663,17 @@ const REASON = {
   dao_proposal_failed: "the DAO refused to open the proposal; budget released",
   transfer_failed: "USDC transfer failed on the token contract; balance restored",
 };
+const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the model flagged the invoice" };
+const holdText = (r) => (r || "over_threshold").split("+").map((x) => HOLD[x] ?? x).join(", ");
 function why(p) {
   const parts = [];
   if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
   if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
-  if (p.status === "Approval") parts.push(p.dao_proposal_id === null ? "above the approval threshold: waiting for a human (the DAO council, or the owner when there is no DAO)" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`);
+  if (p.status === "Approval") parts.push(`${holdText(p.reason)}: ${p.dao_proposal_id === null ? "waiting for a human (the DAO council, or the owner or an approver when there is no DAO)" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`}`);
   if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
   if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
   if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
-  if (p.status === "Paid") parts.push(p.dao_proposal_id !== null ? `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR` : BigInt(p.amount) >= 2000000000n ? "approved by the owner, then paid on NEAR" : "paid on NEAR in the same transaction");
+  if (p.status === "Paid") parts.push(p.dao_proposal_id !== null ? `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR` : p.reason ? `held (${holdText(p.reason)}), approved by a person, then paid on NEAR` : "paid on NEAR in the same transaction");
   if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
   return esc(parts.join(". "));
 }
@@ -690,10 +695,10 @@ async function loadTreasury() {
 $("#refresh").addEventListener("click", loadTreasury);
 
 // ---------- onboarding: this browser becomes the company ----------
-const TUSDC = "tusdc.bursar-c34d05b8.testnet"; // throwaway NEP-141 with open mint, deployed by the README setup
+const TUSDC = "tusdc.bursar-b48563e6.testnet"; // throwaway NEP-141 with open mint, deployed by the README setup
 const DEMO_VENDORS = [
-  { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-c34d05b8.testnet" } }, monthly_budget: "3000000000" },
-  { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: "legalpartners.bursar-c34d05b8.testnet" } }, monthly_budget: "0" },
+  { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-b48563e6.testnet" } }, monthly_budget: "3000000000" },
+  { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: "legalpartners.bursar-b48563e6.testnet" } }, monthly_budget: "0" },
   { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" },
 ];
 async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
@@ -730,7 +735,7 @@ async function createTreasury() {
       const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
       step("contract", "wait", `deploying to ${treasury}`);
       const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
-      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(4.5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)]);
+      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)]);
       step("contract", "ok", `policy contract live at ${treasury}`, t1.hash);
     }
     if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
@@ -752,6 +757,17 @@ async function createTreasury() {
       step("vendors", "wait", "registering the three demo vendors");
       const t4 = await send(treasury, DEMO_VENDORS.map((v) => A.functionCall("add_vendor", v, 30)));
       step("vendors", "ok", "acmehosting, legalpartners (NEAR) and designco (Base) allowlisted with their payouts", t4.hash);
+    }
+    const orders = await view(treasury, "list_orders", { vendor_id: null });
+    if (orders.length) step("orders", "ok", `${orders.length} orders already recorded`);
+    else {
+      step("orders", "wait", "recording what the company agreed to buy");
+      const t5 = await send(treasury, [
+        A.functionCall("add_recurring_order", { vendor_id: "acmehosting", description: "Dedicated server EU-West, monthly", amount_per_period: "500000000", period_days: 30, expires_at: null }, 30),
+        A.functionCall("add_order", { vendor_id: "designco", reference: "PO-2026-118", description: "Landing page redesign", amount: "1250000000", expires_at: null }, 30),
+        A.functionCall("add_order", { vendor_id: "legalpartners", reference: "PO-2026-104", description: "Trademark filing and advisory", amount: "9800000000", expires_at: null }, 30),
+      ]);
+      step("orders", "ok", "hosting 500 USDC a month, PO-2026-118 for DesignCo, PO-2026-104 for Legal Partners", t5.hash);
     }
     try { localStorage.removeItem("bursar.onboarding"); } catch {}
     for (const [k, v] of Object.entries({ network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner: root, ownerKey: rootKey.secretKey })) $("#" + k).value = v;

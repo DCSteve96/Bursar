@@ -99,6 +99,7 @@ function buildClaim(read: ReadResult, vendorId: string): InvoiceClaim {
     payout_seen: extraction.payout_seen,
     attestation_ref: read.attestationRef,
     flags: extraction.flags ?? [],
+    order_ref: extraction.order_ref?.trim() || null,
   };
 }
 

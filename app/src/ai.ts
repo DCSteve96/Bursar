@@ -20,6 +20,8 @@ export interface Extraction {
   payout_seen: Payout;
   flags: string[];
   confidence: number;
+  /** Purchase order or reference number printed on the invoice, empty if none. */
+  order_ref: string;
 }
 
 /** Everything needed to re-verify one inference independently. Stored next to the payment, never on chain. */
@@ -82,6 +84,7 @@ Fields:
 - flags: list any of: "new_payment_details" (text like new bank details, updated wallet, please note our new address),
   "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
+- order_ref: the purchase order or reference number printed on the invoice (labels like "Purchase order", "PO", "Order ref"), as printed; empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 
@@ -195,5 +198,6 @@ export function readInvoiceOffline(text: string): Extraction {
     payout_seen: near ? { Near: { account: near } } : { Chain: { chain, address: addr } },
     flags,
     confidence: 0.5,
+    order_ref: pick(/(?:Purchase order|Order ref(?:erence)?|PO)\s*(?:#|No\.?|number)?\s*:?\s*([A-Z]{1,4}-?[0-9]{2,8}(?:-[0-9A-Z]{1,8})?)/i),
   };
 }

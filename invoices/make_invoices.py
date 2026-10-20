@@ -17,7 +17,7 @@ a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
 
 
-def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, pay_lines, note=None, stamp=None):
+def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, pay_lines, note=None, stamp=None, po=None):
     c = canvas.Canvas(path, pagesize=A4)
     w, h = A4
     y = h - 30 * mm
@@ -27,6 +27,8 @@ def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, 
     c.drawRightString(w - 20 * mm, y, f"Invoice #: {number}")
     c.drawRightString(w - 20 * mm, y - 5 * mm, f"Date: {date}")
     c.drawRightString(w - 20 * mm, y - 10 * mm, f"Due date: {due}")
+    if po:
+        c.drawRightString(w - 20 * mm, y - 15 * mm, f"Purchase order: {po}")
     y -= 20 * mm
     c.setFont("Helvetica-Bold", 11)
     c.drawString(20 * mm, y, f"From: {vendor}")
@@ -85,13 +87,13 @@ invoice(os.path.join(a.out, "01-acme-hosting-0923.pdf"), "Acme Hosting", "Rua da
 invoice(os.path.join(a.out, "02-designco-1107.pdf"), "DesignCo", "Prinsengracht 220, Amsterdam", "invoices@designco.example",
         "DC-1107", "2026-11-03", "2026-11-17",
         [("Landing page redesign, milestone 2", "1,250.00")], "1,250.00",
-        [f"Pay to base address: {a.base_address}", "Token: USDC on Base"])
+        [f"Pay to base address: {a.base_address}", "Token: USDC on Base"], po="PO-2026-118")
 
 # 3. Above approval threshold -> Approval (DAO)
 invoice(os.path.join(a.out, "03-legalpartners-2210.pdf"), "Legal Partners LLP", "Corso Italia 8, Milano", "accounts@legalpartners.example",
         "LP-2210", "2026-11-04", "2026-11-30",
         [("Trademark filing, EU + US", "6,800.00"), ("Advisory hours, October (20h)", "3,000.00")], "9,800.00",
-        [f"Pay to NEAR account: {a.near_vendor_legal}", "Token: USDC"])
+        [f"Pay to NEAR account: {a.near_vendor_legal}", "Token: USDC"], po="PO-2026-104")
 
 # 4. Same vendor as 1, new wallet in the invoice -> Blocked: payout_changed (invoice fraud pattern)
 invoice(os.path.join(a.out, "04-acme-hosting-0924-fraud.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acme-hosting-eu.example",
@@ -105,6 +107,12 @@ invoice(os.path.join(a.out, "04-acme-hosting-0924-fraud.pdf"), "Acme Hosting", "
 invoice(os.path.join(a.out, "05-acme-hosting-1001.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
         "AH-1001", "2026-11-20", "2026-12-05",
         [("Dedicated server EU-West, December", "320.00")], "320.00",
+        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"])
+
+# 6. The registered vendor invents an extra invoice: right account, right amount, nothing agreed -> Approval (no_order)
+invoice(os.path.join(a.out, "06-acme-hosting-1002.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
+        "AH-1002", "2026-11-25", "2026-12-09",
+        [("Extra bandwidth, November", "290.00")], "290.00",
         [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"])
 
 print("written to", a.out)
