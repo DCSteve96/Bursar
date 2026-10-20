@@ -34,11 +34,13 @@ The AI never chooses an address. The executor cannot redirect funds. The owner i
 
 | | |
 |---|---|
-| Policy contract | `treasury.bursar-mvgent6v.testnet` |
-| Agent (one function-call key) | `agent.bursar-mvgent6v.testnet` |
-| Executor / relayer | `executor.bursar-mvgent6v.testnet` |
-| DAO (Sputnik v2) | `bursar-bursar-mvgent6v.sputnik-v2.testnet` |
-| Test USDC | `tusdc.bursar-mvgent6v.testnet` |
+| Policy contract | `treasury.bursar-itlecew5.testnet` |
+| Agent (one function-call key) | `agent.bursar-itlecew5.testnet` |
+| Executor / relayer | `executor.bursar-itlecew5.testnet` |
+| DAO (Sputnik v2) | `bursar-bursar-itlecew5.sputnik-v2.testnet` |
+| Test USDC | `tusdc.bursar-itlecew5.testnet` |
+
+Payments 1 to 7 on that contract are the walkthrough below, run end to end on 20 October 2026: paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate, rejected by the DAO and cancelled, and a transfer to an unregistered account rolled back. Open `web/index.html?network=testnet&treasury=treasury.bursar-itlecew5.testnet` to see them.
 
 Mainnet deployment with real USDC and NEAR Intents: see the demo post (link added at submission).
 
@@ -54,7 +56,7 @@ cd app && npm install && npm test
 ```
 See: `11 passed` from `cargo test`, `bursar_policy.wasm: 303102 bytes` (249 KB if `wasm-opt` is installed), and 7 passing app tests (signature recovery, receipt tampering, offline parser on the four samples).
 
-**1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR (two faucet accounts and a transfer will do).
+**1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR: the faucet gives 10 per account, so create two and transfer from one to the other. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
 
 **2. Deploy everything with one command.**
 
@@ -72,7 +74,7 @@ mkdir -p ../invoices/inbox && cp ../invoices/samples/*.pdf ../invoices/inbox/
 npm run agent -- --once --offline      # drop --offline to read with NEAR AI Cloud (needs NEAR_AI_API_KEY)
 npm run dev status
 ```
-See, in `status`:
+See, in `status` (the account names are yours; the same four decisions are live on the contract above):
 
 ```
 #1 acmehosting   AH-0923   480.00 USDC  Paid                      <- NEAR vendor, under caps: paid in the same tx
@@ -90,7 +92,9 @@ npm run dev status
 ```
 See: `#3 ... Paid`, and the vendor's tUSDC balance up by 9,800. On mainnet the same proposal shows up in Trezu and is approved with one click.
 
-If the council votes `VoteReject` instead, Sputnik does not call anyone back. Run `npm run dev sync`: the contract asks the DAO for the proposal status and, only on the DAO's own answer, cancels the payment and releases its budget. See: `#3 dao#0: Rejected` and `#3 ... Cancelled dao_rejected` in `status`. The executor runs this check on every tick.
+If the council votes `VoteReject` instead, Sputnik does not call anyone back. Run `npm run dev sync`: the contract asks the DAO for the proposal status and, only on the DAO's own answer, cancels the payment and releases its budget. See: `#6 dao#1: Rejected` and `#6 ... Cancelled dao_rejected` in `status` (payment 6 on the live contract is exactly that). The executor runs this check on every tick.
+
+A vendor whose NEAR account is not registered on the token contract makes `ft_transfer` fail. The contract's callback puts the money back: `Blocked transfer_failed`, balance unchanged (payment 7 on the live contract).
 
 **5. Send a duplicate.**
 

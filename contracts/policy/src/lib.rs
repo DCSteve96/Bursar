@@ -44,6 +44,21 @@ pub enum Payout {
     Chain { chain: String, address: String },
 }
 
+impl Payout {
+    /// Case-insensitive equality for chain addresses: EVM addresses carry an optional checksum in their
+    /// letter case, and an invoice may print the same address in a different case than the owner recorded.
+    /// NEAR account ids are already lowercase by construction.
+    pub fn same_as(&self, other: &Payout) -> bool {
+        match (self, other) {
+            (Payout::Near { account: a }, Payout::Near { account: b }) => a == b,
+            (Payout::Chain { chain: c1, address: a1 }, Payout::Chain { chain: c2, address: a2 }) => {
+                c1.eq_ignore_ascii_case(c2) && a1.trim().eq_ignore_ascii_case(a2.trim())
+            }
+            _ => false,
+        }
+    }
+}
+
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Debug)]
 pub struct Vendor {
@@ -502,7 +517,7 @@ impl Bursar {
         let mut p = self.payments.get(&id).cloned().expect("unknown payment");
         require!(p.status == Status::Queued, "not queued");
         let v = self.vendors.get(&p.vendor_id).expect("unknown vendor");
-        require!(v.payout == recipient, "recipient does not match vendor payout");
+        require!(v.payout.same_as(&recipient), "recipient does not match vendor payout");
         require!(matches!(v.payout, Payout::Chain { .. }), "near vendors are paid directly");
         require!(p.amount <= self.balance, "insufficient balance");
         self.balance -= p.amount;
@@ -602,7 +617,7 @@ impl Bursar {
         if !v.active {
             return Err("vendor_inactive".into());
         }
-        if c.payout_seen != v.payout {
+        if !c.payout_seen.same_as(&v.payout) {
             // The classic invoice fraud: same vendor, "new bank details".
             return Err("payout_changed".into());
         }
@@ -831,6 +846,16 @@ mod tests {
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, Payout::Chain { chain: "base".into(), address: "0xabc".into() }));
         assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+    }
+
+    #[test]
+    fn chain_address_case_does_not_matter() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1108", 100_000_000, Payout::Chain { chain: "Base".into(), address: "0xABC".into() }));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+        let other = c.request_payment(claim("design", "1109", 100_000_000, Payout::Chain { chain: "base".into(), address: "0xabd".into() }));
+        assert_eq!(c.get_payment(other).unwrap().reason.as_deref(), Some("payout_changed"));
     }
 
     #[test]

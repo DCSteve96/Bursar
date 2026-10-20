@@ -38,7 +38,27 @@ Non ancora provato con chiavi vere: NEAR AI Cloud (`ai.ts` è scritto sulle docs
 - Dashboard statica `web/index.html`: legge il contratto via RPC, nessun build.
 - README aggiornato con i passi "do X, see Y" per verify, sync, dashboard, test. Gli output di esempio di `verify` sono il formato del comando, non un run reale: va rifatto con un receipt vero.
 
-Da rifare appena c'è rete e chiavi: rideploy su testnet, i 4 passi del README, poi `verify` su un receipt vero (primo punto in cui il formato dell'API può smentire il codice).
+### 2.2 Rifatto su testnet con il contratto nuovo (20 ottobre, seconda parte della sessione cloud, dopo l'apertura della rete)
+
+Nuovo ambiente usa e getta da faucet (chiavi generate nel container, non di Stefano): root `bursar-itlecew5.testnet`, treasury `treasury.bursar-itlecew5.testnet`, DAO `bursar-bursar-itlecew5.sputnik-v2.testnet`, tUSDC `tusdc.bursar-itlecew5.testnet`; account di appoggio `bursar-fund-bfsz0u.testnet` (svuotato) e `probe-x.testnet` (creato per sbaglio con una chiave inutile, da ignorare). Il README punta a questo ambiente.
+
+Verificato on chain, tutto dal README:
+- `setup` da zero: ok, contratto nuovo (303 KB) deployato.
+- Fatture 1-4 via relayer: Paid, Queued, Approval con `dao#0` scritto dal callback, Blocked payout_changed. Fattura 1 rimandata: Blocked duplicate_invoice (#5).
+- `VoteApprove` su proposta 0: #3 Paid, legalpartners riceve 9.800 tUSDC.
+- Seconda fattura sopra soglia (LP-2211, 3.000, inviata via relayer): #6 Approval `dao#1`; `sync_dao_proposal` con proposta aperta risponde `InProgress` e non cambia nulla; dopo `VoteReject` risponde `Rejected` e il pagamento va in `Cancelled dao_rejected`, `spent_this_month` di legalpartners torna a 9.800 (i 3.000 liberati). Tx `2AuGZHE8kpN3rhFd12j9hQsLyGSvQ36twHra5y29G3BX`.
+- Fornitore con account inesistente (`ghost.`): #7 Paid poi callback -> `Blocked transfer_failed`, saldo identico a prima (4.720). Tx `3zhTdupXKtXueQFkj1mNjFmG5kEMgCVEiGGYbuxD38E7`.
+- Dashboard `web/index.html` caricata in Chromium headless contro il contratto vero: mostra i 7 pagamenti con i motivi.
+- `verify 1` su un receipt offline fallisce alla prima riga, come deve.
+- La chiave dell'agente (allowance 0,05 NEAR) non basta per una chiamata diretta da 150 TGas: `--direct` serve solo se l'agente ha NEAR suo. Via relayer tutto ok.
+
+Intents 1-Click (mainnet, solo quote `dry`, nessun deposito): gli asset id USDC in `config.ts` sono tutti presenti in `/v0/tokens`. Quote EXACT_OUTPUT 1.250 USDC NEAR -> Base: amountIn 1.256,53 USDC (0,52% senza JWT), 22 secondi stimati. Due cose imparate: `refundTo` deve essere un account NEAR esistente (altrimenti "Internal server error"), e `recipient` EVM deve essere tutto minuscolo o con checksum EIP-55 valido: il placeholder `0x4F1aC0dE...` aveva un checksum sbagliato ("recipient is not valid"). Ora il placeholder è minuscolo in `setup.ts` e `make_invoices.py`, e il contratto confronta gli indirizzi chain senza distinguere maiuscole (`Payout::same_as`), così una fattura che stampa lo stesso indirizzo con un case diverso non finisce in `payout_changed`.
+
+NEAR AI Cloud: `/v1/models` conferma `z-ai/glm-5.3-flash`, `Qwen/Qwen3-VL-30B-A3B-Instruct`, `Qwen/Qwen3.8-27B`; `/v1/attestation/report` richiede la chiave (401). Il test con chiave vera resta da fare.
+
+Rete e RPC: `rpc.testnet.near.org` risponde 429 (rate limit) e `rpc.mainnet.near.org` pure; i default ora sono FastNEAR (`test.rpc.fastnear.com`, `free.rpc.fastnear.com`), override con `NEAR_RPC`. Nelle sessioni cloud Node deve avere `NODE_USE_ENV_PROXY=1` perché `fetch` passi dal proxy del container (il faucet `helper.nearprotocol.com` si chiama con `POST /account {newAccountId, newAccountPublicKey}`, 10 NEAR per account).
+
+Da fare con chiavi: `verify` su un receipt vero (primo punto in cui il formato dell'API può smentire il codice).
 
 ## 3. Decisioni prese
 
@@ -89,7 +109,7 @@ Da rifare appena c'è rete e chiavi: rideploy su testnet, i 4 passi del README, 
 
 ## 6. Cosa resta (ordine consigliato)
 
-1. **Setup con account di Stefano** su testnet (rideploy del contratto nuovo) e verifica del README passo per passo, compresi `sync` dopo un `VoteReject` e la dashboard.
+1. **Setup con account di Stefano** su testnet: fatto con un account usa e getta (2.2), da ripetere con il suo solo se vuole che il README punti a un account suo.
 2. **NEAR AI Cloud con chiave vera**: `npm run agent -- --once` senza `--offline` sulle 4 fatture; sistemare il prompt finché l'estrazione è giusta; poi `npm run dev verify <id>` su un receipt vero e correggere `verify.ts` se il formato reale differisce. Se un check fallisce per un motivo di formato va capito, non allentato.
 3. **Mainnet**: `setup --root <account>.near --mainnet` (usa USDC vero `17208628...`, niente faucet; serve storage_deposit del treasury sul contratto USDC, da aggiungere a setup se manca), fondi: 50-100 USDC e circa 12 NEAR. Un indirizzo Base di Stefano come fornitore "DesignCo". Provare l'executor: quote, `settle`, `mark_settled`. Proposta sopra soglia vista e approvata in Trezu.
 4. **Contratto** (fatto il 20 ottobre: `dao_proposal_id`, cancel su rifiuto DAO, rollback dei transfer, wasm 303 KB). Resta: replay RTMR3 nel verifier, eventuale `storage_deposit` automatico per i fornitori NEAR.

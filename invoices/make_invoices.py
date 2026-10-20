@@ -11,7 +11,7 @@ from reportlab.lib.units import mm
 ap = argparse.ArgumentParser()
 ap.add_argument("--near-vendor", default="acmehosting.testnet")
 ap.add_argument("--near-vendor-legal", default="legalpartners.testnet")
-ap.add_argument("--base-address", default="0x4F1aC0dE9b2b3c4D5e6F708192A3b4C5d6E7F801")
+ap.add_argument("--base-address", default="0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801")
 ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "samples"))
 a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)

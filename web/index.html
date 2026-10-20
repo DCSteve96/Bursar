@@ -58,7 +58,7 @@
   </div>
 </main>
 <script>
-const RPC = { testnet: "https://rpc.testnet.near.org", mainnet: "https://rpc.mainnet.near.org" };
+const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
 // ?rpc=https://... overrides the RPC endpoint (own node, FastNEAR, local sandbox).
 const rpcOverride = new URLSearchParams(location.search).get("rpc");
 const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
@@ -95,7 +95,7 @@ function why(p, network) {
   if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
   if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
   if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
-  if (p.status === "Paid") parts.push("paid on NEAR in the same transaction");
+  if (p.status === "Paid") parts.push(p.dao_proposal_id === null ? "paid on NEAR in the same transaction" : `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR`);
   if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
   return esc(parts.join(". "));
 }

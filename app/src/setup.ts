@@ -31,7 +31,7 @@ async function loadSigner(network: string, accountId: string) {
 }
 
 export async function setup(o: Opts) {
-  const rpc = o.network === "mainnet" ? "https://rpc.mainnet.near.org" : "https://rpc.testnet.near.org";
+  const rpc = process.env.NEAR_RPC ?? (o.network === "mainnet" ? "https://free.rpc.fastnear.com" : "https://test.rpc.fastnear.com");
   const provider = new JsonRpcProvider({ url: rpc });
   const root = new Account(o.root, provider, await loadSigner(o.network, o.root));
   const sub = (name: string) => `${name}.${o.root}`;
@@ -131,7 +131,7 @@ export async function setup(o: Opts) {
   if (!vendors.some(([id]) => id === "acmehosting")) {
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: names.vendorHosting } }, monthly_budget: "3000000000" }, gas: TGAS(30) });
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: names.vendorLegal } }, monthly_budget: "0" }, gas: TGAS(30) });
-    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4F1aC0dE9b2b3c4D5e6F708192A3b4C5d6E7F801" } }, monthly_budget: "0" }, gas: TGAS(30) });
+    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" }, gas: TGAS(30) });
     log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base)");
   }
 

@@ -10,7 +10,8 @@ const env = (k: string, d?: string): string => {
 
 export const config = {
   network: env("NEAR_NETWORK", "testnet") as "testnet" | "mainnet",
-  rpc: process.env.NEAR_RPC ?? (process.env.NEAR_NETWORK === "mainnet" ? "https://rpc.mainnet.near.org" : "https://rpc.testnet.near.org"),
+  // rpc.testnet.near.org rate-limits hard (429) since 2026; FastNEAR's free endpoints are the default. Override with NEAR_RPC.
+  rpc: process.env.NEAR_RPC ?? (process.env.NEAR_NETWORK === "mainnet" ? "https://free.rpc.fastnear.com" : "https://test.rpc.fastnear.com"),
   keystore: process.env.NEAR_KEYSTORE ?? join(homedir(), ".near-credentials"),
 
   // The policy contract (the company's treasury account).
