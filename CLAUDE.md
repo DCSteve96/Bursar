@@ -41,7 +41,8 @@ app/src/              TypeScript, near-api-js 7
   mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
   setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
   cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
-web/                  index.html (landing), dashboard.html, app.html (console: lettura TEE, verifica, request_payment dal browser), style.css condiviso
+web/                  index.html (landing), dashboard.html, app.html (console: onboarding, lettura TEE, verifica, request_payment dal browser), style.css, brand/, samples/, contracts/
+relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri)
 invoices/             make_invoices.py e 5 PDF di esempio (il quinto per la console web)
 ```
 

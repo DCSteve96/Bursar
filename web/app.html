@@ -91,7 +91,8 @@
         <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
         <label><span>Agent account</span><input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
         <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
-        <label><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
+        <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (included)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
+        <label id="aiKeyRow"><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
         <label><span>Owner account (optional, approves above the threshold)</span><input id="owner" placeholder="you.testnet" autocomplete="off"></label>
         <label><span>Owner key (optional, full access)</span><input id="ownerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
       </div>
@@ -100,6 +101,9 @@
         <button id="demo" type="button" class="btn-ghost">Use the demo treasury</button>
         <button id="forget" type="button" class="btn-ghost">Forget keys</button>
         <span class="muted" style="font-size:14px;max-width:60ch">The agent key can only call <span class="mono">request_payment</span> on the treasury; it cannot move funds. Gas for this direct call comes from the agent account's own small balance (the CLI agent goes through a relayer instead).</span>
+      </div>
+      <div class="muted" style="font-size:14px;max-width:80ch;margin-top:16px"><b>Two ways to read.</b> With "Bursar reading" the page sends the invoice through Bursar's relay, which holds the NEAR AI Cloud key, forwards the bytes untouched and keeps nothing; the invoice is in transit on that relay before it enters the enclave. With your own key the invoice goes from this browser straight to the enclave and never passes through Bursar. The receipt and its checks are identical either way.</div>
+      <div hidden>
       </div>
     </div>
   </div>
@@ -114,7 +118,7 @@
       <div class="muted" style="margin-top:8px">The file is rendered to PNG in this browser; the model inside the TEE sees pixels, and its answer comes back signed.</div>
     </div>
     <div class="samples" style="margin-top:24px">
-      <div class="eyebrow muted" style="margin-bottom:12px">No API key? Load a reading recorded on 20 October 2026, with its real receipt from the enclave</div>
+      <div class="eyebrow muted" style="margin-bottom:12px">Or load a reading recorded on 20 October 2026, with its real receipt from the enclave</div>
       <div class="actions" style="margin:0">
         <button type="button" class="btn-ghost sample" data-file="01-acme-hosting-0923">Acme, 480 USDC</button>
         <button type="button" class="btn-ghost sample" data-file="02-designco-1107">DesignCo on Base, 1,250 USDC</button>
@@ -215,7 +219,12 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 const rpcOverride = q.get("rpc");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode"];
+// Bursar's reading relay (relay/worker.js) holds the NEAR AI Cloud key server-side and forwards the bytes untouched.
+// ?relay=https://... overrides it (local testing). Empty until one is deployed.
+const RELAY = (q.get("relay") || "").replace(/\/$/, "");
+const useOwnKey = () => settings.readMode === "own";
+const aiBase = () => useOwnKey() ? AI_BASE : `${RELAY}/v1`;
 const settings = {};
 function loadSettings() {
   for (const f of FIELDS) { try { const v = localStorage.getItem("bursar." + f); if (v !== null) $("#" + f).value = v; } catch {} }
@@ -223,6 +232,7 @@ function loadSettings() {
   if (q.get("network")) $("#network").value = q.get("network");
   if (q.get("agent")) $("#agent").value = q.get("agent");
   for (const f of FIELDS) settings[f] = $("#" + f).value.trim();
+  syncReadMode();
   reflectSettings();
 }
 function reflectSettings() {
@@ -236,6 +246,8 @@ function saveSettings() {
   loadTreasury();
   location.hash = "#read";
 }
+const syncReadMode = () => { $("#aiKeyRow").hidden = $("#readMode").value !== "own"; };
+$("#readMode").addEventListener("change", syncReadMode);
 $("#save").addEventListener("click", saveSettings);
 // The demo treasury from the README: a throwaway testnet deployment. The agent key is not filled in: paste your own, or
 // read the recorded samples below, which need no key at all.
@@ -371,16 +383,19 @@ Fields:
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
 - confidence: 0 to 1
 Return only the JSON object.`;
-const aiHeaders = () => settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
+const aiHeaders = () => useOwnKey() && settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
 const sha256hex = (s) => toHex(sha256(te.encode(s)));
 
 async function readInTee(pngPages, textFallback, step) {
+  if (useOwnKey() && !settings.aiKey) throw new Error("paste your NEAR AI Cloud key in Settings, or switch Reading to \"Bursar reading\"");
+  if (!useOwnKey() && !RELAY) throw new Error("Bursar reading is not available in this build yet: use your own NEAR AI Cloud key in Settings, or load a recorded reading below");
+  const AI = aiBase();
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)));
   step("attestation", "wait", "fetching the model attestation for a fresh nonce");
   let attestation = { error: "not fetched" };
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const r = await fetch(`${AI_BASE}/attestation/report?model=${encodeURIComponent(settings.model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
+      const r = await fetch(`${AI}/attestation/report?model=${encodeURIComponent(settings.model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
       attestation = r.ok ? await r.json() : { error: `attestation ${r.status}: ${(await r.text()).slice(0, 200)}` };
     } catch (e) { attestation = { error: String(e) }; } // a gateway hiccup answers without CORS headers: the browser sees a network error
     if (!attestation.error) break;
@@ -400,7 +415,7 @@ async function readInTee(pngPages, textFallback, step) {
   let r = null, responseBody = "", lastErr = "";
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      r = await fetch(`${AI_BASE}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
+      r = await fetch(`${AI}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
       responseBody = await r.text();
       if (r.ok || ![429, 502, 503, 504].includes(r.status)) break;
       lastErr = `gateway answered ${r.status}`;
@@ -418,7 +433,7 @@ async function readInTee(pngPages, textFallback, step) {
   let sig = null;
   for (let attempt = 0; attempt < 3 && !sig; attempt++) {
     try {
-      const s = await fetch(`${AI_BASE}/signature/${encodeURIComponent(completion.id)}?signing_algo=ecdsa`, { headers: aiHeaders() });
+      const s = await fetch(`${AI}/signature/${encodeURIComponent(completion.id)}?signing_algo=ecdsa`, { headers: aiHeaders() });
       if (s.ok) { const j = await s.json(); if (j.signature && j.text && j.signing_address) sig = j; }
     } catch {}
     if (!sig) await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));

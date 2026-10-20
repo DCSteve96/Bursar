@@ -1,0 +1,16 @@
+name = "bursar-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Origins allowed to call the relay, comma separated. "*" allows every page (fine for a demo, not for production).
+ALLOWED_ORIGINS = "https://dcsteve96.github.io"
+ALLOWED_MODELS = "z-ai/glm-5.3-flash"
+MAX_READS_PER_IP_PER_DAY = "20"
+MAX_READS_PER_DAY = "300"
+
+# The API key is a secret, never a var:  wrangler secret put NEAR_AI_API_KEY
+# Daily caps need a KV namespace:        wrangler kv namespace create LIMITS   then uncomment and paste the id
+# [[kv_namespaces]]
+# binding = "LIMITS"
+# id = "..."
