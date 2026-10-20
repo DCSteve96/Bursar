@@ -88,6 +88,16 @@ Ambiente usa e getta da faucet, chiavi generate nel container (perse quando il c
 - Due 502 "upstream request failed" dal gateway NEAR AI su 7 chiamate: `ai.ts` ora ritenta fino a 3 volte (2, 4, 6 secondi) su 429, 502, 503, 504. `agent.ts` rilegge `get_payment` fino a 5 volte se l'RPC risponde null subito dopo la transazione (successo con `payment: null` nel receipt del #4, poi corretto rilanciando).
 - Non rifatti qui: rifiuto DAO e transfer_failed (pagamenti 6 e 7 restano sul contratto `itlecew5`, citato nel README).
 
+### 2.6 Console web (20 ottobre, stessa sessione)
+
+Stefano vuole provare Bursar dal web senza mettere nulla sul suo Mac. Le pagine artifact di claude.ai non possono chiamare host esterni (niente RPC, niente NEAR AI), quindi la pagina vive nella repo e si pubblica con GitHub Pages.
+
+- `web/app.html`: file unico, nessun build. Fa tutto l'agente nel browser: pdf.js (cdnjs 4.10.38) rasterizza il PDF a PNG a 110 dpi ed estrae il testo; chiamata a NEAR AI Cloud con lo stesso prompt e lo stesso body di `ai.ts` (CORS aperto su `cloud-api.near.ai`, verificato con preflight); receipt identico a quello dell'agente; verifica in pagina con `@noble/curves` 2.4.0 e `@noble/hashes` 2.4.0 da jsdelivr (`+esm`): bytes, signed_text, recupero ECDSA, signer_kind, attestation signer e nonce, `report_data` letto a offset fisso 568..632 del quote TDX v4 (verificato contro `@phala/dcap-qvl` sulla fixture), extraction, completion_id, attestation_ref. `quote_tcb` è saltato nel browser (collateral Intel solo da CLI). Poi `request_payment` firmato nel browser con la chiave function-call dell'agente: borsh scritto a mano (Transaction + FunctionCall), ed25519 di noble, `send_tx` con `wait_until: EXECUTED_OPTIMISTIC`. Chiavi e API key in `localStorage`, con pulsante "Forget keys". La stessa dashboard di `index.html` in fondo.
+- Perché la chiamata diretta: dal browser non c'è relayer raggiungibile. Serve che l'agente abbia un po' di NEAR: 150 TGas costano circa 0,15 NEAR prepagati (`NotEnoughBalance` con 0,1), `setup.ts` ora gli lascia 0,5 NEAR e la chiave ha allowance 1 NEAR. L'agente attuale è stato ricaricato a 0,5 dal root.
+- Testato end to end in Chromium headless (Playwright, script in `app/.bursar/webtest.cjs`, non committato): fattura 1 -> #6 Blocked duplicate_invoice; nuova fattura `05-acme-hosting-1001.pdf` (Acme, AH-1001, 320 USDC, aggiunta a `make_invoices.py` apposta per il web) -> #7 Paid, tx `Ba9qpCqLAkQBsajtNCoVcufSH84F6nQywzx3kuyKm4b6`. Nessun errore in console. I PDF 1-4 non sono stati rigenerati (solo il 5 copiato), così i loro hash restano quelli dei pagamenti on chain.
+- Hosting: `.github/workflows/pages.yml` pubblica `web/` con GitHub Pages a ogni push su `main` o a mano (`workflow_dispatch`). Va abilitato una volta in Settings, Pages, source "GitHub Actions". Su una repo privata Pages richiede un piano a pagamento (Pro o Team); il sito pubblicato è comunque raggiungibile da chi ha l'URL, ma la pagina non contiene segreti: le chiavi le inserisce l'utente nel suo browser. Se il piano non lo permette, alternativa: repo pubblica solo per `web/`, oppure aprire il file in locale.
+- README: passo 9 "Do it all from a browser".
+
 ## 3. Decisioni prese
 
 - Separato da Epoch, sempre. Niente brand, niente Sui.

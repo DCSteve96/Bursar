@@ -101,4 +101,10 @@ invoice(os.path.join(a.out, "04-acme-hosting-0924-fraud.pdf"), "Acme Hosting", "
         note="Please note our new wallet. Pay immediately to avoid service interruption.",
         stamp="URGENT")
 
+# 5. A second normal invoice from the NEAR vendor, for the web console (not used by the README walkthrough) -> Paid
+invoice(os.path.join(a.out, "05-acme-hosting-1001.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
+        "AH-1001", "2026-11-20", "2026-12-05",
+        [("Dedicated server EU-West, December", "320.00")], "320.00",
+        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"])
+
 print("written to", a.out)

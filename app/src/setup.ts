@@ -68,7 +68,7 @@ export async function setup(o: Opts) {
 
   // 1. accounts
   const treasury = await create(names.treasury, o.dao ? 8 : 6); // ~4.7 NEAR of contract storage + DAO bonds
-  const agent = await create(names.agent, 0.1);
+  const agent = await create(names.agent, 0.5); // enough gas for a few direct calls from the web console; the relayer path needs none
   const executor = await create(names.executor, 1);
   const vendorHosting = await create(names.vendorHosting, 0.1);
   const vendorLegal = await create(names.vendorLegal, 0.1);

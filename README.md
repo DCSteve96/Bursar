@@ -150,6 +150,8 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 **8. Dashboard.** Open `web/index.html` in a browser (a static file, no build) and paste the treasury account. See: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC. Hostable on GitHub Pages as is.
 
+**9. Do it all from a browser.** `web/app.html` is the agent as a web page: no server, no build. Open it, fill Settings (treasury, agent account, the agent's function-call key from `~/.near-credentials/testnet/agent.you.testnet.json`, your NEAR AI Cloud key; all kept in that browser's local storage) and drop `invoices/samples/05-acme-hosting-1001.pdf` on it. See: the PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, the enclave's answer, then the same receipt checks as step 6 (minus the Intel collateral check) and a "Download receipt JSON" link. Press "Request payment": the page signs `request_payment` with the agent key (plain borsh plus ed25519, no NEAR library) and shows the contract's decision, `#7 Paid` on the live contract, with the transaction link. Drop invoice 4 instead: `Blocked payout_changed`. The agent account needs a little NEAR for gas on this direct path (`setup` leaves it 0.5); the CLI agent goes through the relayer and needs none. The workflow in `.github/workflows/pages.yml` publishes `web/` with GitHub Pages (enable Pages with source "GitHub Actions" in the repository settings).
+
 **9. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. With `NEAR_NETWORK=mainnet`, real USDC in the treasury and a vendor on Base, `npm run executor -- --once` quotes USDC NEAR to USDC Base with the vendor's address as recipient, calls `settle`, and marks the payment `Settled` with the Base transaction hash.
 
 **Unit tests:** `cd contracts/policy && cargo test` (11 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
@@ -181,7 +183,8 @@ app/src/mcp.ts        MCP server (submit_invoice, list_payments, explain_decisio
 app/src/setup.ts      one-shot environment setup
 app/test/             vitest: receipt tampering, offline parser
 web/index.html        static dashboard, reads the contract over RPC
-invoices/             make_invoices.py and four fictional sample invoices
+web/app.html          the agent as a web page: PDF to PNG, enclave call, receipt checks, request_payment signed in the browser
+invoices/             make_invoices.py and five fictional sample invoices
 ```
 
 ## Honest limits
