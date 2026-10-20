@@ -110,7 +110,7 @@
           <span class="k">orders</span><span class="v">what the company agreed to buy: hosting 500 USDC a month, two purchase orders. An invoice outside them waits for you</span>
           <span class="k">agent</span><span class="v">a sub-account with one key that can only call <span class="mono">request_payment</span></span>
           <span class="k">vendors</span><span class="v">Acme Hosting and Legal Partners on NEAR, DesignCo on Base, so the sample invoices and the recorded readings apply</span>
-          <span class="k">not here</span><span class="v">a DAO (the README deployment shows the Sputnik path) and cross-chain settlement (NEAR Intents runs on mainnet only)</span>
+          <span class="k">later</span><span class="v">a Sputnik DAO with your collaborators as council, from Settings; cross-chain settlement runs on mainnet only (NEAR Intents)</span>
         </div>
       </div>
     </div>
@@ -229,6 +229,7 @@
     <h3 class="heading-sm" style="margin:0 0 12px">Waiting for approval</h3>
     <div id="attnErr" class="err" hidden></div>
     <div class="wrap"><table id="attnApproval"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>why it waits</th><th>flags</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="actions" id="attnDaoRow" hidden style="margin-top:12px;align-items:center"><button id="attnSync" type="button" class="btn-ghost small">Sync with the DAO</button><span class="muted" style="font-size:14px;max-width:60ch">Sputnik does not call back when the council rejects or a proposal expires: syncing asks the DAO and cancels those payments, releasing their budget.</span></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Refused by policy</h3>
     <div class="wrap"><table id="attnBlocked"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>reason</th><th>flags</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Cross-chain, waiting for the executor</h3>
@@ -373,6 +374,22 @@
       <div id="invOut" hidden style="margin-top:16px">
         <label><span>Invite link (contains the key: share it only with the collaborator)</span><input id="invLink" readonly></label>
         <div class="actions" style="margin-top:12px;align-items:center"><button id="invCopy" type="button" class="btn-inverse">Copy link</button><a id="invMail" class="btn btn-ghost" href="#">Send by email</a><span class="muted" style="font-size:14px" id="invNote"></span></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:24px" id="govCard">
+      <div class="eyebrow muted" style="margin-bottom:8px">Governance</div>
+      <div id="govNone">
+        <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:70ch">Without a DAO, the owner or an approver decides what is held. A Sputnik DAO gives the company a council: every held payment becomes a proposal the council votes on, in this console or in Trezu on mainnet. The treasury keeps a little NEAR for the proposal bonds.</p>
+        <div class="grid cols-2">
+          <label><span>Council (the owner is always in)</span><div id="govCouncil" style="display:flex;flex-direction:column;gap:6px;padding-top:6px;font-size:14px"></div></label>
+          <label><span>More council accounts, comma separated</span><input id="govExtra" placeholder="cfo.testnet, partner.testnet" autocomplete="off"></label>
+        </div>
+        <div class="actions" style="margin-top:16px;align-items:center"><button id="govCreate" type="button" class="btn-signal">Create the DAO</button><span class="muted" style="font-size:14px;max-width:50ch">Sputnik v2 factory, 6 NEAR deposit on testnet. More than half of the council approves a proposal.</span></div>
+        <ul class="log" id="govSteps" style="margin-top:16px"></ul>
+      </div>
+      <div id="govHas" hidden>
+        <div class="kv" id="govKv"></div>
+        <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">Held payments open a proposal on this DAO. Council members vote in Attention; on mainnet the same proposals appear in Trezu. Adding council members later is itself a DAO proposal (not in this console yet).</p>
       </div>
     </div>
     <div id="sErr" class="err" hidden></div>
@@ -556,9 +573,10 @@ async function sendTx({ signerId, secretKey, receiverId, actions, gasTgas }) {
   try {
     res = await rpc("send_tx", { signed_tx_base64: b64(signed), wait_until: "EXECUTED_OPTIMISTIC" });
   } catch (e) {
-    // The RPC node gives up waiting after a few seconds on a busy network; the transaction is usually executed anyway.
-    if (!/timeout/i.test(e.message)) throw e;
-    res = await waitForTx(hash, signerId);
+    // The RPC node gives up waiting after a few seconds on a busy network (a Timeout answer, or a dropped
+    // connection that the browser reports as "Failed to fetch"); the transaction is usually executed anyway.
+    if (!/timeout|failed to fetch|network|load failed/i.test(e.message)) throw e;
+    try { res = await waitForTx(hash, signerId); } catch (e2) { throw new Error(`${e.message}; ${e2.message}`); }
   }
   const st = res.status ?? {};
   if (st.Failure) throw new Error("transaction failed: " + JSON.stringify(st.Failure).slice(0, 400));
@@ -902,10 +920,25 @@ async function loadTreasury() {
       view(t, "list_orders", { vendor_id: null }).catch(() => []), view(t, "get_company").catch(() => null), view(t, "list_operators").catch(() => []),
     ]);
     state = { stats, limits, roles, vendors, payments, orders, company, operators };
+    await loadDao();
     renderOverview(); renderAttention(); renderVendors(); renderOrders(); renderAnalytics(); renderSettings();
   } catch (e) { $("#tErr").textContent = `could not read ${settings.treasury} on ${settings.network}: ${e.message}`; $("#tErr").hidden = false; }
 }
 const held = () => state.payments.filter((p) => p.status === "Approval");
+const dao = () => state.roles?.[3] || null;
+const SPUTNIK = { testnet: "sputnik-v2.testnet", mainnet: "sputnik-dao.near" };
+let daoInfo = { council: [], proposals: {} };
+async function loadDao() {
+  daoInfo = { council: [], proposals: {} };
+  if (!dao()) return;
+  try {
+    const policy = await view(dao(), "get_policy");
+    const role = (policy.roles || []).find((r) => r.name === "council") || (policy.roles || []).find((r) => r.kind && r.kind.Group);
+    daoInfo.council = role?.kind?.Group || [];
+  } catch {}
+  await Promise.all(held().filter((p) => p.dao_proposal_id !== null).map(async (p) => { try { daoInfo.proposals[p.id] = await view(dao(), "get_proposal", { id: p.dao_proposal_id }); } catch {} }));
+}
+const isCouncil = () => !!settings.ownerKey && daoInfo.council.includes(settings.owner);
 function renderOverview() {
   const { stats, limits, roles, payments, vendors, company } = state;
   $("#companyName").textContent = company?.name || settings.label || settings.treasury;
@@ -922,7 +955,8 @@ function renderOverview() {
 }
 function renderAttention() {
   const canApprove = canAct("approve") && !(state.roles?.[3]);
-  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : `<span class="muted">${state.roles?.[3] ? "the DAO council decides" : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
+  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote reject</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
+  $("#attnDaoRow").hidden = !(dao() && !!settings.ownerKey && held().some((p) => p.dao_proposal_id !== null));
   $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
   $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
 }
@@ -931,6 +965,12 @@ document.addEventListener("click", async (e) => {
   const id = Number(b.dataset.id), act = b.dataset.act;
   b.disabled = true;
   try {
+    if (act === "voteApprove" || act === "voteReject") {
+      if (!isCouncil()) throw new Error("only a council member with its key here can vote");
+      await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: dao(), method: "act_proposal", args: { id: Number(b.dataset.proposal), action: act === "voteApprove" ? "VoteApprove" : "VoteReject" }, gasTgas: 300 });
+      if (act === "voteReject") { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id }, gasTgas: 100 }); } catch {} }
+      await loadTreasury(); return;
+    }
     const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner" }[act];
     if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
     const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", removeOp: "remove_operator" }[act];
@@ -939,6 +979,13 @@ document.addEventListener("click", async (e) => {
     await loadTreasury();
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
   finally { b.disabled = false; }
+});
+$("#attnSync").addEventListener("click", async () => {
+  $("#attnErr").hidden = true; const b = $("#attnSync"); b.disabled = true;
+  try {
+    for (const p of held().filter((p) => p.dao_proposal_id !== null)) await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id: p.id }, gasTgas: 100 });
+    await loadTreasury();
+  } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; } finally { b.disabled = false; }
 });
 function renderVendors() {
   $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
@@ -997,6 +1044,12 @@ function renderSettings() {
   $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || "";
   $("#lCap").value = Number(BigInt(limits.per_payment_cap) / 1000000n); $("#lDay").value = Number(BigInt(limits.daily_cap) / 1000000n); $("#lThr").value = Number(BigInt(limits.approval_threshold) / 1000000n); $("#lStrict").value = String(!!limits.require_orders);
   $("#rolesLine").textContent = `owner ${roles[0]}, agent ${roles[1]}, executor ${roles[2]}, DAO ${roles[3] ?? "none"}, token ${roles[4]}`;
+  $("#govNone").hidden = !!dao(); $("#govHas").hidden = !dao();
+  if (dao()) {
+    $("#govKv").innerHTML = [["dao", dao()], ["council", daoInfo.council.join(", ") || "(could not read the policy)"], ["open proposals", held().filter((p) => p.dao_proposal_id !== null).length]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+  } else {
+    $("#govCouncil").innerHTML = `<label style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" checked disabled style="width:auto"> ${esc(roles[0])} (owner)</label>` + operators.map(([a]) => `<label style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" class="govMember" value="${esc(a)}" ${state.operators.length <= 3 ? "checked" : ""} style="width:auto"> ${esc(a)}</label>`).join("");
+  }
   $("#opsTable tbody").innerHTML = operators.map(([a, r]) => `<tr><td class="mono">${esc(a)}</td><td>${r.approve ? "yes" : "no"}</td><td>${r.manage_vendors ? "yes" : "no"}</td><td>${r.manage_orders ? "yes" : "no"}</td><td class="acts">${settings.ownerKey ? `<button type="button" class="btn-ghost small act" data-act="removeOp" data-id="${esc(a)}">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no operators: only the owner acts</td></tr>`;
 }
 async function ownerCall(method, args, gasTgas = 30) {
@@ -1007,6 +1060,55 @@ const onErr = (e) => { $("#sErr").textContent = e.message; $("#sErr").hidden = f
 $("#cSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_company", { name: $("#cName").value.trim(), description: $("#cDesc").value.trim() }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
+// ---------- governance: a Sputnik DAO for the company, from the console ----------
+async function nearBalance(id) { const r = await rpc("query", { request_type: "view_account", finality: "optimistic", account_id: id }); return BigInt(r.amount); }
+/** Testnet only: the faucet funds new accounts, so a helper account is created and emptied into the owner. */
+async function topUpFromFaucet(to, step) {
+  const helper = `bursar-fund-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`;
+  const key = newKey();
+  step("funds", "wait", `asking the testnet faucet for 10 NEAR through ${helper}`);
+  const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: helper, newAccountPublicKey: key.pubStr }) });
+  if (!f.ok) throw new Error(`faucet ${f.status}: ${(await f.text()).slice(0, 200)}`);
+  for (let i = 0; i < 20 && !(await accountExists(helper)); i++) await new Promise((r) => setTimeout(r, 1500));
+  const bal = await nearBalance(helper);
+  await sendTx({ signerId: helper, secretKey: key.secretKey, receiverId: to, actions: [A.transfer(bal - NEAR(0.1))] });
+  step("funds", "ok", `${(Number(bal - NEAR(0.1)) / 1e24).toFixed(1)} NEAR moved to ${to}`);
+}
+$("#govCreate").addEventListener("click", async () => {
+  const step = stepper($("#govSteps")); const btn = $("#govCreate"); btn.disabled = true;
+  try {
+    if (!settings.owner || !settings.ownerKey) throw new Error("only the owner creates the DAO: the owner key is not in Settings");
+    const factory = SPUTNIK[settings.network];
+    const council = [settings.owner, ...Array.from(document.querySelectorAll(".govMember:checked")).map((c) => c.value), ...$("#govExtra").value.split(",").map((x) => x.trim()).filter(Boolean)];
+    const name = `bursar-${settings.owner.split(".")[0]}`.replace(/[^a-z0-9-]/g, "-").slice(0, 40);
+    const daoAccount = `${name}.${factory}`;
+    const need = NEAR(6) + NEAR(2.5); // deposit, bonds for the treasury, gas
+    let bal = await nearBalance(settings.owner);
+    if (bal < need) {
+      if (settings.network !== "testnet") throw new Error(`the owner needs about 8.5 NEAR (has ${(Number(bal) / 1e24).toFixed(2)})`);
+      await topUpFromFaucet(settings.owner, step);
+      bal = await nearBalance(settings.owner);
+      if (bal < need) throw new Error("still not enough NEAR after the faucet; press again");
+    }
+    if (await accountExists(daoAccount)) step("dao", "ok", `${daoAccount} already exists`);
+    else {
+      step("dao", "wait", `creating ${daoAccount} with council ${council.join(", ")}`);
+      const args = b64(te.encode(JSON.stringify({ config: { name, purpose: `${state.company?.name || settings.label || "Bursar"} approvals`, metadata: "" }, policy: council })));
+      const t = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: factory, method: "create", args: { name, args }, gasTgas: 150, deposit: NEAR(6) });
+      for (let i = 0; i < 20 && !(await accountExists(daoAccount)); i++) await new Promise((r) => setTimeout(r, 1500));
+      step("dao", "ok", `${daoAccount} live, ${council.length} council members`, t.hash);
+    }
+    step("bonds", "wait", "leaving 2 NEAR in the treasury for proposal bonds");
+    const t2 = await sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, actions: [A.transfer(NEAR(2))] });
+    step("bonds", "ok", "2 NEAR in the treasury", t2.hash);
+    step("roles", "wait", "pointing the treasury at the DAO");
+    const t3 = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "set_roles", args: { agent: null, executor: null, dao: daoAccount, dao_bond: null }, gasTgas: 30 });
+    step("roles", "ok", "from now on held payments open a proposal the council votes on", t3.hash);
+    await loadTreasury();
+  } catch (e) { step("error", "fail", e.message); }
+  finally { btn.disabled = false; }
+});
+
 // ---------- invites: an account with a key limited to the role, and a link that carries it ----------
 const b64url = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const unb64url = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
