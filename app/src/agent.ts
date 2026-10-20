@@ -123,7 +123,12 @@ export async function processInvoice(pdfPath: string, opts: { offline?: boolean;
   const claim = buildClaim(read, await matchVendor(extraction));
 
   const sent = opts.direct ? await requestPaymentDirect(claim) : await requestPaymentViaRelayer(claim);
-  const payment = await view<Payment | null>("get_payment", { id: sent.paymentId });
+  // The view may lag the transaction by a block on some RPC nodes: retry briefly instead of recording null.
+  let payment: Payment | null = null;
+  for (let i = 0; i < 5 && !payment; i++) {
+    payment = await view<Payment | null>("get_payment", { id: sent.paymentId });
+    if (!payment) await new Promise((r) => setTimeout(r, 1500));
+  }
 
   await mkdir(join(config.state, "receipts"), { recursive: true });
   await writeFile(

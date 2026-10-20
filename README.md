@@ -34,13 +34,13 @@ The AI never chooses an address. The executor cannot redirect funds. The owner i
 
 | | |
 |---|---|
-| Policy contract | `treasury.bursar-itlecew5.testnet` |
-| Agent (one function-call key) | `agent.bursar-itlecew5.testnet` |
-| Executor / relayer | `executor.bursar-itlecew5.testnet` |
-| DAO (Sputnik v2) | `bursar-bursar-itlecew5.sputnik-v2.testnet` |
-| Test USDC | `tusdc.bursar-itlecew5.testnet` |
+| Policy contract | `treasury.bursar-c34d05b8.testnet` |
+| Agent (one function-call key) | `agent.bursar-c34d05b8.testnet` |
+| Executor / relayer | `executor.bursar-c34d05b8.testnet` |
+| DAO (Sputnik v2) | `bursar-bursar-c34d05b8.sputnik-v2.testnet` |
+| Test USDC | `tusdc.bursar-c34d05b8.testnet` |
 
-Payments 1 to 7 on that contract are the walkthrough below, run end to end on 20 October 2026: paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate, rejected by the DAO and cancelled, and a transfer to an unregistered account rolled back. Open `web/index.html?network=testnet&treasury=treasury.bursar-itlecew5.testnet` to see them.
+Payments 1 to 5 on that contract are the walkthrough below, run end to end on 20 October 2026 with the invoices read by NEAR AI Cloud inside the TEE (every `attestation_ref` starts with `nearai:`): paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate. Open `web/index.html?network=testnet&treasury=treasury.bursar-c34d05b8.testnet` to see them. The two failure paths of step 4, a DAO rejection and a rolled-back transfer, are payments 6 and 7 on the earlier deployment `treasury.bursar-itlecew5.testnet`.
 
 Mainnet deployment with real USDC and NEAR Intents: see the demo post (link added at submission).
 
@@ -92,9 +92,9 @@ npm run dev status
 ```
 See: `#3 ... Paid`, and the vendor's tUSDC balance up by 9,800. On mainnet the same proposal shows up in Trezu and is approved with one click.
 
-If the council votes `VoteReject` instead, Sputnik does not call anyone back. Run `npm run dev sync`: the contract asks the DAO for the proposal status and, only on the DAO's own answer, cancels the payment and releases its budget. See: `#6 dao#1: Rejected` and `#6 ... Cancelled dao_rejected` in `status` (payment 6 on the live contract is exactly that). The executor runs this check on every tick.
+If the council votes `VoteReject` instead, Sputnik does not call anyone back. Run `npm run dev sync`: the contract asks the DAO for the proposal status and, only on the DAO's own answer, cancels the payment and releases its budget. See: `#6 dao#1: Rejected` and `#6 ... Cancelled dao_rejected` in `status` (payment 6 on `treasury.bursar-itlecew5.testnet` is exactly that). The executor runs this check on every tick.
 
-A vendor whose NEAR account is not registered on the token contract makes `ft_transfer` fail. The contract's callback puts the money back: `Blocked transfer_failed`, balance unchanged (payment 7 on the live contract).
+A vendor whose NEAR account is not registered on the token contract makes `ft_transfer` fail. The contract's callback puts the money back: `Blocked transfer_failed`, balance unchanged (payment 7 on `treasury.bursar-itlecew5.testnet`).
 
 **5. Send a duplicate.**
 
@@ -134,12 +134,12 @@ NEAR_AI_API_KEY=... npm run dev read ../invoices/samples/04-acme-hosting-0924-fr
 ```
 See: the extraction as JSON (`"flags": ["new_payment_details", "urgency"]`), the claim the agent would have sent, the receipt path `app/.bursar/receipts/read-04-acme-hosting-0924-fraud.json`, and the same check list as above minus `on_chain`. Nothing is submitted: the vendor id is the model's guess, and only the contract matches it against the allowlist.
 
-Without any key at all, check a receipt from a real run (invoice 1, read by `z-ai/glm-5.3-flash` on 2026-10-20, kept in the repo as a test fixture):
+Without any key at all, check the receipt behind payment #1 on the live contract (invoice 1, read by `z-ai/glm-5.3-flash` on 2026-10-20, kept in the repo as a test fixture):
 
 ```bash
-npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json --no-chain
+BURSAR_TREASURY=treasury.bursar-c34d05b8.testnet npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json
 ```
-See: the ten `ok` lines above, `quote_tcb` included (the Intel collateral is fetched live), and no `on_chain` line. The file holds the exact request (with the invoice page as PNG), the exact response, the signature and the attestation report with the TDX quote and GPU evidence: 444 KB, nothing secret.
+See: all the `ok` lines above, `quote_tcb` included (the Intel collateral is fetched live) and `on_chain` (the reference is read from the contract). The file holds the exact request (with the invoice page as PNG), the exact response, the signature and the attestation report with the TDX quote and GPU evidence: 444 KB, nothing secret.
 
 **7. Drive it from an assistant (MCP).** Add to Claude Desktop, Claude Code or Codex:
 

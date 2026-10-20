@@ -148,7 +148,9 @@ export async function setup(o: Opts) {
     const hasFc = keys.keys.some((k: any) => k.access_key.permission !== "FullAccess");
     if (!hasFc) {
       const fc = KeyPair.fromRandom("ed25519");
-      await agent.addFunctionCallAccessKey({ publicKey: fc.getPublicKey(), contractId: names.treasury, methodNames: ["request_payment"], allowance: NEAR(0.05) });
+      // The allowance only caps gas paid from the agent's own balance (0.1 NEAR here); it is not spending power.
+      // 1 NEAR lets the key also sign direct calls (web page, `--direct`) when the relayer is not running.
+      await agent.addFunctionCallAccessKey({ publicKey: fc.getPublicKey(), contractId: names.treasury, methodNames: ["request_payment"], allowance: NEAR(1) });
       const full = keys.keys.find((k: any) => k.access_key.permission === "FullAccess");
       await saveKey(o.network, names.agent, fc);
       if (full) {

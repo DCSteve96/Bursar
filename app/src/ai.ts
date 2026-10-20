@@ -134,12 +134,19 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
     stream: false,
   };
   const requestBody = JSON.stringify(body);
-  const r = await fetch(`${config.aiBaseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { ...headers(), "content-type": "application/json" },
-    body: requestBody,
-  });
-  const responseBody = await r.text();
+  // The gateway answers 502 now and then ("upstream request failed"): retry a few times before giving up.
+  let r!: Response;
+  let responseBody = "";
+  for (let attempt = 0; ; attempt++) {
+    r = await fetch(`${config.aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: requestBody,
+    });
+    responseBody = await r.text();
+    if (r.ok || attempt >= 3 || ![429, 502, 503, 504].includes(r.status)) break;
+    await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
+  }
   if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 500)}`);
   const completion = JSON.parse(responseBody);
   const text: string = completion.choices?.[0]?.message?.content ?? "{}";
