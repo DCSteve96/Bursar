@@ -1,13 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" width="260" height="64" role="img" aria-label="Bursar">
-  <!-- Horizontal lockup: the mark and the wordmark. The wordmark is drawn as paths-free text and expects Space Grotesk; fallback is any grotesk. -->
+  <!-- Horizontal lockup: the mark and the wordmark. The wordmark expects Space Grotesk; the fallback is any grotesk. -->
   <rect width="64" height="64" rx="4" fill="#000"/>
-  <g fill="#fff">
-    <rect x="18" y="14" width="8" height="36"/>
-    <rect x="18" y="14" width="24" height="7"/>
-    <rect x="35" y="14" width="7" height="21"/>
-    <rect x="18" y="28" width="21" height="7"/>
-    <rect x="18" y="43" width="21" height="7"/>
-  </g>
-  <rect x="39" y="28" width="7" height="22" fill="#00ec97"/>
+  <rect x="14" y="16" width="36" height="8" fill="#fff"/>
+  <rect x="14" y="28" width="24" height="8" fill="#00ec97"/>
+  <rect x="14" y="40" width="36" height="8" fill="#fff"/>
   <text x="84" y="42" font-family="Space Grotesk, FK Grotesk, Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="4" fill="#000">BURSAR</text>
 </svg>
