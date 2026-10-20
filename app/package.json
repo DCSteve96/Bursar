@@ -1,0 +1,35 @@
+{
+  "name": "bursar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bursar: an AI treasurer that pays invoices within limits it cannot change. Built for NEAR HACKATHON.",
+  "bin": {
+    "bursar": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "tsx src/cli.ts",
+    "agent": "tsx src/cli.ts agent",
+    "executor": "tsx src/cli.ts executor",
+    "relayer": "tsx src/cli.ts relayer",
+    "mcp": "tsx src/cli.ts mcp",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "borsh": "^1.0.0",
+    "near-api-js": "^7.3.1",
+    "openai": "^4.100.0",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

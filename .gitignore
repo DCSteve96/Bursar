@@ -1,0 +1,15 @@
+# dependencies and build output
+node_modules/
+dist/
+target/
+# local state: rasterized pages, AI receipts
+app/.bursar/
+# environment files written by `bursar setup` (account names only, but keep them local)
+.env.*
+!.env.example
+# the inbox is runtime input; the samples are kept
+invoices/inbox/
+# never credentials
+.near-credentials/
+*.log
+.DS_Store
