@@ -115,6 +115,16 @@ Stefano ha chiesto un'estetica "intuitiva ed esplosiva" studiando NEAR. Riferime
 - Resta scoperto per chi non ha chiavi: premere "Request payment" richiede la chiave dell'agente. Opzione discussa: mettere nella pagina la chiave function-call dell'agente demo (potere limitato a `request_payment` sul treasury demo, 0,5 NEAR di gas, fornitori solo nostri): dimostrerebbe la tesi "anche con la chiave dell'agente non si ruba", ma va contro la lettera della regola 5 (niente segreti nella repo). Decisione a Stefano.
 - Per i test in Chromium la pagina va servita via HTTP (le `fetch` dei sample non funzionano da `file://`): `app/.bursar/sampletest.cjs` tira su un server sull'IP del container e passa `bypass` al proxy di Playwright.
 
+### 2.9 Il giudice come cliente: onboarding dal browser (20 ottobre, stessa sessione)
+
+Idea di Stefano: i giudici provano Bursar come clienti esterni. Fatto nella console, banda "[ 00 / START ] Create my treasury": il browser diventa l'azienda.
+
+- Flusso (tutto con chiavi generate nel browser e salvate in `localStorage`, scaricabili come JSON): 1) account root `bursar-<8hex>.testnet` dal faucet `helper.nearprotocol.com` (10 NEAR, CORS aperto); 2) una transazione verso `treasury.<root>` con CreateAccount, Transfer 4,5 NEAR, AddKey full, DeployContract (wasm da `web/contracts/bursar_policy.wasm`, 303 KB) e `new` con `owner`=root, `agent`=`agent.<root>`, `executor`=root, `dao`=null, usdc = `tusdc.bursar-c34d05b8.testnet` (mint aperto, condiviso), caps come il README; 3) `agent.<root>` con 0,5 NEAR e una sola function-call key (allowance 1 NEAR, solo `request_payment`); 4) su tUSDC: `mint(treasury, 0)` per registrarlo, `mint(root, 15000)`, `ft_transfer_call` al treasury; 5) `add_vendor` x3 con gli stessi payout dei receipt registrati, così le letture registrate si possono rinviare al nuovo treasury e il contratto decide da capo. Costo circa 6 NEAR dei 10 del faucet. Durata circa un minuto.
+- Codifica borsh delle azioni scritta a mano in `app.html` (CreateAccount, DeployContract, FunctionCall, Transfer, AddKey full e function-call); nonce tenuto in pagina per le transazioni consecutive; `b64` a blocchi (il wasm faceva esplodere lo stack con `String.fromCharCode(...)`).
+- Contratto: senza DAO, sopra soglia il pagamento va in `Approval` e lo approva il proprietario (`approve_payment` accetta il DAO se c'è, altrimenti l'owner). Prima senza DAO pagava direttamente. 13 unit test. Firme invariate. Il treasury demo `c34d05b8` ha il wasm vecchio (ha la DAO, comportamento identico); non rideployato. La console mostra "Approve as the owner" quando il pagamento è in Approval senza proposta DAO e la chiave owner è nel browser.
+- Testato end to end in Chromium (`app/.bursar/onboard.cjs`): account `bursar-5fd18e08.testnet` creato dal browser, tre letture registrate inviate: Legal Partners #1 Approval, frode #2 Blocked payout_changed, Acme #3 Paid; nessun errore in console. Account di prova creati e abbandonati durante i test: `bursar-ccf4eed2.testnet` (10 NEAR, mai usato), `bursar-5fd18e08.testnet`, `bursar-3069b91a.testnet` (su questo anche "Approve as the owner": #1 Paid).
+- README: passo 9 riscritto come "Be the customer". Resta fuori: DAO (6 NEAR di deposito non ci stanno nei 10 del faucet) e Intents.
+
 ## 3. Decisioni prese
 
 - Separato da Epoch, sempre. Niente brand, niente Sui.

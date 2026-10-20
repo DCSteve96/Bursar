@@ -29,7 +29,7 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 ## Struttura
 
 ```
-contracts/policy      contratto di policy, Rust, near-sdk 5 (7 unit test)
+contracts/policy      contratto di policy, Rust, near-sdk 5 (13 unit test)
 contracts/test-usdc   NEP-141 usa e getta per testnet, con mint aperto
 app/src/              TypeScript, near-api-js 7
   config.ts           tutta la configurazione da env; asset id USDC per chain (Intents)

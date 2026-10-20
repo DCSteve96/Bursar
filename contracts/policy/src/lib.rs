@@ -390,11 +390,15 @@ impl Bursar {
                 self.reserve(&claim.vendor_id, amount);
                 let key = Self::invoice_key(&claim.vendor_id, &claim.invoice_number);
                 self.invoice_index.insert(key);
-                if amount >= self.limits.approval_threshold && self.dao.is_some() {
+                if amount >= self.limits.approval_threshold {
+                    // Above the threshold a human decides: the DAO council through a Sputnik proposal,
+                    // or the owner directly when the company has no DAO.
                     p.status = Status::Approval;
                     self.payments.insert(id, p);
                     self.emit("payment_needs_approval", &id.to_string());
-                    self.open_dao_proposal(id, amount, &claim.vendor_id);
+                    if self.dao.is_some() {
+                        self.open_dao_proposal(id, amount, &claim.vendor_id);
+                    }
                     id
                 } else {
                     self.execute(p);
@@ -406,10 +410,12 @@ impl Bursar {
 
     // ----- dao -----
 
-    /// Called by the DAO when the council approves the proposal.
+    /// Called by the DAO when the council approves the proposal, or by the owner when there is no DAO.
     pub fn approve_payment(&mut self, id: u64) {
-        let dao = self.dao.clone().expect("no dao");
-        require!(env::predecessor_account_id() == dao, "only the dao");
+        match &self.dao {
+            Some(dao) => require!(env::predecessor_account_id() == *dao, "only the dao"),
+            None => require!(env::predecessor_account_id() == self.owner, "only the owner"),
+        }
         let p = self.payments.get(&id).cloned().expect("unknown payment");
         require!(p.status == Status::Approval, "not waiting for approval");
         self.emit("payment_approved", &id.to_string());
@@ -889,6 +895,25 @@ mod tests {
         let id = c.request_payment(claim("hosting", "2210", 3_000_000_000, Payout::Near { account: accounts(5) }));
         assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
         testing_env!(ctx(accounts(3)).build());
+        c.approve_payment(id);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+    }
+
+    #[test]
+    fn without_a_dao_the_owner_approves_above_threshold() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000));
+        testing_env!(ctx(accounts(4)).build());
+        let _ = c.ft_on_transfer(accounts(0), U128(15_000_000_000), "".into());
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "2210", 3_000_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
+        assert_eq!(c.get_payment(id).unwrap().dao_proposal_id, None);
+        // the agent cannot approve its own request
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err());
+        testing_env!(ctx(accounts(0)).build());
         c.approve_payment(id);
         assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
     }

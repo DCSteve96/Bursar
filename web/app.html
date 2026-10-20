@@ -51,6 +51,36 @@
 
 <div class="ticker" aria-hidden="true"><span>Read in a TEE <b>✳</b></span><span>The contract decides <b>✳</b></span><span>No keys in the AI <b>✳</b></span><span>Every decision on chain <b>✳</b></span><span>Receipts anyone can verify <b>✳</b></span><span>Read in a TEE <b>✳</b></span><span>The contract decides <b>✳</b></span><span>No keys in the AI <b>✳</b></span><span>Every decision on chain <b>✳</b></span><span>Receipts anyone can verify <b>✳</b></span></div>
 
+<section class="band" id="start">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ 00 / START ]</div><h2 class="heading">Your own treasury on testnet, in one click.</h2></div>
+    <div class="grid cols-2">
+      <div class="card">
+        <p style="margin:0 0 16px">This browser becomes the company: it asks the testnet faucet for an account, deploys the policy contract, mints test USDC, registers three vendors and creates an agent with one function-call key. Every key is generated here and stays here. About a minute.</p>
+        <div class="actions" style="margin:0;align-items:center">
+          <button id="create" type="button" class="btn-signal">Create my treasury</button>
+          <span class="muted" style="font-size:14px;max-width:46ch">Then load a recorded reading below, or drop a PDF with your own NEAR AI Cloud key, and watch your contract decide.</span>
+        </div>
+        <ul class="log" id="createSteps" style="margin-top:24px"></ul>
+        <div id="createErr" class="err" hidden></div>
+        <div id="created" hidden style="margin-top:24px">
+          <div class="kv" id="createdKv"></div>
+          <div class="actions" style="margin-top:16px"><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="eyebrow muted" style="margin-bottom:12px">What you get</div>
+        <div class="kv">
+          <span class="k">treasury</span><span class="v">the policy contract, owned by your new account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, owner approval above 2,000</span>
+          <span class="k">agent</span><span class="v">a sub-account with one key that can only call <span class="mono">request_payment</span></span>
+          <span class="k">vendors</span><span class="v">Acme Hosting and Legal Partners on NEAR, DesignCo on Base, so the sample invoices and the recorded readings apply</span>
+          <span class="k">not here</span><span class="v">a DAO (the README deployment shows the Sputnik path) and cross-chain settlement (NEAR Intents runs on mainnet only)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="band" id="settings">
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ SETTINGS ]</div><div class="muted">Kept in this browser's local storage only. Nothing is sent anywhere but the NEAR RPC and NEAR AI Cloud.</div></div>
@@ -62,6 +92,8 @@
         <label><span>Agent account</span><input id="agent" placeholder="agent.you.testnet" autocomplete="off"></label>
         <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
         <label><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
+        <label><span>Owner account (optional, approves above the threshold)</span><input id="owner" placeholder="you.testnet" autocomplete="off"></label>
+        <label><span>Owner key (optional, full access)</span><input id="ownerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
       </div>
       <div class="actions" style="margin-top:24px;align-items:center">
         <button id="save" type="button" class="btn-signal">Save</button>
@@ -143,6 +175,7 @@
           <div class="eyebrow muted">Decision <span id="decId" class="chip"></span> <span id="decReason" class="chip bad" hidden></span></div>
           <div id="decStatus" class="stamp"></div>
           <div id="decWhy" class="sub" style="margin-top:16px;max-width:60ch"></div>
+          <div class="actions" id="approveRow" hidden style="margin-top:16px;align-items:center"><button id="approve" type="button" class="btn-inverse">Approve as the owner</button><span class="muted" style="font-size:14px;max-width:46ch">Above the threshold a human decides. Your treasury has no DAO, so the owner key in this browser approves.</span></div>
         </div>
         <p class="muted mono" id="decTx"></p>
       </div>
@@ -182,7 +215,7 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 const rpcOverride = q.get("rpc");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey"];
 const settings = {};
 function loadSettings() {
   for (const f of FIELDS) { try { const v = localStorage.getItem("bursar." + f); if (v !== null) $("#" + f).value = v; } catch {} }
@@ -208,14 +241,14 @@ $("#save").addEventListener("click", saveSettings);
 // read the recorded samples below, which need no key at all.
 const DEMO = { network: "testnet", treasury: "treasury.bursar-c34d05b8.testnet", agent: "agent.bursar-c34d05b8.testnet", model: "z-ai/glm-5.3-flash" };
 $("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); });
-$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
+$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
 // ---------- small codecs ----------
 const te = new TextEncoder(), td = new TextDecoder();
 const toHex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join("");
 const fromHex = (h) => { h = h.replace(/^0x/i, ""); const u = new Uint8Array(h.length / 2); for (let i = 0; i < u.length; i++) u[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16); return u; };
 const concat = (...parts) => { const n = parts.reduce((a, p) => a + p.length, 0); const u = new Uint8Array(n); let o = 0; for (const p of parts) { u.set(p, o); o += p.length; } return u; };
-const b64 = (u8) => btoa(String.fromCharCode(...u8));
+const b64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 function b58encode(u8) {
@@ -261,25 +294,46 @@ async function view(contract, method, args = {}) {
   if (res.error) throw new Error(res.error);
   return JSON.parse(td.decode(new Uint8Array(res.result)));
 }
-/** Sign and send one function call with an ed25519 key held in this page (no library: borsh + ed25519 + RPC send_tx). */
-async function functionCall({ signerId, secretKey, receiverId, method, args, gasTgas, deposit = 0n }) {
+// NEAR actions, borsh-encoded by hand. Only the ones this page sends.
+const NEAR = (n) => BigInt(Math.round(n * 1e6)) * 10n ** 18n;
+const TGAS = (n) => BigInt(n) * 10n ** 12n;
+const A = {
+  createAccount: () => (b) => b.u8(0),
+  deployContract: (code) => (b) => b.u8(1).vec(code),
+  functionCall: (method, args, gasTgas, deposit = 0n) => (b) => b.u8(2).str(method).vec(te.encode(JSON.stringify(args))).uint(TGAS(gasTgas), 8).uint(deposit, 16),
+  transfer: (amount) => (b) => b.u8(3).uint(amount, 16),
+  addFullAccessKey: (pub) => (b) => b.u8(5).u8(0).bytes(pub).uint(0n, 8).u8(1),
+  addFunctionCallKey: (pub, allowance, receiverId, methods) => (b) => { b.u8(5).u8(0).bytes(pub).uint(0n, 8).u8(0).u8(1).uint(allowance, 16).str(receiverId).uint(methods.length, 4); for (const m of methods) b.str(m); return b; },
+};
+const keyOf = (secretKey) => {
   const raw = b58decode(secretKey.replace(/^ed25519:/, ""));
-  if (raw.length !== 64 && raw.length !== 32) throw new Error("the agent key must be an ed25519 secret key");
+  if (raw.length !== 64 && raw.length !== 32) throw new Error("not an ed25519 secret key");
   const seed = raw.subarray(0, 32);
   const pub = ed25519.getPublicKey(seed);
-  const pubStr = "ed25519:" + b58encode(pub);
+  return { seed, pub, pubStr: "ed25519:" + b58encode(pub) };
+};
+const newKey = () => { const seed = crypto.getRandomValues(new Uint8Array(32)); const pub = ed25519.getPublicKey(seed); return { secretKey: "ed25519:" + b58encode(concat(seed, pub)), pubStr: "ed25519:" + b58encode(pub), pub }; };
+const nonces = {}; // last nonce used per key in this page, so back-to-back transactions do not wait for finality
+/** Sign and send one transaction with an ed25519 key held in this page (no library: borsh + ed25519 + RPC send_tx). */
+async function sendTx({ signerId, secretKey, receiverId, actions, gasTgas }) {
+  const { seed, pub, pubStr } = keyOf(secretKey);
   const ak = await rpc("query", { request_type: "view_access_key", finality: "final", account_id: signerId, public_key: pubStr });
   if (ak.error) throw new Error(ak.error);
-  const tx = new Borsh().str(signerId).u8(0).bytes(pub).uint(BigInt(ak.nonce) + 1n, 8).str(receiverId).bytes(b58decode(ak.block_hash))
-    .uint(1, 4).u8(2).str(method).vec(te.encode(JSON.stringify(args))).uint(BigInt(gasTgas) * 10n ** 12n, 8).uint(deposit, 16).out();
+  const nonce = BigInt(Math.max(Number(ak.nonce), nonces[pubStr] ?? 0)) + 1n;
+  nonces[pubStr] = Number(nonce);
+  const b = new Borsh().str(signerId).u8(0).bytes(pub).uint(nonce, 8).str(receiverId).bytes(b58decode(ak.block_hash)).uint(actions.length, 4);
+  for (const a of actions) a(b);
+  const tx = b.out();
   const sig = ed25519.sign(sha256(tx), seed);
   const signed = concat(tx, Uint8Array.of(0), sig);
   const res = await rpc("send_tx", { signed_tx_base64: b64(signed), wait_until: "EXECUTED_OPTIMISTIC" });
   const st = res.status ?? {};
   if (st.Failure) throw new Error("transaction failed: " + JSON.stringify(st.Failure).slice(0, 400));
+  for (const ro of res.receipts_outcome ?? []) { const f = ro.outcome?.status?.Failure; if (f) throw new Error("receipt failed: " + JSON.stringify(f).slice(0, 400)); }
   const value = st.SuccessValue ? td.decode(unb64(st.SuccessValue)) : "";
   return { hash: res.transaction?.hash, value };
 }
+const functionCall = ({ signerId, secretKey, receiverId, method, args, gasTgas, deposit = 0n }) => sendTx({ signerId, secretKey, receiverId, actions: [A.functionCall(method, args, gasTgas, deposit)] });
 
 // ---------- NEAR AI Cloud (same prompt and body as app/src/ai.ts, so the receipt verifies the same way) ----------
 const SYSTEM = `You are the reading half of an AI treasurer. You read one invoice and return JSON only.
@@ -541,17 +595,7 @@ $("#submit").addEventListener("click", async () => {
   try {
     if (!settings.agent || !settings.agentKey) throw new Error("set the agent account and its key in Settings");
     const { hash, value } = await functionCall({ signerId: settings.agent, secretKey: settings.agentKey, receiverId: settings.treasury, method: "request_payment", args: { claim: current.claim }, gasTgas: 150 });
-    const id = Number(value);
-    let p = null;
-    for (let i = 0; i < 6 && !p; i++) { p = await view(settings.treasury, "get_payment", { id }); if (!p) await new Promise((r) => setTimeout(r, 1500)); }
-    const status = p?.status ?? "?";
-    $("#decId").textContent = `#${id}`;
-    const st = $("#decStatus"); st.textContent = status; st.className = `stamp ${status}`; void st.offsetWidth; st.classList.add("in");
-    const reason = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");
-    $("#decReason").textContent = reason; $("#decReason").hidden = !reason;
-    $("#decWhy").innerHTML = p ? why(p) : "";
-    $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, signed by the agent's function-call key`;
-    $("#decision").hidden = false;
+    await showDecision(Number(value), hash, "signed by the agent's function-call key");
     loadTreasury();
   } catch (e) {
     $("#submitErr").textContent = e.message; $("#submitErr").hidden = false;
@@ -572,11 +616,11 @@ function why(p) {
   const parts = [];
   if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
   if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
-  if (p.status === "Approval") parts.push(p.dao_proposal_id === null ? "DAO proposal being opened" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`);
+  if (p.status === "Approval") parts.push(p.dao_proposal_id === null ? "above the approval threshold: waiting for a human (the DAO council, or the owner when there is no DAO)" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`);
   if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
   if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
   if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
-  if (p.status === "Paid") parts.push(p.dao_proposal_id === null ? "paid on NEAR in the same transaction" : `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR`);
+  if (p.status === "Paid") parts.push(p.dao_proposal_id !== null ? `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR` : BigInt(p.amount) >= 2000000000n ? "approved by the owner, then paid on NEAR" : "paid on NEAR in the same transaction");
   if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
   return esc(parts.join(". "));
 }
@@ -596,6 +640,85 @@ async function loadTreasury() {
   } catch (e) { $("#tErr").textContent = `could not read ${settings.treasury} on ${settings.network}: ${e.message}`; $("#tErr").hidden = false; }
 }
 $("#refresh").addEventListener("click", loadTreasury);
+
+// ---------- onboarding: this browser becomes the company ----------
+const TUSDC = "tusdc.bursar-c34d05b8.testnet"; // throwaway NEP-141 with open mint, deployed by the README setup
+const DEMO_VENDORS = [
+  { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-c34d05b8.testnet" } }, monthly_budget: "3000000000" },
+  { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: "legalpartners.bursar-c34d05b8.testnet" } }, monthly_budget: "0" },
+  { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" },
+];
+async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
+async function createTreasury() {
+  const btn = $("#create"); btn.disabled = true;
+  $("#createErr").hidden = true; $("#created").hidden = true;
+  const step = stepper($("#createSteps"));
+  try {
+    if ($("#network").value !== "testnet") { $("#network").value = "testnet"; }
+    settings.network = "testnet";
+    const root = `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`;
+    const rootKey = newKey(), treasuryKey = newKey(), agentKey = newKey();
+    const treasury = `treasury.${root}`, agent = `agent.${root}`;
+    step("account", "wait", `asking the testnet faucet for ${root}`);
+    const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: root, newAccountPublicKey: rootKey.pubStr }) });
+    if (!f.ok) throw new Error(`faucet ${f.status}: ${(await f.text()).slice(0, 200)}`);
+    for (let i = 0; i < 20 && !(await accountExists(root)); i++) await new Promise((r) => setTimeout(r, 1500));
+    if (!(await accountExists(root))) throw new Error("the faucet accepted the request but the account did not appear");
+    step("account", "ok", `${root} created with 10 NEAR; its key stays in this browser`);
+    step("contract", "wait", "fetching the policy contract (303 KB)");
+    const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
+    step("contract", "wait", `deploying to ${treasury}`);
+    const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
+    const t1 = await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: treasury, actions: [A.createAccount(), A.transfer(NEAR(4.5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)] });
+    step("contract", "ok", `policy contract live at ${treasury} (tx ${t1.hash.slice(0, 10)}...)`);
+    step("agent", "wait", `creating ${agent}`);
+    await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: agent, actions: [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(agentKey.pub, NEAR(1), treasury, ["request_payment"])] });
+    step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`);
+    step("usdc", "wait", "minting 15,000 test USDC into the treasury");
+    await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: TUSDC, actions: [A.functionCall("mint", { to: treasury, amount: "0" }, 30, NEAR(0.01)), A.functionCall("mint", { to: root, amount: "15000000000" }, 30, NEAR(0.01)), A.functionCall("ft_transfer_call", { receiver_id: treasury, amount: "15000000000", msg: "" }, 80, 1n)] });
+    step("usdc", "ok", "15,000.00 USDC in the treasury");
+    step("vendors", "wait", "registering the three demo vendors");
+    await sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId: treasury, actions: DEMO_VENDORS.map((v) => A.functionCall("add_vendor", v, 30)) });
+    step("vendors", "ok", "acmehosting, legalpartners (NEAR) and designco (Base) allowlisted with their payouts");
+    for (const [k, v] of Object.entries({ network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner: root, ownerKey: rootKey.secretKey })) $("#" + k).value = v;
+    saveSettings();
+    $("#createdKv").innerHTML = [["owner", root], ["treasury", treasury], ["agent", agent]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+    const keys = { network: "testnet", owner: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, treasury: { account_id: treasury, public_key: treasuryKey.pubStr, private_key: treasuryKey.secretKey }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
+    $("#dlKeys").href = URL.createObjectURL(new Blob([JSON.stringify(keys, null, 2)], { type: "application/json" })); $("#dlKeys").download = `${root}-keys.json`;
+    $("#created").hidden = false;
+    step("done", "ok", "settings saved in this browser; load a recorded reading below");
+    location.hash = "#read";
+  } catch (e) {
+    $("#createErr").textContent = e.message; $("#createErr").hidden = false;
+  } finally { btn.disabled = false; }
+}
+$("#create").addEventListener("click", createTreasury);
+let lastDecision = null;
+$("#approve").addEventListener("click", async () => {
+  if (!lastDecision) return;
+  const btn = $("#approve"); btn.disabled = true; btn.textContent = "Approving...";
+  try {
+    if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
+    const { hash } = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "approve_payment", args: { id: lastDecision }, gasTgas: 100 });
+    await showDecision(lastDecision, hash, "approved by the owner");
+    loadTreasury();
+  } catch (e) { $("#submitErr").textContent = e.message; $("#submitErr").hidden = false; }
+  finally { btn.disabled = false; btn.textContent = "Approve as the owner"; }
+});
+async function showDecision(id, hash, signedBy) {
+  let p = null;
+  for (let i = 0; i < 6 && !p; i++) { p = await view(settings.treasury, "get_payment", { id }); if (!p) await new Promise((r) => setTimeout(r, 1500)); }
+  const status = p?.status ?? "?";
+  lastDecision = id;
+  $("#decId").textContent = `#${id}`;
+  const st = $("#decStatus"); st.textContent = status; st.className = `stamp ${status}`; void st.offsetWidth; st.classList.add("in");
+  const reason = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");
+  $("#decReason").textContent = reason; $("#decReason").hidden = !reason;
+  $("#decWhy").innerHTML = p ? why(p) : "";
+  $("#approveRow").hidden = !(status === "Approval" && p?.dao_proposal_id === null && settings.ownerKey);
+  $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, ${signedBy}`;
+  $("#decision").hidden = false;
+}
 
 // ---------- star field (NEAR's star-cross particles), still under reduced motion ----------
 (function stars() {
