@@ -30,16 +30,19 @@
   .side .me .min { min-width: 0; flex: 1; } .side .me .name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .side .me .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .side .me .out { color: var(--mute-dark); text-decoration: none; font-size: 18px; }
   .work { min-width: 0; }
+  /* Phones: the company and the account in a top bar, the pages in a fixed bar at the bottom like an app, so nothing looks cut off. */
   @media (max-width: 900px) {
     .shell { grid-template-columns: minmax(0, 1fr); }
-    .side .company select { min-width: 0; max-width: 100%; }
-    .side { position: sticky; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; z-index: 5; }
-    .side .company { flex: 1 1 140px; } .side .company .eyebrow { display: none; }
-    .tabs { flex-direction: row; overflow-x: auto; scrollbar-width: none; width: 100%; min-width: 0; flex: 1 1 100%; order: 3; }
-    .side .company { min-width: 0; }
-    .tabs a { padding: 8px 10px; }
-    .side .me { margin-top: 0; border-top: 0; padding: 0; order: 2; } .side .me .min { display: none; }
+    .side { position: sticky; height: auto; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; z-index: 5; }
+    .side .company { flex: 1 1 auto; min-width: 0; padding: 0; } .side .company .eyebrow { display: none; } .side .company select { min-width: 0; max-width: 100%; }
+    .side .me { margin-top: 0; border-top: 0; padding: 0; } .side .me .min { display: none; }
     .wordmark span { display: none; }
+    .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; flex-direction: row; justify-content: space-around; gap: 0; background: var(--void); border-top: 1px solid var(--line-dark); padding: 6px max(4px, env(safe-area-inset-right, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px)); }
+    .tabs a { flex: 1 1 0; min-width: 0; flex-direction: column; gap: 4px; padding: 6px 2px; font: 500 10px/1 var(--display); text-align: center; position: relative; }
+    .tabs a[aria-current] { font-weight: 600; }
+    .tabs a svg { width: 18px; height: 18px; }
+    .badge { position: absolute; top: 0; left: calc(50% + 4px); margin: 0; font-size: 10px; line-height: 16px; padding: 0 5px; }
+    .work { padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
   }
 
   /* Views are pages on the paper workspace; the invoice flow keeps its dark/mint/dark rhythm inside its page. */
