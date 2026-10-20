@@ -75,7 +75,7 @@
   <div class="eyebrow">[ 02 ]</div>
   <h2>How a payment flows</h2>
   <ol>
-    <li>An invoice PDF arrives: dropped in the console, or in the inbox folder the agent watches.</li>
+    <li>An invoice PDF arrives: dropped in the console, posted in a Telegram chat connected to the treasury (it shows up in Inbox, unread, until a person presses Read), or in the inbox folder the agent watches.</li>
     <li>The <strong>agent</strong> rasterizes it and sends the page to a model running in a TEE on NEAR AI Cloud. First it fetches an attestation for a fresh nonce; the answer comes back as structured JSON with an ECDSA signature over the exact bytes.</li>
     <li>The agent turns the answer into a claim (vendor, invoice number, amount, payout printed on the invoice, order reference, flags) and calls <code>request_payment</code> on the policy contract. Its only key can call that one method on that one contract.</li>
     <li>The <strong>contract</strong> decides, deterministically and on chain, in the same transaction.</li>
@@ -137,6 +137,8 @@
     <li>the quote checked against Intel's collateral (TCB status).</li>
   </ul>
   <p>Change one byte and the signature fails. The contract stores a compact reference to the receipt next to the payment, so a decision can always be traced to exactly the model output it was made on. The console runs the same checks in the browser; <code>bursar verify</code> runs them from the terminal.</p>
+  <h3>Invoices by Telegram</h3>
+  <p>Vendors send invoices as they always do. Connect a Telegram chat to the treasury from Settings (a link, one tap on Start) and every PDF posted there lands in the console's Inbox: a chat with the vendor, a group for the whole company, or just you forwarding an email attachment from your phone. Nothing is read until a person presses Read; then it is the same enclave reading and the same contract decision, and the bot answers the chat with the outcome. Bursar's relay keeps only the sender, the file name and Telegram's reference to the file; the PDF stays on Telegram. Telegram chats with bots are not end-to-end encrypted, so treat the chat as you would email. A company with its own NEAR AI Cloud key runs the same relay on its own Cloudflare account.</p>
   <h3>Who holds the NEAR AI Cloud key</h3>
   <p>Two plans. <strong>Bursar reading</strong>, used for this hackathon demo: the browser goes through Bursar's relay, a Cloudflare Worker that holds a key paid by the team and forwards the bytes untouched, with daily caps. <strong>Own key</strong>: a company using Bursar brings its own NEAR AI Cloud key, and the invoice goes from the browser straight to the enclave, never through Bursar.</p>
 </section>
@@ -158,6 +160,7 @@
   <h2>The console</h2>
   <p>A static page: nothing to install, every number read from the contract over RPC, every change signed in the browser.</p>
   <div class="rule">
+    <span class="k">Inbox</span><span>Invoices received through the Telegram bot, with sender and file name. Read sends one to the enclave and the contract; Discard drops it. The bot tells the chat each decision.</span>
     <span class="k">Overview</span><span>Balance, spent this month, budgets, what waits for a person, the last decisions.</span>
     <span class="k">Invoices</span><span>Drop a PDF or load a recorded reading; watch the enclave read it, the receipt verify, the contract answer. "Request payment" signs with the agent key.</span>
     <span class="k">Attention</span><span>Held payments to approve or cancel, council votes when there is a DAO, and what was refused, with the reason.</span>

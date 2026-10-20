@@ -14,3 +14,9 @@ MAX_READS_PER_DAY = "300"
 # [[kv_namespaces]]
 # binding = "LIMITS"
 # id = "..."
+
+# Telegram inbox (optional). Secrets:  wrangler secret put TELEGRAM_BOT_TOKEN   and   wrangler secret put TELEGRAM_WEBHOOK_SECRET
+# It needs a KV namespace:            wrangler kv namespace create INBOX   then uncomment and paste the id
+# [[kv_namespaces]]
+# binding = "INBOX"
+# id = "..."

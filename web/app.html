@@ -122,6 +122,7 @@
   </div>
   <nav class="tabs" id="tabs">
     <a href="#overview" data-view="overview"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/></svg>Overview</a>
+    <a href="#inbox" data-view="inbox"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 9v5h14V9"/><path d="M1 9l2-7h10l2 7"/><path d="M1 9h4l1 2h4l1-2h4"/></svg>Inbox <span class="badge" id="inboxBadge" hidden>0</span></a>
     <a href="#invoices" data-view="invoices"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1h7l3 3v11H3z"/><path d="M5 7h6M5 10h6M5 13h4"/></svg>Invoices</a>
     <a href="#attention" data-view="attention"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z"/><path d="M8 6v4M8 11.5v1"/></svg>Attention <span class="badge" id="attnBadge" hidden>0</span></a>
     <a href="#vendors" data-view="vendors"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="3"/><path d="M1 15c0-3 2-5 5-5s5 2 5 5"/><path d="M11 4h4M11 7h4"/></svg>Vendors</a>
@@ -167,6 +168,22 @@
           <span class="k">later</span><span class="v">a Sputnik DAO with your collaborators as council, from Settings; cross-chain settlement runs on mainnet only (NEAR Intents)</span>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ INBOX: invoices received through Telegram ============ -->
+<section class="band view" id="inbox" hidden>
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ INBOX ]</div><h2 class="heading">Invoices received. Nothing is read, let alone paid, until a person presses Read.</h2></div>
+    <div id="inboxOff" class="card" hidden>
+      <p style="margin:0 0 16px;max-width:70ch">Vendors send invoices as they always do. Connect a Telegram chat to this treasury and every PDF posted there lands here: you, a colleague, or a group with the vendor in it. Bursar keeps only the sender and the file name; the PDF stays on Telegram until someone presses Read.</p>
+      <div class="actions" style="margin:0"><a class="btn btn-signal" href="#settings">Connect Telegram in Settings</a></div>
+    </div>
+    <div id="inboxOn" hidden>
+      <div class="wrap"><table id="inboxTable"><thead><tr><th>received</th><th>from</th><th>file</th><th>note</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="actions" style="margin-top:16px;align-items:center"><button id="inboxRefresh" type="button" class="btn-ghost">Refresh</button><span class="muted" id="inboxFoot" style="font-size:14px"></span></div>
+      <div id="inboxErr" class="err" hidden></div>
     </div>
   </div>
 </section>
@@ -403,6 +420,7 @@
           <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
           <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
+          <label><span>Inbox token (Telegram)</span><input id="inboxToken" type="password" placeholder="set by Connect a Telegram chat" autocomplete="off"></label>
         </div>
         <input id="model" type="hidden" value="z-ai/glm-5.3-flash">
         <div class="actions" style="margin-top:16px;align-items:center">
@@ -412,6 +430,16 @@
       </details>
     </div>
 
+    <div class="card" style="margin-top:24px" id="tgCard">
+      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Telegram inbox <i class="help" tabindex="0" data-help="A Telegram chat connected to this treasury. Every PDF posted in it shows up in Inbox, where a person reads it and the contract decides. Invite the vendor to a group with the bot, or forward their emails' attachments yourself. The bot never pays anything.">?</i></div>
+      <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:72ch">Press Connect, open the link on your phone, press Start in the chat. From then on, PDFs sent to that chat land in Inbox and the bot tells the chat how each one was decided. Connect as many chats as you like: one per vendor, or one for the whole company.</p>
+      <div class="actions" style="margin:0;align-items:center"><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button><span class="muted" style="font-size:14px" id="tgStatus"></span></div>
+      <div id="tgOut" hidden style="margin-top:16px">
+        <div class="kv"><span class="k">link</span><span class="v"><a id="tgLink" href="#" target="_blank" rel="noopener"></a></span><span class="k">or send</span><span class="v mono" id="tgCmd"></span></div>
+        <p class="muted" style="font-size:13px;margin:12px 0 0">The code works once and for a day. Each chat gets its own.</p>
+      </div>
+      <div id="tgErr" class="err" hidden></div>
+    </div>
     <div class="grid cols-2" style="margin-top:24px">
       <div class="card">
         <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Company <i class="help" tabindex="0" data-help="The company's name and a line about it, stored in the contract. The name shows in the sidebar, in invites and in the explorer.">?</i></div>
@@ -499,8 +527,8 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 const rpcOverride = q.get("rpc");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey"];
-const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
+const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
 // Who signs owner-level actions here: the owner key, or an operator key limited to its role.
 const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
 const canAct = (perm) => !!settings.ownerKey || (!!settings.operatorKey && !!settings.operator && !!operatorRole()[perm]);
@@ -1015,7 +1043,8 @@ async function loadTreasury() {
   const empty = !settings.treasury;
   $("#noTreasury").hidden = !empty; $("#ovBody").hidden = empty;
   reflectSettings();
-  if (empty) { $("#companyName").textContent = "No treasury"; $("#companyDesc").textContent = ""; $("#attnBadge").hidden = true; return; }
+  if (empty) { $("#companyName").textContent = "No treasury"; $("#companyDesc").textContent = ""; $("#attnBadge").hidden = true; $("#inboxBadge").hidden = true; return; }
+  loadInbox();
   try {
     const t = settings.treasury;
     const [stats, limits, roles, vendors, payments, orders, company, operators] = await Promise.all([
@@ -1279,13 +1308,79 @@ function acceptInvite() {
   } catch (e) { $("#sErr").textContent = `invite not accepted: ${e.message}`; $("#sErr").hidden = false; location.hash = "#settings"; return false; }
 }
 
+// ---------- inbox: invoices received through the Telegram bot on the relay ----------
+// The relay keeps the sender, the file name and Telegram's file reference; the PDF stays on Telegram until Read.
+let inboxItems = [], inboxCurrent = null;
+const inboxHeaders = () => ({ Authorization: `Bearer ${settings.inboxToken}` });
+async function loadInbox() {
+  const on = !!settings.inboxToken && !!settings.treasury;
+  $("#inboxOff").hidden = on; $("#inboxOn").hidden = !on; $("#inboxErr").hidden = true;
+  $("#tgStatus").textContent = on ? "connected: this browser holds the inbox token" : "";
+  if (!on) { $("#inboxBadge").hidden = true; inboxItems = []; return; }
+  try {
+    const r = await fetch(`${RELAY}/inbox/list?treasury=${encodeURIComponent(settings.treasury)}`, { headers: inboxHeaders() });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
+    inboxItems = j.items;
+    $("#inboxBadge").textContent = inboxItems.length; $("#inboxBadge").hidden = inboxItems.length === 0;
+    $("#inboxTable tbody").innerHTML = inboxItems.slice().reverse().map((it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}">Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`).join("") || `<tr><td colspan="5" class="muted">nothing waiting. Send a PDF to a connected chat and press Refresh.</td></tr>`;
+    $("#inboxFoot").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}. ${inboxItems.length} waiting.`;
+    $("#tgStatus").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}`;
+  } catch (e) { $("#inboxErr").textContent = `could not read the inbox: ${e.message}`; $("#inboxErr").hidden = false; }
+}
+$("#inboxRefresh").addEventListener("click", loadInbox);
+$("#inboxTable").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.act"); if (!b) return;
+  const it = inboxItems.find((x) => x.id === b.dataset.id); if (!it) return;
+  $("#inboxErr").hidden = true; b.disabled = true;
+  try {
+    if (b.dataset.act === "inboxDiscard") {
+      await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, id: it.id }) });
+      await loadInbox();
+    } else {
+      const r = await fetch(`${RELAY}/inbox/file?treasury=${encodeURIComponent(settings.treasury)}&id=${encodeURIComponent(it.id)}`, { headers: inboxHeaders() });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `file ${r.status}`);
+      const file = new File([await r.arrayBuffer()], it.name, { type: "application/pdf" });
+      inboxCurrent = it;
+      location.hash = "#invoices";
+      await handleFile(file);
+    }
+  } catch (err) { $("#inboxErr").textContent = err.message; $("#inboxErr").hidden = false; b.disabled = false; }
+});
+/** After a decision on an inbox item: drop it from the inbox and tell the chat. Best effort, never blocks the decision. */
+async function inboxAfterDecision(id, p, hash) {
+  if (!settings.inboxToken) return;
+  const h = { ...inboxHeaders(), "content-type": "application/json" };
+  const item = inboxCurrent; inboxCurrent = null;
+  try {
+    if (item) await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, id: item.id }) });
+    const what = p ? `${p.status}${p.reason ? ` (${p.reason})` : ""}` : "decided";
+    const text = `${item ? item.name + ": " : ""}payment #${id} ${what}. ${p ? `${p.vendor_id} ${p.invoice_number}, ${usdc(p.amount)}. ` : ""}${p?.status === "Approval" ? "It waits for a person in the console. " : ""}${EXPLORER[settings.network]}/txns/${hash}`;
+    await fetch(`${RELAY}/inbox/notify`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, text }) });
+    loadInbox();
+  } catch {}
+}
+$("#tgConnect").addEventListener("click", async () => {
+  $("#tgErr").hidden = true; $("#tgOut").hidden = true; const b = $("#tgConnect"); b.disabled = true;
+  try {
+    if (!settings.treasury) throw new Error("no treasury selected");
+    if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
+    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: state.company?.name || settings.label || settings.treasury }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
+    $("#tgLink").href = j.link; $("#tgLink").textContent = j.link; $("#tgCmd").textContent = `/start ${j.code}  to @${j.bot}`;
+    $("#tgOut").hidden = false;
+    loadInbox();
+  } catch (e) { $("#tgErr").textContent = e.message; $("#tgErr").hidden = false; }
+  finally { b.disabled = false; }
+});
+
 // ---------- router: one view at a time, by hash ----------
-const VIEWS = ["start", "overview", "invoices", "attention", "vendors", "orders", "analytics", "settings"];
+const VIEWS = ["start", "inbox", "overview", "invoices", "attention", "vendors", "orders", "analytics", "settings"];
 function route() {
   let v = (location.hash || "").replace("#", "");
   if (v === "read" || v === "receipt" || v === "decide") v = "invoices";
   if (!VIEWS.includes(v)) v = settings.treasury ? "overview" : "start";
   for (const id of VIEWS) $("#" + id).hidden = id !== v;
+  if (v === "inbox") loadInbox();
   for (const a of document.querySelectorAll("#tabs a")) { if (a.dataset.view === v) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); }
   window.scrollTo({ top: 0 });
 }
@@ -1469,6 +1564,7 @@ async function showDecision(id, hash, signedBy) {
   $("#approveRow").hidden = !(status === "Approval" && p?.dao_proposal_id === null && canAct("approve"));
   $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, ${signedBy}`;
   $("#decision").hidden = false;
+  inboxAfterDecision(id, p, hash);
 }
 
 
