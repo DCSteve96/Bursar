@@ -1,4 +1,4 @@
-# Bursar
+# <img src="web/brand/mark.svg" width="28" height="28" alt=""> Bursar
 
 **An AI treasurer that pays invoices within limits it cannot change.**
 
