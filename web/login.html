@@ -93,6 +93,7 @@
 <script type="module">
 import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm";
 import { NearConnector } from "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js";
+import { registerMeteorExtension } from "./meteor.js";
 const $ = (s) => document.querySelector(s);
 const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
 // The public list of treasuries (contracts/registry). Entries are hints: the owner is checked on the treasury itself.
@@ -110,8 +111,8 @@ const q = new URLSearchParams(location.search);
 let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
 // NEAR Connect: one picker for every NEAR wallet (Meteor, HOT, Intear, Nightly, Near Mobile, OKX, WalletConnect). Each wallet's
 // own code runs in a sandboxed iframe; this page only sees the account id and the transactions it asks the wallet to sign.
-let connector = null;
-const connect = () => connector || (connector = new NearConnector({ network, footerBranding: null }));
+let connector = null, meteorReady = null;
+const connect = () => { if (!connector) { connector = new NearConnector({ network, footerBranding: null }); window.bursarConnector = connector; meteorReady = registerMeteorExtension().catch((e) => console.warn("Meteor extension bridge:", e)); } return connector; };
 function setNet(n) {
   network = n;
   for (const b of document.querySelectorAll("#net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
@@ -125,7 +126,7 @@ $("#net").addEventListener("click", (e) => { const b = e.target.closest("button"
 $("#wGo").addEventListener("click", async () => {
   $("#wErr").hidden = true; $("#wGo").disabled = true;
   try {
-    const c = connect();
+    const c = connect(); await meteorReady;
     const wallet = await c.connect();
     const accounts = await wallet.getAccounts({ network });
     if (!accounts?.length) throw new Error("the wallet did not return an account");

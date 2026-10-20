@@ -1249,8 +1249,9 @@ async function connectWalletKey(treasury, owner, label) {
   const btn = $("#createdWallet"); btn.disabled = true; btn.textContent = "Waiting for the wallet...";
   $("#createErr").hidden = true;
   try {
-    const { NearConnector } = await import("https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js");
+    const [{ NearConnector }, { registerMeteorExtension }] = await Promise.all([import("https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js"), import("./meteor.js")]);
     const connector = new NearConnector({ network: settings.network, footerBranding: null });
+    await registerMeteorExtension().catch((e) => console.warn("Meteor extension bridge:", e));
     let wallet, accounts;
     try { ({ wallet, accounts } = await connector.getConnectedWallet()); } catch { wallet = await connector.connect(); accounts = await wallet.getAccounts({ network: settings.network }); }
     if (!accounts?.some((a) => a.accountId === owner)) throw new Error(`the wallet is signed in as ${accounts?.[0]?.accountId || "nobody"}, not ${owner}`);
