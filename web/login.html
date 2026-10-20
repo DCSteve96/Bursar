@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar sign in</title>
-<meta name="description" content="Sign in to the Bursar console with your NEAR wallet, the keys you downloaded, or an invite link. No passwords, no server.">
+<meta name="description" content="Sign in to the Bursar console with your NEAR wallet or an invite link. No password, no server. A wallet without a treasury gets one created on the spot.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -17,23 +17,35 @@
   .top a.plain { color: var(--mute-light); text-decoration: none; font-size: 14px; }
   .center { flex: 1; display: grid; place-items: start center; padding: 24px max(16px, env(safe-area-inset-left, 0px)) 64px; }
   .box { width: 100%; max-width: 520px; }
-  .mark { width: 48px; height: 48px; margin: 0 auto 16px; }
+  .mark { width: 48px; height: 48px; margin: 0 auto 16px; display: block; }
   h1 { text-align: center; font-size: 28px; }
   .lead { text-align: center; color: var(--mute-light); margin: 8px 0 28px; }
   .card { background: var(--paper); border: 1px solid var(--line-light); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
   .way { display: flex; flex-direction: column; gap: 10px; }
-  .way h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .way h2 { font-size: 15px; font-weight: 600; }
   .way p { margin: 0; color: var(--mute-light); font-size: 14px; }
   .or { display: flex; align-items: center; gap: 12px; color: var(--mute-light); font: 600 11px/1 var(--mono); letter-spacing: 0.1em; }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line-light); }
   input, select { border-color: var(--line-light); background: var(--bone); color: var(--fg-light); }
   label > span { color: var(--mute-light); }
-  .btn-ghost { color: var(--fg-light); border-color: var(--line-light); background: var(--paper); }
   .btn-inverse { background: var(--void); color: var(--paper); }
-  .err { color: var(--blocked-light); }
-  .fine { text-align: center; color: var(--mute-light); font-size: 13px; margin-top: 20px; }
-  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } @media (max-width: 480px) { .row2 { grid-template-columns: 1fr; } }
-  .drop { padding: 18px; text-align: center; background: var(--bone); border: 1px dashed var(--line-light); }
+  .btn-ghost { color: var(--fg-light); border-color: var(--line-light); background: var(--paper); }
+  .err { color: var(--blocked-light); font-size: 13px; }
+  .fine { text-align: center; color: var(--mute-light); font-size: 13px; margin-top: 20px; line-height: 1.6; }
+  .fine a, .way a { color: inherit; }
+  .fine label { display: inline; text-decoration: underline; cursor: pointer; }
+  .net { display: flex; justify-content: center; gap: 8px; margin-bottom: 16px; }
+  .net button { font: 500 13px/1 var(--mono); padding: 8px 14px; background: var(--paper); border: 1px solid var(--line-light); color: var(--mute-light); border-radius: 4px; }
+  .net button[aria-pressed="true"] { background: var(--void); color: var(--paper); border-color: var(--void); }
+  .who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--mint); border-radius: 4px; }
+  .who .av { width: 36px; height: 36px; border-radius: 4px; background: var(--void); color: var(--signal); display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
+  .who .n { font-weight: 600; font-size: 14px; word-break: break-all; }
+  .who .r { font-size: 12px; color: var(--mute-light); }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .list button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; background: var(--bone); border: 1px solid var(--line-light); border-radius: 4px; color: var(--fg-light); font: 500 14px var(--display); }
+  .list button:hover { border-color: var(--void); }
+  .list button .m { font: 500 12px var(--mono); color: var(--mute-light); }
+  .spin { color: var(--mute-light); font: 500 13px var(--mono); }
 </style>
 </head>
 <body>
@@ -43,34 +55,39 @@
 </div>
 <div class="center"><div class="box">
   <img class="mark" src="brand/mark.svg" alt="">
-  <h1>Welcome back</h1>
-  <p class="lead">Sign in to your company's console. No password: your keys, your wallet, or an invite.</p>
-  <div class="card">
+  <h1 id="title">Log in</h1>
+  <p class="lead" id="lead">Your company's console. No password: your NEAR wallet, or the invite a colleague sent you.</p>
+
+  <div class="net" id="net" role="group" aria-label="Network"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
+
+  <div class="card" id="choose">
     <div class="way">
-      <h2>With your NEAR wallet</h2>
-      <p>The wallet adds a key limited to your treasury contract to this browser: it signs vendors, orders, limits and approvals, never a transfer.</p>
-      <div class="row2">
-        <label><span>Network</span><select id="wNetwork"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
-        <label><span>Treasury account</span><input id="wTreasury" placeholder="treasury.you.testnet" autocomplete="off"></label>
-      </div>
+      <h2>Continue with your NEAR wallet</h2>
+      <p>The wallet signs you in. If your account owns a treasury, the console opens it. If it owns none yet, Bursar creates one on the spot: Bursar pays for the accounts and the contract, you pay nothing.</p>
       <button id="wGo" type="button" class="btn-signal">Continue with NEAR wallet</button>
-      <div id="wErr" class="err mono" hidden></div>
+      <p>No NEAR wallet yet? <a id="wNew" href="https://testnet.mynearwallet.com/create" target="_blank" rel="noopener">Create one on MyNearWallet</a>, it takes a minute and is free on testnet.</p>
+      <div id="wErr" class="err" hidden></div>
     </div>
     <div class="or">OR</div>
     <div class="way">
-      <h2>With the keys you downloaded</h2>
-      <p>The file "Download the keys" gave you when the treasury was created. It stays in this browser.</p>
-      <label class="drop" id="kDrop"><input id="kFile" type="file" accept="application/json" style="display:none"><span class="muted">Drop the keys file here, or click to choose it</span></label>
-      <div id="kErr" class="err mono" hidden></div>
-    </div>
-    <div class="or">OR</div>
-    <div class="way">
-      <h2>With an invite link</h2>
-      <p>A collaborator opens the link the owner sent; pasting it here does the same.</p>
-      <div class="row2" style="grid-template-columns: 1fr auto"><input id="iLink" placeholder="https://.../app.html#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
+      <h2>Open an invite link</h2>
+      <p>A colleague invited you to approve invoices or manage vendors. Open the link, or paste it here. It signs you in with exactly the role they chose.</p>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="iLink" placeholder="https://.../app.html#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
+      <div id="iErr" class="err" hidden></div>
     </div>
   </div>
-  <p class="fine">No company yet? <a href="app.html#start">Create a treasury on testnet in a minute</a>. Just looking? <a href="app.html#settings">Open the README demo, read-only</a>.</p>
+
+  <div class="card" id="back" hidden>
+    <div class="who"><div class="av" id="av"></div><div><div class="n" id="acct"></div><div class="r" id="acctNet"></div></div></div>
+    <div id="lookup" class="spin">looking for your treasuries...</div>
+    <div id="have" hidden class="way"><h2>Your treasuries</h2><p>Pick one. The wallet will add a key to this browser limited to that treasury: it signs vendors, orders, limits and approvals, never a transfer.</p><div class="list" id="list"></div></div>
+    <div id="none" hidden class="way"><h2>No treasury yet</h2><p id="noneText">This account owns no Bursar treasury. Create it now: Bursar funds the accounts and the contract storage, registers three demo vendors and mints test USDC. About a minute, nothing to pay.</p><button id="createGo" type="button" class="btn-signal">Create my treasury</button></div>
+    <div id="bErr" class="err" hidden></div>
+    <p class="way" style="margin:0"><a href="login.html" style="font-size:13px">Use another account</a></p>
+  </div>
+
+  <p class="fine">Just looking? <a href="app.html#settings" id="demoLink">Open the README demo, read-only</a>.<br>Have a keys file from an earlier treasury? <label for="kFile">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">. No wallet at all? <a href="app.html#start">Try it with throwaway keys</a>.</p>
+  <div id="kErr" class="err" hidden style="text-align:center"></div>
 </div></div>
 
 <script type="module">
@@ -78,52 +95,101 @@ import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed2551
 const $ = (s) => document.querySelector(s);
 const WALLET = { testnet: "https://testnet.mynearwallet.com", mainnet: "https://app.mynearwallet.com" };
 const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+// The public list of treasuries (contracts/registry). Entries are hints: the owner is checked on the treasury itself.
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const b58 = (u8) => { let n = 0n; for (const b of u8) n = n * 256n + BigInt(b); let s = ""; while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; } for (const b of u8) { if (b !== 0) break; s = "1" + s; } return s; };
 const concat = (a, b) => { const u = new Uint8Array(a.length + b.length); u.set(a); u.set(b, a.length); return u; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 async function view(network, contract, method, args = {}) {
   const r = await fetch(RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
   const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.data ?? j.error.message); if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
 }
 const q = new URLSearchParams(location.search);
-if (q.get("treasury")) $("#wTreasury").value = q.get("treasury");
-if (q.get("network")) $("#wNetwork").value = q.get("network");
-$("#wGo").addEventListener("click", async () => {
+let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
+function setNet(n) {
+  network = n;
+  for (const b of document.querySelectorAll("#net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
+  $("#wNew").href = `${WALLET[n]}/create`;
+}
+setNet(network);
+$("#net").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setNet(b.dataset.net); });
+
+/** Step 1: the wallet tells us who you are. No key is added yet. */
+$("#wGo").addEventListener("click", () => {
   $("#wErr").hidden = true;
-  try {
-    const network = $("#wNetwork").value, treasury = $("#wTreasury").value.trim();
-    if (!treasury) throw new Error("enter the treasury account");
-    const roles = await view(network, treasury, "get_roles");
-    let company = null; try { company = await view(network, treasury, "get_company"); } catch {}
-    const seed = crypto.getRandomValues(new Uint8Array(32)); const pub = ed25519.getPublicKey(seed);
-    const pending = { network, treasury, label: company?.name || treasury, owner: roles[0], pubStr: "ed25519:" + b58(pub), secretKey: "ed25519:" + b58(concat(seed, pub)) };
-    localStorage.setItem("bursar.walletPending", JSON.stringify(pending));
-    const back = new URL("app.html", location.href).href;
-    const u = new URL(`${WALLET[network]}/login/`);
-    u.searchParams.set("title", "Bursar"); u.searchParams.set("contract_id", treasury); u.searchParams.set("public_key", pending.pubStr);
-    u.searchParams.set("success_url", back); u.searchParams.set("failure_url", new URL("login.html?wallet=failed", location.href).href);
-    location.href = u.href;
-  } catch (e) { $("#wErr").textContent = e.message; $("#wErr").hidden = false; }
+  try { localStorage.setItem("bursar.walletPending", JSON.stringify({ stage: "identify", network })); } catch {}
+  const u = new URL(`${WALLET[network]}/login/`);
+  u.searchParams.set("title", "Bursar");
+  u.searchParams.set("success_url", new URL(`login.html?network=${network}`, location.href).href);
+  u.searchParams.set("failure_url", new URL(`login.html?network=${network}&wallet=failed`, location.href).href);
+  location.href = u.href;
 });
 if (q.get("wallet") === "failed") { $("#wErr").textContent = "the wallet did not complete the sign-in"; $("#wErr").hidden = false; }
-async function useKeys(file) {
+
+/** Step 2: add a key limited to one treasury. The console accepts the wallet's return. */
+function openTreasury(treasury, label, owner) {
+  const seed = crypto.getRandomValues(new Uint8Array(32)); const pub = ed25519.getPublicKey(seed);
+  const pending = { stage: "key", network, treasury, label: label || treasury, owner, pubStr: "ed25519:" + b58(pub), secretKey: "ed25519:" + b58(concat(seed, pub)) };
+  localStorage.setItem("bursar.walletPending", JSON.stringify(pending));
+  const u = new URL(`${WALLET[network]}/login/`);
+  u.searchParams.set("title", "Bursar"); u.searchParams.set("contract_id", treasury); u.searchParams.set("public_key", pending.pubStr);
+  u.searchParams.set("success_url", new URL("app.html", location.href).href);
+  u.searchParams.set("failure_url", new URL(`login.html?network=${network}&wallet=failed`, location.href).href);
+  location.href = u.href;
+}
+
+/** Back from step 1: find the treasuries this account owns, verified on each contract. */
+async function afterIdentify(account) {
+  $("#choose").hidden = true; $("#net").hidden = true; $("#back").hidden = false;
+  $("#title").textContent = "Welcome"; $("#lead").textContent = "Signed in with your NEAR wallet.";
+  $("#acct").textContent = account; $("#acctNet").textContent = `NEAR ${network}`; $("#av").textContent = account.slice(0, 2).toUpperCase();
+  try {
+    if (!REGISTRY[network]) throw new Error(`no registry on ${network} yet`);
+    const hints = await view(network, REGISTRY[network], "of", { owner: account });
+    const mine = [];
+    await Promise.all(hints.map(async (t) => {
+      try {
+        const roles = await view(network, t, "get_roles");
+        if (roles[0] !== account) return;
+        let company = null; try { company = await view(network, t, "get_company"); } catch {}
+        mine.push({ treasury: t, label: company?.name || t });
+      } catch {}
+    }));
+    $("#lookup").hidden = true;
+    if (mine.length) {
+      mine.sort((a, b) => a.treasury.localeCompare(b.treasury));
+      $("#list").innerHTML = mine.map((m) => `<button type="button" data-t="${esc(m.treasury)}" data-l="${esc(m.label)}"><span>${esc(m.label)}</span>${m.label !== m.treasury ? `<span class="m">${esc(m.treasury)}</span>` : ""}</button>`).join("");
+      $("#have").hidden = false;
+      $("#list").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) openTreasury(b.dataset.t, b.dataset.l, account); });
+    } else {
+      if (network !== "testnet") $("#noneText").textContent = "This account owns no Bursar treasury. On mainnet, creation runs from the CLI for now (bursar setup); on testnet the console creates it for free.";
+      $("#createGo").disabled = network !== "testnet";
+      $("#none").hidden = false;
+      $("#createGo").addEventListener("click", () => {
+        try { localStorage.setItem("bursar.walletOwner", JSON.stringify({ network, account })); } catch {}
+        location.href = "app.html#start";
+      });
+    }
+  } catch (e) { $("#lookup").hidden = true; $("#bErr").textContent = e.message; $("#bErr").hidden = false; }
+}
+if (q.get("account_id")) afterIdentify(q.get("account_id"));
+
+$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "app.html" + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
+$("#kFile").addEventListener("change", async (e) => {
   $("#kErr").hidden = true;
   try {
-    const k = JSON.parse(await file.text());
+    const k = JSON.parse(await e.target.files[0].text());
     if (!k.owner?.account_id || !k.treasury?.account_id || !k.agent?.account_id) throw new Error("not a Bursar keys file");
-    const profile = { network: k.network || "testnet", treasury: k.treasury.account_id, agent: k.agent.account_id, agentKey: k.agent.private_key, owner: k.owner.account_id, ownerKey: k.owner.private_key, label: k.label || `My treasury (${k.owner.account_id.split(".")[0].slice(7)})`, operator: "", operatorKey: "", operatorRole: "", ownerKeyKind: "" };
+    const profile = { network: k.network || "testnet", treasury: k.treasury.account_id, agent: k.agent.account_id, agentKey: k.agent.private_key, owner: k.owner.account_id, ownerKey: k.owner.private_key, label: k.label || `My treasury (${k.owner.account_id.split(".")[0].slice(7)})`, operator: "", operatorKey: "", operatorRole: "", ownerKeyKind: "", payer: "", payerKey: "" };
     for (const [f, v] of Object.entries(profile)) localStorage.setItem("bursar." + f, v);
     let profiles = []; try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
     const i = profiles.findIndex((p) => p.treasury === profile.treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
     location.href = "app.html#overview";
-  } catch (e) { $("#kErr").textContent = e.message; $("#kErr").hidden = false; }
-}
-$("#kFile").addEventListener("change", (e) => useKeys(e.target.files?.[0]));
-$("#kDrop").addEventListener("dragover", (e) => e.preventDefault());
-$("#kDrop").addEventListener("drop", (e) => { e.preventDefault(); useKeys(e.dataTransfer.files?.[0]); });
-$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "app.html" + m[0]; });
+  } catch (err) { $("#kErr").textContent = err.message; $("#kErr").hidden = false; }
+});
 </script>
 </body>
 </html>

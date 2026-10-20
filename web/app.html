@@ -86,6 +86,10 @@
   #settings .wrap table th { background: var(--bone); }
   /* ai tile keeps the brand signature on the receipt band */
   .ai-tile { background: repeating-conic-gradient(var(--signal) 0 25%, var(--paper) 0 50%) 0 0 / 20px 20px; }
+  .who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--mint); border-radius: 4px; color: var(--fg-light); }
+  .who .av { width: 36px; height: 36px; border-radius: 4px; background: var(--void); color: var(--signal); display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
+  .who .n { font-weight: 600; font-size: 14px; word-break: break-all; }
+  .who .r { font-size: 12px; color: var(--mute-light); }
 </style>
 </head>
 <body>
@@ -116,25 +120,27 @@
 <!-- ============ START: a new treasury ============ -->
 <section class="band view" id="start">
   <div class="in">
-    <div class="band-head"><div class="eyebrow">[ NEW TREASURY ]</div><h2 class="heading">Your own treasury on testnet, in one click.</h2></div>
+    <div class="band-head"><div class="eyebrow">[ NEW TREASURY ]</div><h2 class="heading" id="startTitle">Your own treasury on testnet, in one click.</h2></div>
     <div class="grid cols-2">
       <div class="card">
-        <p style="margin:0 0 16px">This browser becomes the company: it asks the testnet faucet for an account, deploys the policy contract, mints test USDC, registers three vendors and what the company agreed to buy, and creates an agent with one function-call key. Every key is generated here and stays here. About a minute.</p>
+        <div id="startWallet" class="who" hidden style="margin-bottom:16px"><div class="av" id="startAv"></div><div><div class="n" id="startOwner"></div><div class="r">will own the treasury. Bursar pays for the accounts and the contract: nothing to pay.</div></div></div>
+        <p style="margin:0 0 16px" id="startText">This browser becomes the company: it asks the testnet faucet for an account, deploys the policy contract, mints test USDC, registers three vendors and what the company agreed to buy, and creates an agent with one function-call key. Every key is generated here and stays here. About a minute.</p>
         <div class="actions" style="margin:0;align-items:center">
           <button id="create" type="button" class="btn-signal">Create my treasury</button>
-          <span class="muted" style="font-size:14px;max-width:46ch">Already have one? Add it in Settings with its keys.</span>
+          <span class="muted" style="font-size:14px;max-width:46ch" id="startAside">Already have one? Add it in Settings with its keys.</span>
         </div>
         <ul class="log" id="createSteps" style="margin-top:24px"></ul>
         <div id="createErr" class="err" hidden></div>
         <div id="created" hidden style="margin-top:24px">
           <div class="kv" id="createdKv"></div>
-          <div class="actions" style="margin-top:16px"><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a><a class="btn btn-signal" href="#invoices">Go to invoices</a></div>
+          <div class="actions" style="margin-top:16px"><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a><a class="btn btn-signal" href="#invoices" id="createdGo">Go to invoices</a><button type="button" class="btn-signal" id="createdWallet" hidden>Connect the wallet key</button></div>
+          <p class="muted" id="createdNote" hidden style="font-size:14px;margin:12px 0 0">The wallet adds a key limited to this treasury to the browser: it signs vendors, orders, limits and approvals, never a transfer. The payer account's key stays here to fund invites and the DAO.</p>
         </div>
       </div>
       <div class="card">
         <div class="eyebrow muted" style="margin-bottom:12px">What you get</div>
         <div class="kv">
-          <span class="k">treasury</span><span class="v">the policy contract, owned by your new account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person approves above 2,000</span>
+          <span class="k">treasury</span><span class="v" id="startOwned">the policy contract, owned by your new account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person approves above 2,000</span>
           <span class="k">orders</span><span class="v">what the company agreed to buy: hosting 500 USDC a month, two purchase orders. An invoice outside them waits for you</span>
           <span class="k">agent</span><span class="v">a sub-account with one key that can only call <span class="mono">request_payment</span></span>
           <span class="k">vendors</span><span class="v">Acme Hosting and Legal Partners on NEAR, DesignCo on Base, so the sample invoices and the recorded readings apply</span>
@@ -349,6 +355,8 @@
         <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
         <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
         <label><span>Owner key kind</span><select id="ownerKeyKind"><option value="">full access (downloaded keys)</option><option value="wallet">function-call key added by the wallet</option></select></label>
+        <label><span>Payer account (funds new accounts and the DAO; set at creation)</span><input id="payer" placeholder="bursar-1a2b3c4d.testnet" autocomplete="off"></label>
+        <label><span>Payer key (full access)</span><input id="payerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
         <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (hackathon demo)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
         <label id="aiKeyRow"><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
         <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
@@ -446,8 +454,8 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 const rpcOverride = q.get("rpc");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind"];
-const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey"];
+const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey"];
 // Who signs owner-level actions here: the owner key, or an operator key limited to its role.
 const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
 const canAct = (perm) => !!settings.ownerKey || (!!settings.operatorKey && !!settings.operator && !!operatorRole()[perm]);
@@ -500,6 +508,10 @@ function reflectSettings() {
 }
 /** The wallet added a function-call key to the owner's account: it signs vendors, orders, limits and approvals, not deposits or new accounts. */
 const hasFullAccess = () => !!settings.ownerKey && settings.ownerKeyKind !== "wallet";
+/** Who creates accounts and attaches deposits: the owner's full-access key, or the payer account kept from creation (a wallet owner). */
+const funder = () => hasFullAccess() ? { signerId: settings.owner, secretKey: settings.ownerKey } : settings.payer && settings.payerKey ? { signerId: settings.payer, secretKey: settings.payerKey } : null;
+// The public list of treasuries the explorer and the sign-in page read (contracts/registry).
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
 function saveSettings() {
   for (const f of FIELDS) { settings[f] = $("#" + f).value.trim(); try { localStorage.setItem("bursar." + f, settings[f]); } catch {} }
   upsertProfile();
@@ -518,7 +530,7 @@ $("#save").addEventListener("click", saveSettings);
 // read the recorded samples below, which need no key at all.
 const DEMO = { network: "testnet", treasury: "treasury.bursar-b48563e6.testnet", agent: "agent.bursar-b48563e6.testnet", model: "z-ai/glm-5.3-flash", label: "README demo (read-only)", owner: "", ownerKey: "", agentKey: "" };
 $("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); location.hash = "#overview"; });
-$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey", "operatorKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
+$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey", "operatorKey", "payerKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
 // ---------- small codecs ----------
 const te = new TextEncoder(), td = new TextDecoder();
@@ -1116,32 +1128,33 @@ $("#govCreate").addEventListener("click", async () => {
   const step = stepper($("#govSteps")); const btn = $("#govCreate"); btn.disabled = true;
   try {
     if (!settings.owner || !settings.ownerKey) throw new Error("only the owner creates the DAO: the owner key is not in Settings");
-    if (!hasFullAccess()) throw new Error("creating a DAO attaches a 6 NEAR deposit: a wallet function-call key cannot; use the downloaded keys");
+    const f = funder();
+    if (!f) throw new Error("creating a DAO attaches a 6 NEAR deposit: a wallet function-call key cannot, and no payer account is kept here; use the downloaded keys");
     const factory = SPUTNIK[settings.network];
     const council = [settings.owner, ...Array.from(document.querySelectorAll(".govMember:checked")).map((c) => c.value), ...$("#govExtra").value.split(",").map((x) => x.trim()).filter(Boolean)];
     const name = `bursar-${settings.owner.split(".")[0]}`.replace(/[^a-z0-9-]/g, "-").slice(0, 40);
     const daoAccount = `${name}.${factory}`;
     const need = NEAR(6) + NEAR(2.5); // deposit, bonds for the treasury, gas
-    let bal = await nearBalance(settings.owner);
+    let bal = await nearBalance(f.signerId);
     if (bal < need) {
-      if (settings.network !== "testnet") throw new Error(`the owner needs about 8.5 NEAR (has ${(Number(bal) / 1e24).toFixed(2)})`);
-      await topUpFromFaucet(settings.owner, step);
-      bal = await nearBalance(settings.owner);
+      if (settings.network !== "testnet") throw new Error(`${f.signerId} needs about 8.5 NEAR (has ${(Number(bal) / 1e24).toFixed(2)})`);
+      await topUpFromFaucet(f.signerId, step);
+      bal = await nearBalance(f.signerId);
       if (bal < need) throw new Error("still not enough NEAR after the faucet; press again");
     }
     if (await accountExists(daoAccount)) step("dao", "ok", `${daoAccount} already exists`);
     else {
       step("dao", "wait", `creating ${daoAccount} with council ${council.join(", ")}`);
       const args = b64(te.encode(JSON.stringify({ config: { name, purpose: `${state.company?.name || settings.label || "Bursar"} approvals`, metadata: "" }, policy: council })));
-      const t = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: factory, method: "create", args: { name, args }, gasTgas: 150, deposit: NEAR(6) });
+      const t = await functionCall({ ...f, receiverId: factory, method: "create", args: { name, args }, gasTgas: 150, deposit: NEAR(6) });
       for (let i = 0; i < 20 && !(await accountExists(daoAccount)); i++) await new Promise((r) => setTimeout(r, 1500));
       step("dao", "ok", `${daoAccount} live, ${council.length} council members`, t.hash);
     }
     step("bonds", "wait", "leaving 2 NEAR in the treasury for proposal bonds");
-    const t2 = await sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, actions: [A.transfer(NEAR(2))] });
+    const t2 = await sendTx({ ...f, receiverId: settings.treasury, actions: [A.transfer(NEAR(2))] });
     step("bonds", "ok", "2 NEAR in the treasury", t2.hash);
     step("roles", "wait", "pointing the treasury at the DAO");
-    const t3 = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "set_roles", args: { agent: null, executor: null, dao: daoAccount, dao_bond: null }, gasTgas: 30 });
+    const t3 = await ownerCall("set_roles", { agent: null, executor: null, dao: daoAccount, dao_bond: null });
     step("roles", "ok", "from now on held payments open a proposal the council votes on", t3.hash);
     await loadTreasury();
   } catch (e) { step("error", "fail", e.message); }
@@ -1156,20 +1169,22 @@ $("#invCreate").addEventListener("click", async () => {
   const btn = $("#invCreate"); btn.disabled = true;
   try {
     if (!settings.owner || !settings.ownerKey) throw new Error("only the owner invites: the owner key is not in Settings");
-    if (!hasFullAccess()) throw new Error("inviting creates an account and moves NEAR: a wallet function-call key cannot; use the downloaded keys");
+    const f = funder();
+    if (!f) throw new Error("inviting creates an account and moves NEAR: a wallet function-call key cannot, and no payer account is kept here; use the downloaded keys");
     const name = $("#invName").value.trim().toLowerCase();
     if (!/^[a-z0-9]{2,32}$/.test(name)) throw new Error("the name is 2 to 32 letters and digits");
     const role = { approve: $("#invApprove").checked, manage_vendors: $("#invVendors").checked, manage_orders: $("#invOrders").checked };
     const methods = Object.entries(role).flatMap(([k, v]) => v ? ROLE_METHODS[k] : []);
     if (!methods.length) throw new Error("pick at least one permission");
-    const account = `${name}.${settings.owner}`;
+    const account = `${name}.${f.signerId}`;
     const key = newKey();
     if (await accountExists(account)) throw new Error(`${account} already exists; pick another name`);
+    if (await nearBalance(f.signerId) < NEAR(0.7)) { if (settings.network !== "testnet") throw new Error(`${f.signerId} needs 0.7 NEAR for the new account`); await topUpFromFaucet(f.signerId, step); }
     step("account", "wait", `creating ${account} with a key limited to ${methods.join(", ")}`);
-    const t1 = await sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: account, actions: [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(key.pub, NEAR(1), settings.treasury, methods)] });
+    const t1 = await sendTx({ ...f, receiverId: account, actions: [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(key.pub, NEAR(1), settings.treasury, methods)] });
     step("account", "ok", `${account} created; 0.5 NEAR for gas, no full-access key: it can only call the treasury`, t1.hash);
     step("role", "wait", "recording the role in the contract");
-    const t2 = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "add_operator", args: { account, role }, gasTgas: 30 });
+    const t2 = await ownerCall("add_operator", { account, role });
     step("role", "ok", `operator ${account}: ${Object.keys(role).filter((k) => role[k]).join(", ")}`, t2.hash);
     const invite = { v: 1, network: settings.network, treasury: settings.treasury, label: state.company?.name || settings.label || settings.treasury, account, key: key.secretKey, role };
     const link = `${location.origin}${location.pathname}#invite=${b64url(JSON.stringify(invite))}`;
@@ -1189,10 +1204,12 @@ function acceptWalletReturn() {
   let pending = null;
   try { pending = JSON.parse(localStorage.getItem("bursar.walletPending") || "null"); } catch {}
   try {
-    if (!pending || pending.pubStr !== p.get("public_key")) throw new Error("this browser did not start that wallet sign-in");
-    for (const f of PROFILE_FIELDS) $("#" + f).value = "";
-    $("#network").value = pending.network; $("#treasury").value = pending.treasury; $("#label").value = pending.label || pending.treasury;
+    if (!pending || pending.stage !== "key" || pending.pubStr !== p.get("public_key")) throw new Error("this browser did not start that wallet sign-in");
+    const known = profiles.find((x) => x.treasury === pending.treasury) || {};
+    for (const f of PROFILE_FIELDS) $("#" + f).value = known[f] ?? "";
+    $("#network").value = pending.network; $("#treasury").value = pending.treasury; $("#label").value = pending.label || known.label || pending.treasury;
     $("#owner").value = p.get("account_id"); $("#ownerKey").value = pending.secretKey; $("#ownerKeyKind").value = "wallet";
+    $("#operator").value = ""; $("#operatorKey").value = ""; $("#operatorRole").value = "";
     saveSettings();
     try { localStorage.removeItem("bursar.walletPending"); } catch {}
     history.replaceState(null, "", location.pathname); location.hash = "#overview";
@@ -1234,6 +1251,41 @@ const DEMO_VENDORS = [
   { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" },
 ];
 async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
+const WALLET = { testnet: "https://testnet.mynearwallet.com", mainnet: "https://app.mynearwallet.com" };
+/** Set by login.html when a wallet account signed in and owns no treasury yet: the one created here belongs to it. */
+const walletOwner = () => { try { return JSON.parse(localStorage.getItem("bursar.walletOwner") || "null"); } catch { return null; } };
+function reflectWalletOwner() {
+  const wo = walletOwner();
+  $("#startWallet").hidden = !wo;
+  if (!wo) return;
+  $("#startOwner").textContent = wo.account; $("#startAv").textContent = wo.account.slice(0, 2).toUpperCase();
+  $("#startTitle").textContent = "Your company's treasury, created at first sign-in.";
+  $("#startText").textContent = "Bursar asks the testnet faucet for a payer account, deploys the policy contract with your wallet as its owner, mints test USDC, registers three vendors and what the company agreed to buy, and creates an agent with one function-call key. About a minute. Afterwards the wallet adds a key for this treasury to the browser.";
+  $("#startAside").textContent = "Only your wallet will be able to change vendors, limits and approvals.";
+  $("#startOwned").textContent = "the policy contract, owned by your wallet account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person approves above 2,000";
+}
+/** Step 2 of the wallet sign-in for a treasury created here: the wallet adds a key limited to it. */
+function connectWalletKey(treasury, owner, label) {
+  const key = newKey();
+  const pending = { stage: "key", network: "testnet", treasury, label, owner, pubStr: key.pubStr, secretKey: key.secretKey };
+  try { localStorage.setItem("bursar.walletPending", JSON.stringify(pending)); localStorage.removeItem("bursar.walletOwner"); } catch {}
+  const u = new URL(`${WALLET.testnet}/login/`);
+  u.searchParams.set("title", "Bursar"); u.searchParams.set("contract_id", treasury); u.searchParams.set("public_key", key.pubStr);
+  u.searchParams.set("success_url", new URL("app.html", location.href).href);
+  u.searchParams.set("failure_url", new URL("login.html?network=testnet&wallet=failed", location.href).href);
+  location.href = u.href;
+}
+/** List the treasury in the public registry so the explorer and the sign-in page find it. Entries are hints; readers verify the owner on the contract. */
+async function registerTreasury(signer, treasury, owner, step) {
+  const reg = REGISTRY[settings.network]; if (!reg) return;
+  try {
+    const got = await view(reg, "get", { treasury });
+    if (got && got.owner === owner) { step("registry", "ok", "listed in the Bursar registry"); return; }
+    step("registry", "wait", "listing the treasury in the Bursar registry");
+    const t = await functionCall({ ...signer, receiverId: reg, method: "register", args: { treasury, owner }, gasTgas: 30, deposit: NEAR(0.01) });
+    step("registry", "ok", "listed in the Bursar registry: the explorer counts it, your wallet finds it at sign-in", t.hash);
+  } catch (e) { step("registry", "fail", `could not list in the registry: ${e.message}`); }
+}
 async function createTreasury() {
   const btn = $("#create"); btn.disabled = true;
   $("#createErr").hidden = true; $("#created").hidden = true;
@@ -1245,10 +1297,11 @@ async function createTreasury() {
     let ob = null;
     try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
     if (!ob) {
-      ob = { root: `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`, rootKey: newKey(), treasuryKey: newKey(), agentKey: newKey() };
+      ob = { root: `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`, rootKey: newKey(), treasuryKey: newKey(), agentKey: newKey(), owner: walletOwner()?.account || "" };
       try { localStorage.setItem("bursar.onboarding", JSON.stringify(ob)); } catch {}
     }
     const { root, rootKey, treasuryKey, agentKey } = ob;
+    const owner = ob.owner || root; // a wallet account signed in at login.html, or the throwaway root itself
     rootKey.pub = keyOf(rootKey.secretKey).pub; treasuryKey.pub = keyOf(treasuryKey.secretKey).pub; agentKey.pub = keyOf(agentKey.secretKey).pub;
     const treasury = `treasury.${root}`, agent = `agent.${root}`;
     const send = (receiverId, actions) => sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId, actions });
@@ -1266,6 +1319,7 @@ async function createTreasury() {
       step("contract", "wait", "fetching the policy contract (303 KB)");
       const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
       step("contract", "wait", `deploying to ${treasury}`);
+      // The payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below).
       const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
       const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)]);
       step("contract", "ok", `policy contract live at ${treasury}`, t1.hash);
@@ -1301,19 +1355,38 @@ async function createTreasury() {
       ]);
       step("orders", "ok", "hosting 500 USDC a month, PO-2026-118 for DesignCo, PO-2026-104 for Legal Partners", t5.hash);
     }
+    if (owner !== root) {
+      const roles = await view(treasury, "get_roles");
+      if (roles[0] === owner) step("owner", "ok", `${treasury} is owned by ${owner}`);
+      else {
+        step("owner", "wait", `handing the treasury to ${owner}`);
+        const t6 = await send(treasury, [A.functionCall("transfer_ownership", { new_owner: owner }, 30)]);
+        step("owner", "ok", `${treasury} is owned by ${owner}; the payer ${root} is only the executor and the agent's parent`, t6.hash);
+      }
+    }
+    await registerTreasury({ signerId: root, secretKey: rootKey.secretKey }, treasury, owner, step);
     try { localStorage.removeItem("bursar.onboarding"); } catch {}
-    for (const [k, v] of Object.entries({ network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner: root, ownerKey: rootKey.secretKey, label: `My treasury (${root.split(".")[0].slice(7)})` })) $("#" + k).value = v;
+    const wallet = owner !== root;
+    const label = `My treasury (${root.split(".")[0].slice(7)})`;
+    for (const f of PROFILE_FIELDS) $("#" + f).value = "";
+    const fields = wallet
+      ? { network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner, ownerKey: "", ownerKeyKind: "wallet", payer: root, payerKey: rootKey.secretKey, label }
+      : { network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner: root, ownerKey: rootKey.secretKey, ownerKeyKind: "", payer: "", payerKey: "", label };
+    for (const [k, v] of Object.entries(fields)) $("#" + k).value = v;
     saveSettings();
-    $("#createdKv").innerHTML = [["owner", root], ["treasury", treasury], ["agent", agent]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
-    const keys = { network: "testnet", owner: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, treasury: { account_id: treasury, public_key: treasuryKey.pubStr, private_key: treasuryKey.secretKey }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
+    $("#createdKv").innerHTML = [["owner", owner], ["treasury", treasury], ["agent", agent], ...(wallet ? [["payer", root]] : [])].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+    const keys = { network: "testnet", label, owner: wallet ? { account_id: owner, note: "your wallet account: the wallet adds its own key to the browser" } : { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, ...(wallet ? { payer: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey, note: "funds invites and the DAO" } } : {}), treasury: { account_id: treasury, public_key: treasuryKey.pubStr, private_key: treasuryKey.secretKey }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
     $("#dlKeys").href = URL.createObjectURL(new Blob([JSON.stringify(keys, null, 2)], { type: "application/json" })); $("#dlKeys").download = `${root}-keys.json`;
+    $("#createdGo").hidden = wallet; $("#createdWallet").hidden = !wallet; $("#createdNote").hidden = !wallet;
+    if (wallet) $("#createdWallet").onclick = () => connectWalletKey(treasury, owner, label);
     $("#created").hidden = false;
-    step("done", "ok", "settings saved in this browser; go to Invoices and load a recorded reading");
+    step("done", "ok", wallet ? "created; connect the wallet key to sign in as the owner" : "settings saved in this browser; go to Invoices and load a recorded reading");
   } catch (e) {
     $("#createErr").textContent = e.message; $("#createErr").hidden = false;
   } finally { btn.disabled = false; }
 }
 $("#create").addEventListener("click", createTreasury);
+reflectWalletOwner();
 try { if (localStorage.getItem("bursar.onboarding")) $("#create").textContent = "Resume creating my treasury"; } catch {}
 let lastDecision = null;
 $("#approve").addEventListener("click", async () => {

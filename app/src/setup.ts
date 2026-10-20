@@ -150,6 +150,16 @@ export async function setup(o: Opts) {
     log(`funded treasury with ${Number(fund) / 1e6} USDC`);
   }
 
+  // 6b. list the treasury in the public registry (explorer and sign-in page). Entries are hints: readers verify the owner on the contract.
+  const registry = process.env.BURSAR_REGISTRY ?? (o.network === "testnet" ? "registry.bursar-b48563e6.testnet" : "");
+  if (registry && await exists(registry)) {
+    const entry = await provider.callFunction({ contractId: registry, method: "get", args: { treasury: names.treasury } }) as { owner: string } | null;
+    if (entry?.owner !== o.root) {
+      await root.callFunction({ contractId: registry, methodName: "register", args: { treasury: names.treasury, owner: o.root }, gas: TGAS(30), deposit: NEAR(0.01) });
+      log(`listed ${names.treasury} in the registry ${registry}`);
+    } else log(`already listed in the registry ${registry}`);
+  }
+
   // 7. the agent's key: one function-call key limited to request_payment, then drop the full-access key
   {
     const keys = await agent.getAccessKeyList();

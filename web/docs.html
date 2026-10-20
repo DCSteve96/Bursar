@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar docs</title>
+<meta name="description" content="How Bursar works, end to end: the three roles, the rules the contract enforces, orders and holds, people and the DAO, the attested reading, signing in, the console, the explorer, and how to run it yourself.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: var(--paper); color: var(--fg-light); color-scheme: light; }
+  .bar { color: var(--fg-dark); }
+  .docs { max-width: var(--max); margin: 0 auto; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 48px; padding: 48px max(16px, env(safe-area-inset-left, 0px)) 96px; }
+  .toc { position: sticky; top: 72px; align-self: start; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .toc .eyebrow { margin-bottom: 8px; }
+  .toc a { color: var(--mute-light); text-decoration: none; padding: 4px 0; border-left: 2px solid transparent; padding-left: 12px; }
+  .toc a:hover, .toc a.on { color: var(--fg-light); border-left-color: var(--signal); }
+  .doc > section { padding: 0 0 48px; margin-bottom: 48px; border-bottom: 1px solid var(--line-light); }
+  .doc h1 { font-size: clamp(32px, 5vw, 44px); letter-spacing: -0.02em; line-height: 1.05; margin: 0 0 12px; }
+  .doc h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 8px; }
+  .doc h3 { font-size: 17px; margin: 28px 0 8px; }
+  .doc p, .doc li { font-size: 16px; line-height: 1.6; max-width: 72ch; }
+  .doc ul, .doc ol { padding-left: 22px; margin: 12px 0; }
+  .doc li { margin: 6px 0; }
+  .doc .eyebrow { color: var(--paid-light); }
+  .doc .lead { color: var(--mute-light); font-size: 18px; }
+  .doc .code { margin: 16px 0; }
+  .doc code { font: 500 0.92em var(--mono); background: var(--bone); padding: 1px 5px; border-radius: 3px; }
+  .doc table { margin: 12px 0; font-size: 15px; }
+  .doc .note { background: var(--mint); border-radius: 4px; padding: 16px 18px; max-width: 72ch; }
+  .doc .note p { margin: 0; }
+  .doc a { color: inherit; }
+  .rule { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 6px 16px; max-width: 76ch; }
+  .rule .k { font: 600 12px/1.6 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); padding-top: 3px; }
+  @media (max-width: 900px) { .docs { grid-template-columns: minmax(0, 1fr); gap: 24px; } .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px 14px; } .toc .eyebrow { width: 100%; } .toc a { border-left: 0; padding-left: 0; } .rule { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<header class="bar"><div class="in">
+  <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
+  <nav><a href="explorer.html">Explorer</a><a href="docs.html" aria-current="page">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login.html" class="btn btn-ghost">Log in</a></nav>
+</div></header>
+
+<div class="docs">
+<nav class="toc" id="toc">
+  <div class="eyebrow">[ DOCS ]</div>
+  <a href="#what">What Bursar is</a>
+  <a href="#flow">How a payment flows</a>
+  <a href="#rules">The rules the contract enforces</a>
+  <a href="#orders">Orders and holds</a>
+  <a href="#people">People, roles, DAO</a>
+  <a href="#reading">The reading and its receipt</a>
+  <a href="#signin">Signing in</a>
+  <a href="#console">The console</a>
+  <a href="#explorer">Explorer and registry</a>
+  <a href="#run">Run it yourself</a>
+  <a href="#limits">Custody and limits</a>
+  <a href="#glossary">Glossary</a>
+</nav>
+
+<main class="doc">
+<section id="what">
+  <div class="eyebrow">[ 01 ]</div>
+  <h1>What Bursar is</h1>
+  <p class="lead">An AI treasurer for small companies that pays invoices within limits it cannot change.</p>
+  <p>Every company pays invoices. Two things go wrong, often: someone pays a fake invoice (the "please note our new bank details" fraud, the most common business scam in the world), and someone pays the same invoice twice. Letting an AI do the work makes both worse, unless the AI never holds the keys.</p>
+  <p>Bursar splits the job in three. <strong>The AI reads</strong> the invoice inside a trusted execution environment on NEAR AI Cloud and reports what it says. <strong>The contract decides</strong>: a NEAR smart contract owned by the company checks the vendor, the payout, the amounts, the orders, and pays or refuses by itself. <strong>A dumb executor moves the money</strong>, and only to the destination the owner recorded. Nobody in the loop can both decide and move money, and the AI cannot choose an address.</p>
+  <div class="note"><p>Bursar is software, not a payment service. The USDC stays in the company's own contract, with the company's keys. Nothing passes through Bursar.</p></div>
+</section>
+
+<section id="flow">
+  <div class="eyebrow">[ 02 ]</div>
+  <h2>How a payment flows</h2>
+  <ol>
+    <li>An invoice PDF arrives: dropped in the console, or in the inbox folder the agent watches.</li>
+    <li>The <strong>agent</strong> rasterizes it and sends the page to a model running in a TEE on NEAR AI Cloud. First it fetches an attestation for a fresh nonce; the answer comes back as structured JSON with an ECDSA signature over the exact bytes.</li>
+    <li>The agent turns the answer into a claim (vendor, invoice number, amount, payout printed on the invoice, order reference, flags) and calls <code>request_payment</code> on the policy contract. Its only key can call that one method on that one contract.</li>
+    <li>The <strong>contract</strong> decides, deterministically and on chain, in the same transaction.</li>
+    <li>A vendor on NEAR is paid in that transaction. A vendor on Base, Arbitrum, Solana or Sui is queued for the <strong>executor</strong>, which settles through NEAR Intents to the address on record, verified by the contract before any USDC leaves (mainnet only).</li>
+    <li>Every decision is an on-chain event and carries a reference to the signed receipt of the reading. There is no database.</li>
+  </ol>
+</section>
+
+<section id="rules">
+  <div class="eyebrow">[ 03 ]</div>
+  <h2>The rules the contract enforces</h2>
+  <p>The owner sets them; the AI cannot touch them. Each refusal has a reason code you see in the console, the dashboard and the explorer.</p>
+  <div class="rule">
+    <span class="k">unknown_vendor</span><span>The vendor must be in the owner's allowlist, by id.</span>
+    <span class="k">payout_changed</span><span>The payout printed on the invoice must equal the one the owner recorded for that vendor. A "new bank details" invoice dies here, blocked, not paid.</span>
+    <span class="k">duplicate_invoice</span><span>One invoice number per vendor, ever.</span>
+    <span class="k">over_payment_cap</span><span>No single payment above the per-payment cap.</span>
+    <span class="k">over_daily_cap</span><span>No more than the daily cap in one day, across all vendors.</span>
+    <span class="k">over_monthly_budget</span><span>No more than the vendor's monthly budget in one month.</span>
+    <span class="k">insufficient_treasury</span><span>Not enough USDC in the contract.</span>
+    <span class="k">over_threshold</span><span>At or above the approval threshold the payment is held for a person: the DAO council votes, or the owner or an approver decides.</span>
+    <span class="k">no_order</span><span>Nothing the company agreed to buy covers this invoice. Held for a person.</span>
+    <span class="k">flagged</span><span>The model noticed something (urgency, new payment details). Held for a person. The AI can add scrutiny, never remove it.</span>
+  </div>
+  <p style="margin-top:20px">Only the owner changes a vendor's payout. The executor cannot redirect funds: the contract compares the recipient it reports with the vendor record before releasing USDC. A transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked <code>transfer_failed</code>.</p>
+</section>
+
+<section id="orders">
+  <div class="eyebrow">[ 04 ]</div>
+  <h2>Orders and holds</h2>
+  <p>A registered vendor with the right account could still invent invoices under every cap. Bursar pays only what the company agreed to buy.</p>
+  <ul>
+    <li><strong>Purchase order</strong>: a reference (PO-2026-118), a total, an optional expiry. Invoices that print the reference consume it until it is spent.</li>
+    <li><strong>Standing order</strong>: an amount per period (500 USDC every 30 days). One invoice per period, up to the amount.</li>
+    <li>An invoice that no order covers is <em>held</em>, not blocked: a person sees it in Attention and approves or cancels it. By default only vendors that have orders are held to them; <code>set_order_policy true</code> makes every invoice need an order.</li>
+  </ul>
+  <p>A hold is never silent. The Overview shows what waits for a person, and the hold's reasons are written on the payment: <code>over_threshold</code>, <code>no_order</code>, <code>flagged</code>, or a combination.</p>
+</section>
+
+<section id="people">
+  <div class="eyebrow">[ 05 ]</div>
+  <h2>People, roles, DAO</h2>
+  <h3>Owner</h3>
+  <p>The NEAR account that owns the contract: your wallet. It sets limits, vendors, orders and the company name, approves held payments, invites and removes collaborators.</p>
+  <h3>Operators</h3>
+  <p>Collaborators get an on-chain role with three permissions: approve, manage vendors, manage orders. An invite creates an account for them with a single key limited to exactly the methods their role allows, records the role in the contract, and gives you a link that carries the key after the hash sign, so it never reaches a server. Whoever opens it is signed in as that account with that role and nothing else. Remove revokes it on chain.</p>
+  <h3>DAO</h3>
+  <p>From Settings the owner creates a Sputnik DAO with the council of their choice. From then on every held payment opens a proposal that the council votes on, in the console or in Trezu on mainnet. A rejected or expired proposal cancels the payment and releases its budget; the contract reads the verdict back from the DAO itself.</p>
+</section>
+
+<section id="reading">
+  <div class="eyebrow">[ 06 ]</div>
+  <h2>The reading and its receipt</h2>
+  <p>The invoice is read by a model running in a TEE on NEAR AI Cloud. The invoice never leaves the enclave in clear text. The answer comes with a receipt anyone can verify, without the API key and without trusting the agent:</p>
+  <ul>
+    <li>the exact request and response bytes, and their hashes;</li>
+    <li>the enclave's ECDSA signature over <code>model:sha256(request):sha256(response)</code>;</li>
+    <li>the attestation report with the Intel TDX quote, bound to the signer and to the fresh nonce the agent chose;</li>
+    <li>the quote checked against Intel's collateral (TCB status).</li>
+  </ul>
+  <p>Change one byte and the signature fails. The contract stores a compact reference to the receipt next to the payment, so a decision can always be traced to exactly the model output it was made on. The console runs the same checks in the browser; <code>bursar verify</code> runs them from the terminal.</p>
+  <h3>Who holds the NEAR AI Cloud key</h3>
+  <p>Two plans. <strong>Bursar reading</strong>, used for this hackathon demo: the browser goes through Bursar's relay, a Cloudflare Worker that holds a key paid by the team and forwards the bytes untouched, with daily caps. <strong>Own key</strong>: a company using Bursar brings its own NEAR AI Cloud key, and the invoice goes from the browser straight to the enclave, never through Bursar.</p>
+</section>
+
+<section id="signin">
+  <div class="eyebrow">[ 07 ]</div>
+  <h2>Signing in</h2>
+  <p>No password, no server. Three doors on the <a href="login.html">sign-in page</a>:</p>
+  <ul>
+    <li><strong>NEAR wallet.</strong> The wallet tells the console who you are. If your account owns a treasury (the registry lists it, the contract confirms it), you pick it and the wallet adds a key limited to that contract to your browser: it signs vendors, orders, limits and approvals, never a transfer. If your account owns none, the console creates one at this first sign-in: a payer account from the testnet faucet, the policy contract deployed with your wallet as owner, test USDC, three demo vendors and their orders, an agent with one key. Bursar pays for the accounts and the contract storage; you pay nothing.</li>
+    <li><strong>Invite link.</strong> A colleague's link signs you in with exactly the role they chose.</li>
+    <li><strong>Keys file.</strong> For a treasury created with throwaway keys ("Download the keys"), when there is no wallet at all.</li>
+  </ul>
+  <p>Several treasuries live side by side in the console's switcher. "Switch account" takes you back to the door.</p>
+</section>
+
+<section id="console">
+  <div class="eyebrow">[ 08 ]</div>
+  <h2>The console</h2>
+  <p>A static page: nothing to install, every number read from the contract over RPC, every change signed in the browser.</p>
+  <div class="rule">
+    <span class="k">Overview</span><span>Balance, spent this month, budgets, what waits for a person, the last decisions.</span>
+    <span class="k">Invoices</span><span>Drop a PDF or load a recorded reading; watch the enclave read it, the receipt verify, the contract answer. "Request payment" signs with the agent key.</span>
+    <span class="k">Attention</span><span>Held payments to approve or cancel, council votes when there is a DAO, and what was refused, with the reason.</span>
+    <span class="k">Vendors</span><span>The allowlist: id, name, payout on record, monthly budget, active or not.</span>
+    <span class="k">Orders</span><span>Purchase orders and standing orders, what each has consumed, close.</span>
+    <span class="k">Analytics</span><span>Spend by vendor and by month, straight from the payments.</span>
+    <span class="k">Settings</span><span>Company, limits, strict order mode, operators and invites, governance (create the DAO), keys and reading plan.</span>
+  </div>
+</section>
+
+<section id="explorer">
+  <div class="eyebrow">[ 09 ]</div>
+  <h2>Explorer and registry</h2>
+  <p>The <a href="explorer.html">explorer</a> shows the whole network: how many companies, the USDC their contracts hold, what was paid out today, this month and all time, how many decisions, blocked, waiting for a person, and the last decisions across every company. Nothing private: amounts and decisions are on-chain events. Vendor names and invoice numbers appear only on each company's own dashboard.</p>
+  <p>It reads a small public contract, the <strong>registry</strong>, where every treasury lists itself when it is created (the console does it; <code>bursar setup</code> too). Entries are hints, not proof: the explorer and the sign-in page read <code>get_roles</code> on each treasury and drop entries whose owner does not match.</p>
+</section>
+
+<section id="run">
+  <div class="eyebrow">[ 10 ]</div>
+  <h2>Run it yourself</h2>
+  <p>The <a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">README</a> is a walkthrough in "do X, see Y" form; the short version:</p>
+  <div class="code">git clone https://github.com/DCSteve96/Bursar && cd Bursar
+(cd contracts/policy && cargo test && ./build.sh)
+cd app && npm install && npm test
+npx tsx src/cli.ts setup --root you.testnet     # accounts, contract, USDC, vendors, orders, DAO
+set -a; source .env.testnet; set +a
+npm run relayer &amp;
+npm run agent -- --once --offline                # drop --offline to read with NEAR AI Cloud
+npm run dev status
+npm run dev verify 1                             # the receipt behind payment 1</div>
+  <p>The agent sends its claims as meta transactions (NEP-366) through a relayer that only forwards <code>request_payment</code>, so the agent owns no NEAR. An MCP server (<code>bursar mcp</code>) lets any assistant drive it with exactly the agent's powers: submit an invoice, list payments, explain a decision, verify a receipt.</p>
+</section>
+
+<section id="limits">
+  <div class="eyebrow">[ 11 ]</div>
+  <h2>Custody and limits</h2>
+  <ul>
+    <li>Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through Bursar. USDC only.</li>
+    <li>The AI never chooses an address. The executor cannot redirect funds. Only the owner changes a payout, and a changed payout on an invoice is a block.</li>
+    <li>Cross-chain payouts through NEAR Intents are mainnet only; on testnet the Base vendor stops at Queued.</li>
+    <li>The verifier checks the signature, the nonce, the quote's binding and the quote against Intel collateral. It does not yet replay the RTMR3 event log or check GPU evidence; the receipt keeps both.</li>
+    <li>The wallet sign-in adds a function-call key. Creating the DAO and inviting collaborators need NEAR deposits, which the payer account kept from creation funds on testnet.</li>
+    <li>Sample invoices are fictional. Nothing in the demo is a real person or company.</li>
+  </ul>
+</section>
+
+<section id="glossary" style="border-bottom:0">
+  <div class="eyebrow">[ 12 ]</div>
+  <h2>Glossary</h2>
+  <div class="rule">
+    <span class="k">treasury</span><span>The company's policy contract, a NEAR account that holds the USDC and the rules.</span>
+    <span class="k">agent</span><span>The process (or the browser) that reads invoices and asks the contract to pay. One key, one method.</span>
+    <span class="k">executor</span><span>The process that settles cross-chain payments the contract queued. No AI, no choice of destination.</span>
+    <span class="k">payout</span><span>Where a vendor gets paid: a NEAR account, or a chain and an address. Recorded by the owner, compared on every invoice.</span>
+    <span class="k">hold</span><span>A payment that waits for a person: over the threshold, outside the orders, or flagged by the model.</span>
+    <span class="k">receipt</span><span>The signed, attested record of one reading inside the enclave.</span>
+    <span class="k">TEE</span><span>Trusted execution environment: hardware-isolated compute (Intel TDX here) that proves what ran with an attestation quote.</span>
+    <span class="k">registry</span><span>The public list of treasuries the explorer and the sign-in page read.</span>
+  </div>
+</section>
+</main>
+</div>
+
+<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional.</footer>
+<script>
+const links = [...document.querySelectorAll("#toc a")];
+const obs = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) for (const a of links) a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); }, { rootMargin: "-20% 0px -70% 0px" });
+for (const s of document.querySelectorAll(".doc > section")) obs.observe(s);
+</script>
+</body>
+</html>

@@ -384,6 +384,14 @@ impl Bursar {
         self.emit("company_set", &name);
     }
 
+    /// Hand the treasury to another account. Used when a payer account bootstraps a treasury for a
+    /// wallet owner, and to move a company to new keys.
+    pub fn transfer_ownership(&mut self, new_owner: AccountId) {
+        self.assert_owner();
+        self.owner = new_owner.clone();
+        self.emit("owner_changed", new_owner.as_str());
+    }
+
     // ----- operators: the owner delegates parts of its power, on chain, revocably -----
 
     pub fn add_operator(&mut self, account: AccountId, role: Role) {
@@ -1162,6 +1170,19 @@ mod tests {
         testing_env!(ctx(accounts(0)).build());
         c.approve_payment(id);
         assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+    }
+
+    #[test]
+    fn transfer_ownership_moves_every_owner_power() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        c.transfer_ownership(accounts(5));
+        assert_eq!(c.get_roles().0, accounts(5));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_company("x".into(), "".into())));
+        assert!(r.is_err(), "the old owner is out");
+        testing_env!(ctx(accounts(5)).build());
+        c.set_company("Wallet Co".into(), "".into());
+        assert_eq!(c.get_company().unwrap().name, "Wallet Co");
     }
 
     fn no_dao() -> Bursar {

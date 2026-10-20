@@ -27,7 +27,7 @@
 <body>
 <header class="bar"><div class="in">
   <a class="wordmark" href="index.html" aria-current="page"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <nav><a href="dashboard.html" id="dashLink">Dashboard</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login.html" class="btn btn-ghost" style="padding:6px 16px;font-size:14px;color:var(--paper)">Log in</a></nav>
+  <nav><a href="docs.html">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login.html" class="btn btn-ghost">Log in</a></nav>
 </div></header>
 
 <section class="band hero">
@@ -42,8 +42,8 @@
     <p class="sub muted" style="max-width:62ch;margin-top:32px">Bursar pays a small company's invoices without ever handing the AI a key. Invoices are read inside a NEAR AI Cloud enclave, a NEAR contract decides inside limits the owner set, and the only thing that moves USDC is a dumb executor the contract keeps on a leash.</p>
     <div class="actions">
       <a class="btn btn-signal" href="login.html">Log in</a>
-      <a class="btn btn-ghost" href="app.html#start">Create a treasury</a>
-      <a class="btn btn-ghost" href="dashboard.html" id="dashBtn">See the live treasury</a>
+      <a class="btn btn-ghost" href="explorer.html">See the live treasury</a>
+      <a class="btn btn-ghost" href="docs.html">Docs</a>
     </div>
   </div>
 </section>
@@ -94,11 +94,11 @@ verified</div></div>
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ 04 / TRY IT ]</div><h2 class="heading">Four invoices, four decisions, one command each.</h2></div>
     <div class="grid cols-2">
-      <div class="card"><div class="eyebrow muted">From the browser</div><p class="fine" style="margin:12px 0 0">Open the console, paste a treasury and the agent's one key, drop a PDF. Watch the enclave read it, the receipt verify, and the contract answer.</p><a class="btn btn-signal" href="app.html" style="margin-top:24px">Open the console</a></div>
+      <div class="card"><div class="eyebrow muted">From the browser</div><p class="fine" style="margin:12px 0 0">Log in with your NEAR wallet. No treasury yet? Bursar creates one on the spot, at no cost to you. Then drop a PDF and watch the enclave read it, the receipt verify, and the contract answer.</p><a class="btn btn-signal" href="login.html" style="margin-top:24px">Open the console</a></div>
       <div class="card"><div class="eyebrow muted">From the terminal</div><div class="code" style="margin-top:12px">npx tsx src/cli.ts setup --root you.testnet
 npm run relayer &amp;
 npm run agent -- --once        # NEAR_AI_API_KEY set
-npm run dev status</div><a class="btn btn-ghost" href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener" style="margin-top:24px">Read the README</a></div>
+npm run dev status</div><a class="btn btn-ghost" href="docs.html" style="margin-top:24px">Read the docs</a></div>
     </div>
   </div>
 </section>
@@ -111,7 +111,6 @@ const q = new URLSearchParams(location.search);
 const network = q.get("network") || "testnet";
 const treasury = q.get("treasury") || "treasury.bursar-b48563e6.testnet";
 const $ = (s) => document.querySelector(s);
-$("#dashLink").href = $("#dashBtn").href = `dashboard.html?network=${network}&treasury=${encodeURIComponent(treasury)}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const usdc = (u) => { const n = BigInt(u); const d = 10n ** 6n; return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(6, "0").slice(0, 2)} USDC`; };
 async function view(method, args = {}) {
@@ -128,7 +127,7 @@ const REASON = { payout_changed: "the invoice asks for a different wallet than t
     const [stats, payments] = await Promise.all([view("get_stats"), view("list_payments", { from: 0, limit: 200 })]);
     const last = payments.slice(-5).reverse();
     $("#deck").innerHTML = last.map((p) => `<div class="dec"><div class="eyebrow muted">#${p.id} ${esc(p.vendor_id)} ${esc(p.invoice_number)}</div><div class="stamp ${esc(p.status)}" style="margin-top:12px">${esc(p.status)}</div><div class="mono" style="margin-top:8px">${usdc(p.amount)}${p.dao_proposal_id !== null ? ` · dao#${p.dao_proposal_id}` : ""}</div><div class="what">${esc(p.status === "Blocked" ? (REASON[p.reason] ?? p.reason) : WHAT[p.status] ?? "")}</div></div>`).join("") || `<div class="dec muted">no payments yet</div>`;
-    $("#liveFoot").innerHTML = `${stats.payments} decisions on <span class="mono">${esc(treasury)}</span>, balance ${usdc(stats.balance)}. Every one was read by NEAR AI Cloud inside the TEE.`;
+    $("#liveFoot").innerHTML = `${stats.payments} decisions on <span class="mono">${esc(treasury)}</span>, balance ${usdc(stats.balance)}. Every one was read by NEAR AI Cloud inside the TEE. <a href="explorer.html">Every treasury on the network</a>.`;
   } catch (e) { $("#deck").innerHTML = `<div class="dec muted">could not read ${esc(treasury)}: ${esc(e.message)}</div>`; }
 })();
 (function stars() {

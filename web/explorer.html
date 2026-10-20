@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar explorer</title>
+<meta name="description" content="Every Bursar treasury on the network, read from the chain: how many companies, how much USDC they hold and moved, and the last decisions the contracts made.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="stylesheet" href="style.css">
+<style>
+  .deck { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+  .dec { border: 1px solid var(--line-dark); border-radius: 4px; padding: 20px; min-width: 0; }
+  .dec .stamp { font-size: 32px; }
+  .dec .what { margin-top: 12px; font-size: 14px; color: var(--mute-dark); }
+  .dec .where { margin-top: 10px; font: 500 12px var(--mono); color: var(--mute-dark); overflow-wrap: anywhere; }
+  .net { display: inline-flex; gap: 8px; margin-top: 24px; }
+  .net button { font: 500 13px/1 var(--mono); padding: 8px 14px; background: transparent; border: 1px solid var(--line-dark); color: var(--mute-dark); border-radius: 4px; }
+  .net button[aria-pressed="true"] { background: var(--paper); color: var(--void); border-color: var(--paper); }
+  .stat .v.big { color: var(--signal); }
+  .light .stat .v.big { color: var(--paid-light); }
+  .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); margin-right: 8px; vertical-align: middle; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  td a { color: inherit; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="in">
+  <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
+  <nav><a href="explorer.html" aria-current="page">Explorer</a><a href="docs.html">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login.html" class="btn btn-ghost">Log in</a></nav>
+</div></header>
+
+<section class="band" style="border-top:0">
+  <div class="in">
+    <div class="eyebrow accent">[ EXPLORER / <span id="netLabel">TESTNET</span> ]</div>
+    <h1 class="heading" style="margin-top:16px">Every treasury on the network, read from the chain right now.</h1>
+    <p class="sub muted" style="max-width:62ch;margin-top:16px">Each company runs its own policy contract. This page lists them from the public registry and adds up what the contracts report. Nothing here is private: every number is an on-chain event. Vendor names and invoice numbers stay on each company's own dashboard.</p>
+    <div class="net" role="group" aria-label="Network"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
+    <div class="grid stats" id="stats" style="margin-top:32px"></div>
+    <div id="err" class="err" hidden style="margin-top:16px"></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow"><span class="pulse" aria-hidden="true"></span>[ LAST DECISIONS, ALL COMPANIES ]</div><h2 class="heading">What the contracts decided last.</h2></div>
+    <div class="deck" id="deck"><div class="dec muted">loading...</div></div>
+  </div>
+</section>
+
+<section class="band light">
+  <div class="in">
+    <div class="band-head"><div class="eyebrow">[ COMPANIES ]</div><h2 class="heading">One contract each, with its own keys.</h2></div>
+    <div class="wrap"><table id="companies"><thead><tr><th>treasury</th><th>since</th><th>decisions</th><th>held for a person</th><th>last decision</th><th></th></tr></thead><tbody><tr><td colspan="6" class="muted">loading...</td></tr></tbody></table></div>
+    <p class="muted" id="foot" style="margin-top:24px;font-size:14px"></p>
+  </div>
+</section>
+
+<footer>Bursar is software, not a payment service. Funds stay in each company's own contract, with the company's keys.</footer>
+
+<script>
+const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
+// The public list of treasuries (contracts/registry). Entries are hints: each treasury's owner is read from the contract itself.
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
+const DEC = 6;
+const $ = (s) => document.querySelector(s);
+const q = new URLSearchParams(location.search);
+let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
+async function view(contract, method, args = {}) {
+  const r = await fetch(q.get("rpc") || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.data?.message ?? j.error.message ?? JSON.stringify(j.error));
+  if (j.result.error) throw new Error(j.result.error);
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+}
+const usdc = (u) => { const n = BigInt(u); const d = 10n ** BigInt(DEC); return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(DEC, "0").slice(0, 2)} USDC`; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ago = (ms) => { const s = Math.max(0, (Date.now() - ms) / 1000); if (s < 90) return "just now"; if (s < 5400) return `${Math.round(s / 60)} min ago`; if (s < 172800) return `${Math.round(s / 3600)} h ago`; return `${Math.round(s / 86400)} d ago`; };
+const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+const ms = (ns) => Math.floor(Number(ns) / 1e6); // payments carry nanoseconds; the registry milliseconds
+const WHAT = { Paid: "under the caps, paid on NEAR in one transaction", Queued: "cross-chain vendor, waiting for the executor", Approval: "held for a person", Blocked: "", Cancelled: "cancelled after the DAO's answer", Settled: "delivered on the vendor's chain", Settling: "USDC on its way through NEAR Intents" };
+const REASON = { payout_changed: "the invoice asks for a different wallet than the one on record", duplicate_invoice: "same vendor and invoice number already accepted", unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner", transfer_failed: "token transfer failed, balance restored", dao_proposal_failed: "the DAO refused the proposal", over_payment_cap: "above the per-payment cap", over_daily_cap: "daily cap exceeded", over_monthly_budget: "monthly budget exceeded", insufficient_treasury: "not enough USDC in the treasury", over_threshold: "above the threshold", no_order: "no purchase order or standing order covers it", flagged: "the model flagged it" };
+const held = (p) => p.status === "Approval";
+const whatOf = (p) => p.status === "Blocked" ? (REASON[p.reason] ?? p.reason) : p.status === "Approval" ? `held: ${(p.reason || "").split("+").map((r) => REASON[r.trim()] ?? r.trim()).filter(Boolean).join("; ") || "waiting for a person"}` : WHAT[p.status] ?? "";
+function setNet(n) {
+  network = n;
+  for (const b of document.querySelectorAll(".net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
+  $("#netLabel").textContent = n.toUpperCase();
+  history.replaceState(null, "", n === "testnet" ? location.pathname : `?network=${n}`);
+  load();
+}
+document.querySelector(".net").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.net !== network) setNet(b.dataset.net); });
+const stat = (k, v, big) => `<div class="stat"><div class="k">${k}</div><div class="v${big ? " big" : ""}">${v}</div></div>`;
+async function load() {
+  $("#err").hidden = true;
+  $("#stats").innerHTML = stat("companies", "...") + stat("treasury balance", "...") + stat("paid out", "...") + stat("decisions", "...");
+  $("#deck").innerHTML = `<div class="dec muted">loading...</div>`;
+  $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">loading...</td></tr>`;
+  try {
+    const reg = REGISTRY[network];
+    if (!reg) throw new Error(`no registry on ${network} yet: Bursar runs on testnet for the hackathon`);
+    const entries = [];
+    for (let from = 0; ; from += 100) { const page = await view(reg, "list", { from, limit: 100 }); entries.push(...page); if (page.length < 100) break; }
+    const companies = (await Promise.all(entries.map(async ([treasury, e]) => {
+      try {
+        const [roles, stats, payments] = await Promise.all([view(treasury, "get_roles"), view(treasury, "get_stats"), view(treasury, "list_payments", { from: 0, limit: 200 })]);
+        if (roles[0] !== e.owner) return null; // the registry entry does not match the contract: dropped
+        return { treasury, since: e.registered_at, stats, payments };
+      } catch { return null; }
+    }))).filter(Boolean);
+    const all = companies.flatMap((c) => c.payments.map((p) => ({ ...p, treasury: c.treasury, updated_at: ms(p.updated_at), created_at: ms(p.created_at) })));
+    const today = day(Date.now()), month = today.slice(0, 7);
+    const moved = (p) => ["Paid", "Settled", "Settling"].includes(p.status);
+    const sum = (list) => list.reduce((a, p) => a + BigInt(p.amount), 0n);
+    const balance = companies.reduce((a, c) => a + BigInt(c.stats.balance), 0n);
+    const paid = all.filter(moved), blocked = all.filter((p) => p.status === "Blocked"), waiting = all.filter(held);
+    $("#stats").innerHTML =
+      stat("companies", companies.length, true) +
+      stat("treasury balance", usdc(balance)) +
+      stat("paid out, all time", usdc(sum(paid))) +
+      stat("paid out today", usdc(sum(paid.filter((p) => day(p.updated_at) === today)))) +
+      stat("paid out this month", usdc(sum(paid.filter((p) => day(p.updated_at).startsWith(month))))) +
+      stat("decisions", all.length) +
+      stat("blocked", blocked.length) +
+      stat("waiting for a person", waiting.length);
+    const last = all.sort((a, b) => b.updated_at - a.updated_at).slice(0, 10);
+    $("#deck").innerHTML = last.map((p) => `<div class="dec"><div class="eyebrow muted">${esc(ago(p.updated_at))}</div><div class="stamp ${esc(p.status)}" style="margin-top:12px">${esc(p.status)}</div><div class="mono" style="margin-top:8px">${usdc(p.amount)}${p.dao_proposal_id !== null && p.dao_proposal_id !== undefined ? ` · dao#${p.dao_proposal_id}` : ""}</div><div class="what">${esc(whatOf(p))}</div><div class="where">${esc(p.treasury)} #${p.id}</div></div>`).join("") || `<div class="dec muted">no decisions yet</div>`;
+    $("#companies tbody").innerHTML = companies.sort((a, b) => b.since - a.since).map((c) => {
+      const lastP = c.payments[c.payments.length - 1];
+      return `<tr><td class="mono id"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="s ${esc(lastP.status)}">${esc(lastP.status)}</span> <span class="mono">${usdc(lastP.amount)}</span>` : `<span class="muted">none yet</span>`}</td><td><a href="dashboard.html?network=${network}&treasury=${encodeURIComponent(c.treasury)}">dashboard</a></td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="muted">no companies registered yet</td></tr>`;
+    $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
+  } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; $("#deck").innerHTML = `<div class="dec muted">${esc(e.message)}</div>`; $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
+}
+setNet(network);
+</script>
+</body>
+</html>
