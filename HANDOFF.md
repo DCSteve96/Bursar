@@ -181,6 +181,15 @@ Obiezione di Stefano: un fornitore registrato inventa fatture e svuota la cassa 
 - `sendTx`: su qualunque connessione caduta durante `send_tx` ("Failed to fetch", non solo "Timeout") interroga la transazione per hash prima di arrendersi: la `create` della factory è lenta e il primo giro era fallito così pur essendo passata.
 - Test `app/.bursar/daotest.cjs`: treasury `bursar-7a821dc8.testnet`, DAO `bursar-bursar-7a821dc8.sputnik-v2.testnet` creata da Settings con il faucet di appoggio, Legal Partners in attesa con proposta 0 (InProgress, 0 di 1 voti), voto del titolare, Paid. Un primo giro (`bursar-f92eedea.testnet`) era caduto sulla connessione durante la `create`: la DAO potrebbe esistere lì senza essere collegata; ignorare.
 
+### 2.16 Login e barra laterale (20 ottobre, stessa sessione)
+
+Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI, pagina di login) e chiesto un pulsante Login nella landing che faccia entrare "come ci siamo detti".
+
+- `web/login.html`: pagina di accesso con tre vie, nessuna password. 1) Wallet NEAR: la pagina legge `get_roles` del treasury indicato, genera una chiave, la salva come `bursar.walletPending` e manda al login di MyNearWallet (`/login/?contract_id=<treasury>&public_key=...&success_url=app.html`), flusso URL classico di near-api-js: il wallet aggiunge all'account del titolare una function-call key limitata al contratto treasury e torna su `app.html?account_id=...&public_key=...`; `acceptWalletReturn()` controlla che la chiave sia quella attesa e salva il profilo con `ownerKeyKind = "wallet"`. Una chiave così firma fornitori, ordini, limiti, approvazioni, azienda, operatori; non può allegare depositi né creare account, quindi DAO e inviti dicono "use the downloaded keys" (`hasFullAccess()`); in futuro quelle due azioni possono passare dal wallet con il redirect di firma. Non testato end to end: richiede il wallet reale nel browser; il ritorno è simulabile con `?account_id=&public_key=` e la chiave pendente. 2) File delle chiavi scaricato dall'onboarding: drop o scelta del file, profilo creato, dentro. 3) Link d'invito incollato.
+- `web/app.html`: barra laterale scura a sinistra (logo, selettore azienda, voci con icone, badge rosso sulle attese, in basso il blocco utente con avatar, nome e ruolo e il link "Switch account" verso il login); su telefono la stessa barra diventa un'intestazione con le voci scorrevoli. Campo `ownerKeyKind` nelle impostazioni e nei profili.
+- Landing: pulsante "Log in" nella barra e nell'hero, più "Create a treasury".
+- Da fare: firma via wallet per DAO e inviti; wallet-selector (Meteor, HOT) oltre a MyNearWallet.
+
 ## 3. Decisioni prese
 
 - Separato da Epoch, sempre. Niente brand, niente Sui.

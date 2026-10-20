@@ -13,16 +13,34 @@
 <style>
   /* App shell: dark sidebar, paper workspace. Dense but calm: 4px radii, hairlines, one signal color, semantic pills. */
   body { background: var(--bone); color: var(--fg-light); color-scheme: light; }
-  .bar { position: sticky; top: 0; height: 56px; background: var(--void); z-index: 5; }
-  .bar .in { max-width: none; }
-  .bar .who select { font: 500 14px/1.4 var(--display); padding: 6px 32px 6px 10px; border: 1px solid var(--line-dark); background: var(--ink); color: var(--fg-dark); border-radius: 4px; max-width: 260px; }
-  .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-  .tabs a { color: var(--mute-dark); text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+  .shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+  .side { background: var(--void); color: var(--fg-dark); display: flex; flex-direction: column; gap: 20px; padding: 20px 14px; position: sticky; top: 0; height: 100vh; box-sizing: border-box; }
+  .side .wordmark { padding: 0 8px; }
+  .side .company { padding: 0 8px; display: flex; flex-direction: column; gap: 6px; }
+  .side .company select { font: 500 14px/1.4 var(--display); padding: 8px 32px 8px 10px; border: 1px solid var(--line-dark); background: var(--ink); color: var(--fg-dark); border-radius: 4px; width: 100%; min-width: 0; text-overflow: ellipsis; }
+  .tabs { display: flex; flex-direction: column; gap: 2px; }
+  .tabs a { color: var(--mute-dark); text-decoration: none; padding: 9px 10px; border-radius: 4px; font-size: 14px; white-space: nowrap; display: flex; align-items: center; gap: 10px; }
+  .tabs a svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; flex: none; }
   .tabs a:hover { color: var(--fg-dark); background: var(--ink); }
   .tabs a[aria-current] { color: var(--void); background: var(--signal); font-weight: 600; }
-  .badge { background: var(--blocked); color: #fff; border: 0; padding: 0 6px; border-radius: 999px; font-size: 11px; }
+  .badge { margin-left: auto; background: var(--blocked); color: #fff; padding: 0 7px; border-radius: 999px; font: 600 11px/18px var(--mono); }
   .tabs a[aria-current] .badge { background: var(--void); }
-  @media (max-width: 760px) { .bar .in { gap: 8px; } .bar .who select { max-width: 120px; } .wordmark span { display: none; } }
+  .side .me { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-top: 1px solid var(--line-dark); }
+  .side .me .avatar { width: 32px; height: 32px; border-radius: 4px; background: var(--signal); color: var(--void); display: grid; place-items: center; font: 700 13px/1 var(--mono); flex: none; }
+  .side .me .min { min-width: 0; flex: 1; } .side .me .name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .side .me .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side .me .out { color: var(--mute-dark); text-decoration: none; font-size: 18px; }
+  .work { min-width: 0; }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: minmax(0, 1fr); }
+    .side .company select { min-width: 0; max-width: 100%; }
+    .side { position: sticky; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; z-index: 5; }
+    .side .company { flex: 1 1 140px; } .side .company .eyebrow { display: none; }
+    .tabs { flex-direction: row; overflow-x: auto; scrollbar-width: none; width: 100%; min-width: 0; flex: 1 1 100%; order: 3; }
+    .side .company { min-width: 0; }
+    .tabs a { padding: 8px 10px; }
+    .side .me { margin-top: 0; border-top: 0; padding: 0; order: 2; } .side .me .min { display: none; }
+    .wordmark span { display: none; }
+  }
 
   /* Views are pages on the paper workspace; the invoice flow keeps its dark/mint/dark rhythm inside its page. */
   .view { background: var(--bone); color: var(--fg-light); border-top: 0; }
@@ -71,19 +89,29 @@
 </style>
 </head>
 <body>
-<header class="bar"><div class="in">
+<div class="shell">
+<aside class="side">
   <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24"><span>Bursar</span></a>
+  <div class="company">
+    <div class="eyebrow muted">Company</div>
+    <select id="profile" title="treasury"></select>
+  </div>
   <nav class="tabs" id="tabs">
-    <a href="#overview" data-view="overview">Overview</a>
-    <a href="#invoices" data-view="invoices">Invoices</a>
-    <a href="#attention" data-view="attention">Attention <span class="chip badge" id="attnBadge" hidden>0</span></a>
-    <a href="#vendors" data-view="vendors">Vendors</a>
-    <a href="#orders" data-view="orders">Orders</a>
-    <a href="#analytics" data-view="analytics">Analytics</a>
-    <a href="#settings" data-view="settings">Settings</a>
+    <a href="#overview" data-view="overview"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/></svg>Overview</a>
+    <a href="#invoices" data-view="invoices"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1h7l3 3v11H3z"/><path d="M5 7h6M5 10h6M5 13h4"/></svg>Invoices</a>
+    <a href="#attention" data-view="attention"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z"/><path d="M8 6v4M8 11.5v1"/></svg>Attention <span class="badge" id="attnBadge" hidden>0</span></a>
+    <a href="#vendors" data-view="vendors"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="3"/><path d="M1 15c0-3 2-5 5-5s5 2 5 5"/><path d="M11 4h4M11 7h4"/></svg>Vendors</a>
+    <a href="#orders" data-view="orders"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>Orders</a>
+    <a href="#analytics" data-view="analytics"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14h12"/><rect x="3" y="8" width="2" height="5"/><rect x="7" y="4" width="2" height="9"/><rect x="11" y="6" width="2" height="7"/></svg>Analytics</a>
+    <a href="#settings" data-view="settings"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5 13 13M3 13l1.5-1.5M11.5 4.5 13 3"/></svg>Settings</a>
   </nav>
-  <div class="who"><select id="profile" title="treasury"></select></div>
-</div></header>
+  <div class="me">
+    <div class="avatar" id="meAvatar">?</div>
+    <div class="min"><div class="name" id="meName">Not signed in</div><div class="muted mono" id="meRole">read-only</div></div>
+    <a href="login.html" class="out" title="Switch account">⇄</a>
+  </div>
+</aside>
+<main class="work">
 
 <!-- ============ START: a new treasury ============ -->
 <section class="band view" id="start">
@@ -320,6 +348,7 @@
         <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
         <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
         <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
+        <label><span>Owner key kind</span><select id="ownerKeyKind"><option value="">full access (downloaded keys)</option><option value="wallet">function-call key added by the wallet</option></select></label>
         <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (hackathon demo)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
         <label id="aiKeyRow"><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
         <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
@@ -397,6 +426,8 @@
 </section>
 
 <footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys.</footer>
+</main>
+</div>
 
 <script type="module">
 import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -415,8 +446,8 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 const rpcOverride = q.get("rpc");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole"];
-const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind"];
+const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind"];
 // Who signs owner-level actions here: the owner key, or an operator key limited to its role.
 const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
 const canAct = (perm) => !!settings.ownerKey || (!!settings.operatorKey && !!settings.operator && !!operatorRole()[perm]);
@@ -462,7 +493,13 @@ function loadSettings() {
   syncReadMode();
   reflectSettings();
 }
-function reflectSettings() { renderProfiles(); }
+function reflectSettings() {
+  renderProfiles();
+  const who = settings.ownerKey ? { name: settings.owner, role: settings.ownerKeyKind === "wallet" ? "owner, wallet key" : "owner" } : settings.operator ? { name: settings.operator, role: Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "operator" } : settings.treasury ? { name: settings.treasury, role: "read-only" } : { name: "Not signed in", role: "no keys here" };
+  $("#meName").textContent = who.name; $("#meRole").textContent = who.role; $("#meAvatar").textContent = (who.name || "?").replace(/^agent\.|^treasury\./, "").slice(0, 2).toUpperCase();
+}
+/** The wallet added a function-call key to the owner's account: it signs vendors, orders, limits and approvals, not deposits or new accounts. */
+const hasFullAccess = () => !!settings.ownerKey && settings.ownerKeyKind !== "wallet";
 function saveSettings() {
   for (const f of FIELDS) { settings[f] = $("#" + f).value.trim(); try { localStorage.setItem("bursar." + f, settings[f]); } catch {} }
   upsertProfile();
@@ -912,6 +949,7 @@ async function loadTreasury() {
   $("#tErr").hidden = true;
   const empty = !settings.treasury;
   $("#noTreasury").hidden = !empty; $("#ovBody").hidden = empty;
+  reflectSettings();
   if (empty) { $("#companyName").textContent = "No treasury"; $("#companyDesc").textContent = ""; $("#attnBadge").hidden = true; return; }
   try {
     const t = settings.treasury;
@@ -1078,6 +1116,7 @@ $("#govCreate").addEventListener("click", async () => {
   const step = stepper($("#govSteps")); const btn = $("#govCreate"); btn.disabled = true;
   try {
     if (!settings.owner || !settings.ownerKey) throw new Error("only the owner creates the DAO: the owner key is not in Settings");
+    if (!hasFullAccess()) throw new Error("creating a DAO attaches a 6 NEAR deposit: a wallet function-call key cannot; use the downloaded keys");
     const factory = SPUTNIK[settings.network];
     const council = [settings.owner, ...Array.from(document.querySelectorAll(".govMember:checked")).map((c) => c.value), ...$("#govExtra").value.split(",").map((x) => x.trim()).filter(Boolean)];
     const name = `bursar-${settings.owner.split(".")[0]}`.replace(/[^a-z0-9-]/g, "-").slice(0, 40);
@@ -1117,6 +1156,7 @@ $("#invCreate").addEventListener("click", async () => {
   const btn = $("#invCreate"); btn.disabled = true;
   try {
     if (!settings.owner || !settings.ownerKey) throw new Error("only the owner invites: the owner key is not in Settings");
+    if (!hasFullAccess()) throw new Error("inviting creates an account and moves NEAR: a wallet function-call key cannot; use the downloaded keys");
     const name = $("#invName").value.trim().toLowerCase();
     if (!/^[a-z0-9]{2,32}$/.test(name)) throw new Error("the name is 2 to 32 letters and digits");
     const role = { approve: $("#invApprove").checked, manage_vendors: $("#invVendors").checked, manage_orders: $("#invOrders").checked };
@@ -1142,6 +1182,23 @@ $("#invCreate").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 $("#invCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#invLink").value); $("#invCopy").textContent = "Copied"; } catch { $("#invLink").select(); } setTimeout(() => { $("#invCopy").textContent = "Copy link"; }, 1500); });
+/** Back from the NEAR wallet: it added our function-call key (limited to the treasury) to the owner's account. */
+function acceptWalletReturn() {
+  const p = new URLSearchParams(location.search);
+  if (!p.get("account_id") || !p.get("public_key")) return false;
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem("bursar.walletPending") || "null"); } catch {}
+  try {
+    if (!pending || pending.pubStr !== p.get("public_key")) throw new Error("this browser did not start that wallet sign-in");
+    for (const f of PROFILE_FIELDS) $("#" + f).value = "";
+    $("#network").value = pending.network; $("#treasury").value = pending.treasury; $("#label").value = pending.label || pending.treasury;
+    $("#owner").value = p.get("account_id"); $("#ownerKey").value = pending.secretKey; $("#ownerKeyKind").value = "wallet";
+    saveSettings();
+    try { localStorage.removeItem("bursar.walletPending"); } catch {}
+    history.replaceState(null, "", location.pathname); location.hash = "#overview";
+    return true;
+  } catch (e) { $("#sErr").textContent = `wallet sign-in not accepted: ${e.message}`; $("#sErr").hidden = false; history.replaceState(null, "", location.pathname); location.hash = "#settings"; return false; }
+}
 function acceptInvite() {
   const m = location.hash.match(/^#invite=([A-Za-z0-9_-]+)$/);
   if (!m) return false;
@@ -1295,7 +1352,7 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files?.[0]); });
 $("#file").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
 loadSettings();
-if (!acceptInvite()) { route(); loadTreasury(); }
+if (!acceptInvite() && !acceptWalletReturn()) { route(); loadTreasury(); }
 </script>
 </body>
 </html>
