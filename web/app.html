@@ -213,7 +213,7 @@
           <div class="eyebrow muted">Decision <span id="decId" class="chip"></span> <span id="decReason" class="chip bad" hidden></span></div>
           <div id="decStatus" class="stamp"></div>
           <div id="decWhy" class="sub" style="margin-top:16px;max-width:60ch"></div>
-          <div class="actions" id="approveRow" hidden style="margin-top:16px;align-items:center"><button id="approve" type="button" class="btn-inverse">Approve as the owner</button><span class="muted" style="font-size:14px;max-width:46ch">A person decides. This treasury has no DAO, so the owner key in this browser approves.</span></div>
+          <div class="actions" id="approveRow" hidden style="margin-top:16px;align-items:center"><button id="approve" type="button" class="btn-inverse">Approve</button><span class="muted" style="font-size:14px;max-width:46ch">A person decides. This treasury has no DAO, so the owner or an approver signs here.</span></div>
         </div>
         <p class="muted mono" id="decTx"></p>
       </div>
@@ -316,6 +316,9 @@
         <label><span>Agent key (function-call, ed25519:...)</span><input id="agentKey" type="password" placeholder="from ~/.near-credentials" autocomplete="off"></label>
         <label><span>Owner account</span><input id="owner" placeholder="you.testnet" autocomplete="off"></label>
         <label><span>Owner key (full access)</span><input id="ownerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+        <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
+        <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+        <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
         <label><span>Reading</span><select id="readMode"><option value="relay">Bursar reading (hackathon demo)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
         <label id="aiKeyRow"><span>NEAR AI Cloud API key</span><input id="aiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
         <label><span>Model</span><input id="model" value="z-ai/glm-5.3-flash" autocomplete="off"></label>
@@ -358,6 +361,20 @@
       </div>
       <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">Roles and DAO: <span class="mono" id="rolesLine"></span></p>
     </div>
+    <div class="card" style="margin-top:24px" id="inviteCard">
+      <div class="eyebrow muted" style="margin-bottom:8px">Invite a collaborator</div>
+      <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:70ch">The owner creates an account for the collaborator with one key limited to the methods of the role, records the role in the contract, and gets a link that carries the key after the hash sign: it never reaches a server. Send it as you like. Revoke the role on chain at any time; the key can then do nothing.</p>
+      <div class="grid cols-3">
+        <label><span>Name (letters and digits)</span><input id="invName" placeholder="anna" autocomplete="off"></label>
+        <label><span>May</span><div style="display:flex;gap:16px;padding-top:10px;flex-wrap:wrap"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invApprove" checked style="width:auto"> approve</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invVendors" style="width:auto"> vendors</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="invOrders" style="width:auto"> orders</label></div></label>
+        <label><span>&nbsp;</span><button id="invCreate" type="button" class="btn-signal">Create the invite</button></label>
+      </div>
+      <ul class="log" id="invSteps" style="margin-top:16px"></ul>
+      <div id="invOut" hidden style="margin-top:16px">
+        <label><span>Invite link (contains the key: share it only with the collaborator)</span><input id="invLink" readonly></label>
+        <div class="actions" style="margin-top:12px;align-items:center"><button id="invCopy" type="button" class="btn-inverse">Copy link</button><a id="invMail" class="btn btn-ghost" href="#">Send by email</a><span class="muted" style="font-size:14px" id="invNote"></span></div>
+      </div>
+    </div>
     <div id="sErr" class="err" hidden></div>
   </div>
 </section>
@@ -381,8 +398,14 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 const rpcOverride = q.get("rpc");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label"];
-const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole"];
+const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole"];
+// Who signs owner-level actions here: the owner key, or an operator key limited to its role.
+const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
+const canAct = (perm) => !!settings.ownerKey || (!!settings.operatorKey && !!settings.operator && !!operatorRole()[perm]);
+const actor = () => settings.ownerKey ? { signerId: settings.owner, secretKey: settings.ownerKey } : { signerId: settings.operator, secretKey: settings.operatorKey };
+// Methods each permission unlocks: the invite key is limited to exactly these on the treasury.
+const ROLE_METHODS = { approve: ["approve_payment", "cancel_payment"], manage_vendors: ["add_vendor", "update_vendor"], manage_orders: ["add_order", "add_recurring_order", "close_order"] };
 // Several treasuries per browser: profiles are snapshots of the per-treasury fields, keyed by treasury account.
 let profiles = [];
 try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
@@ -441,7 +464,7 @@ $("#save").addEventListener("click", saveSettings);
 // read the recorded samples below, which need no key at all.
 const DEMO = { network: "testnet", treasury: "treasury.bursar-b48563e6.testnet", agent: "agent.bursar-b48563e6.testnet", model: "z-ai/glm-5.3-flash", label: "README demo (read-only)", owner: "", ownerKey: "", agentKey: "" };
 $("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); location.hash = "#overview"; });
-$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
+$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey", "operatorKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
 // ---------- small codecs ----------
 const te = new TextEncoder(), td = new TextDecoder();
@@ -490,7 +513,8 @@ async function rpc(method, params) {
   return j.result;
 }
 async function view(contract, method, args = {}) {
-  const res = await rpc("query", { request_type: "call_function", finality: "final", account_id: contract, method_name: method, args_base64: b64(te.encode(JSON.stringify(args))) });
+  // optimistic: a view right after one of our own transactions must see it
+  const res = await rpc("query", { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: b64(te.encode(JSON.stringify(args))) });
   if (res.error) throw new Error(res.error);
   return JSON.parse(td.decode(new Uint8Array(res.result)));
 }
@@ -893,12 +917,12 @@ function renderOverview() {
   $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (stats.paused ? stat("paused", "yes", "bad") : "");
   $("#ovAttention").innerHTML = held().slice(-5).reverse().map((p) => `<li><span class="st wait">#${p.id}</span><span><b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}: ${esc(holdText(p.reason))}</span></li>`).join("") || `<li><span class="st ok">OK</span><span>nothing waits for you</span></li>`;
   $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${p.id}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
-  $("#foot").innerHTML = `owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard.html?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
+  $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard.html?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
   const n = held().length; $("#attnBadge").textContent = n; $("#attnBadge").hidden = n === 0;
 }
 function renderAttention() {
-  const canApprove = !!settings.ownerKey && !(state.roles?.[3]);
-  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : `<span class="muted">${state.roles?.[3] ? "the DAO council decides" : "owner key needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
+  const canApprove = canAct("approve") && !(state.roles?.[3]);
+  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : `<span class="muted">${state.roles?.[3] ? "the DAO council decides" : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
   $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
   $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
 }
@@ -907,39 +931,40 @@ document.addEventListener("click", async (e) => {
   const id = Number(b.dataset.id), act = b.dataset.act;
   b.disabled = true;
   try {
-    if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
+    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner" }[act];
+    if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
     const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", removeOp: "remove_operator" }[act];
     const args = act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "removeOp" ? { account: b.dataset.id } : { id };
-    await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method, args, gasTgas: 100 });
+    await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
     await loadTreasury();
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
   finally { b.disabled = false; }
 });
 function renderVendors() {
-  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${settings.ownerKey ? `<button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
+  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
   const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
 }
 $("#vAdd").addEventListener("click", async () => {
   $("#vErr").hidden = true;
   try {
-    if (!settings.ownerKey) throw new Error("the owner key is not in Settings");
+    if (!canAct("manage_vendors")) throw new Error("this needs the owner key, or an operator allowed to manage vendors");
     const id = $("#vId").value.trim().toLowerCase().replace(/[^a-z0-9]/g, ""), name = $("#vName").value.trim(), chain = $("#vChain").value, addr = $("#vPayout").value.trim();
     if (!id || !name || !addr) throw new Error("vendor id, name and payout are required");
     const payout = chain === "near" ? { Near: { account: addr.toLowerCase() } } : { Chain: { chain, address: addr } };
-    await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0") }, gasTgas: 30 });
+    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0") }, gasTgas: 30 });
     for (const f of ["vId", "vName", "vBudget", "vPayout"]) $("#" + f).value = "";
     await loadTreasury();
   } catch (e) { $("#vErr").textContent = e.message; $("#vErr").hidden = false; }
 });
 function renderOrders() {
-  $("#ordersTable tbody").innerHTML = state.orders.slice().reverse().map((o) => { const single = o.kind.Single; const rec = o.kind.Recurring; return `<tr><td>${o.id}</td><td class="mono">${esc(o.vendor_id)}</td><td>${single ? "purchase order" : "standing order"}</td><td class="mono">${esc(o.reference) || "<span class=muted>by vendor</span>"}</td><td>${esc(o.description)}</td><td>${single ? `${usdc(single.remaining)} left` : `${usdc(rec.amount_per_period)} every ${rec.period_days} days${rec.last_period ? `, used this period` : ""}`}</td><td>${o.active ? (single && BigInt(single.remaining) === 0n ? `<span class="pill Queued">spent</span>` : `<span class="pill Paid">open</span>`) : `<span class="pill Cancelled">closed</span>`}</td><td class="acts">${settings.ownerKey && o.active ? `<button type="button" class="btn-ghost small act" data-act="closeOrder" data-id="${o.id}">Close</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no orders yet: invoices are bound by the caps alone</td></tr>`;
+  $("#ordersTable tbody").innerHTML = state.orders.slice().reverse().map((o) => { const single = o.kind.Single; const rec = o.kind.Recurring; return `<tr><td>${o.id}</td><td class="mono">${esc(o.vendor_id)}</td><td>${single ? "purchase order" : "standing order"}</td><td class="mono">${esc(o.reference) || "<span class=muted>by vendor</span>"}</td><td>${esc(o.description)}</td><td>${single ? `${usdc(single.remaining)} left` : `${usdc(rec.amount_per_period)} every ${rec.period_days} days${rec.last_period ? `, used this period` : ""}`}</td><td>${o.active ? (single && BigInt(single.remaining) === 0n ? `<span class="pill Queued">spent</span>` : `<span class="pill Paid">open</span>`) : `<span class="pill Cancelled">closed</span>`}</td><td class="acts">${canAct("manage_orders") && o.active ? `<button type="button" class="btn-ghost small act" data-act="closeOrder" data-id="${o.id}">Close</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no orders yet: invoices are bound by the caps alone</td></tr>`;
 }
 $("#oAdd").addEventListener("click", async () => {
   $("#oErr").hidden = true;
   try {
-    if (!settings.ownerKey) throw new Error("the owner key is not in Settings");
-    await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "add_order", args: { vendor_id: $("#oVendor").value, reference: $("#oRef").value.trim(), description: $("#oDesc").value.trim(), amount: toUnits($("#oAmount").value || "0"), expires_at: null }, gasTgas: 30 });
+    if (!canAct("manage_orders")) throw new Error("this needs the owner key, or an operator allowed to manage orders");
+    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_order", args: { vendor_id: $("#oVendor").value, reference: $("#oRef").value.trim(), description: $("#oDesc").value.trim(), amount: toUnits($("#oAmount").value || "0"), expires_at: null }, gasTgas: 30 });
     $("#oRef").value = ""; $("#oAmount").value = ""; $("#oDesc").value = "";
     await loadTreasury();
   } catch (e) { $("#oErr").textContent = e.message; $("#oErr").hidden = false; }
@@ -947,8 +972,8 @@ $("#oAdd").addEventListener("click", async () => {
 $("#rAdd").addEventListener("click", async () => {
   $("#oErr").hidden = true;
   try {
-    if (!settings.ownerKey) throw new Error("the owner key is not in Settings");
-    await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "add_recurring_order", args: { vendor_id: $("#rVendor").value, description: $("#rDesc").value.trim(), amount_per_period: toUnits($("#rAmount").value || "0"), period_days: Number($("#rDays").value || 30), expires_at: null }, gasTgas: 30 });
+    if (!canAct("manage_orders")) throw new Error("this needs the owner key, or an operator allowed to manage orders");
+    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_recurring_order", args: { vendor_id: $("#rVendor").value, description: $("#rDesc").value.trim(), amount_per_period: toUnits($("#rAmount").value || "0"), period_days: Number($("#rDays").value || 30), expires_at: null }, gasTgas: 30 });
     $("#rAmount").value = ""; $("#rDesc").value = "";
     await loadTreasury();
   } catch (e) { $("#oErr").textContent = e.message; $("#oErr").hidden = false; }
@@ -982,6 +1007,54 @@ const onErr = (e) => { $("#sErr").textContent = e.message; $("#sErr").hidden = f
 $("#cSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_company", { name: $("#cName").value.trim(), description: $("#cDesc").value.trim() }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
+// ---------- invites: an account with a key limited to the role, and a link that carries it ----------
+const b64url = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64url = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
+$("#invCreate").addEventListener("click", async () => {
+  const step = stepper($("#invSteps")); $("#invOut").hidden = true;
+  const btn = $("#invCreate"); btn.disabled = true;
+  try {
+    if (!settings.owner || !settings.ownerKey) throw new Error("only the owner invites: the owner key is not in Settings");
+    const name = $("#invName").value.trim().toLowerCase();
+    if (!/^[a-z0-9]{2,32}$/.test(name)) throw new Error("the name is 2 to 32 letters and digits");
+    const role = { approve: $("#invApprove").checked, manage_vendors: $("#invVendors").checked, manage_orders: $("#invOrders").checked };
+    const methods = Object.entries(role).flatMap(([k, v]) => v ? ROLE_METHODS[k] : []);
+    if (!methods.length) throw new Error("pick at least one permission");
+    const account = `${name}.${settings.owner}`;
+    const key = newKey();
+    if (await accountExists(account)) throw new Error(`${account} already exists; pick another name`);
+    step("account", "wait", `creating ${account} with a key limited to ${methods.join(", ")}`);
+    const t1 = await sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: account, actions: [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(key.pub, NEAR(1), settings.treasury, methods)] });
+    step("account", "ok", `${account} created; 0.5 NEAR for gas, no full-access key: it can only call the treasury`, t1.hash);
+    step("role", "wait", "recording the role in the contract");
+    const t2 = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "add_operator", args: { account, role }, gasTgas: 30 });
+    step("role", "ok", `operator ${account}: ${Object.keys(role).filter((k) => role[k]).join(", ")}`, t2.hash);
+    const invite = { v: 1, network: settings.network, treasury: settings.treasury, label: state.company?.name || settings.label || settings.treasury, account, key: key.secretKey, role };
+    const link = `${location.origin}${location.pathname}#invite=${b64url(JSON.stringify(invite))}`;
+    $("#invLink").value = link;
+    $("#invMail").href = `mailto:?subject=${encodeURIComponent(`${invite.label}: your Bursar access`)}&body=${encodeURIComponent(`Open this link in your browser to approve invoices for ${invite.label}. It signs you in as ${account}; keep it private.\n\n${link}`)}`;
+    $("#invNote").textContent = "The link signs the collaborator in as this account with this role, nothing else.";
+    $("#invOut").hidden = false;
+    await loadTreasury();
+  } catch (e) { step("error", "fail", e.message); }
+  finally { btn.disabled = false; }
+});
+$("#invCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#invLink").value); $("#invCopy").textContent = "Copied"; } catch { $("#invLink").select(); } setTimeout(() => { $("#invCopy").textContent = "Copy link"; }, 1500); });
+function acceptInvite() {
+  const m = location.hash.match(/^#invite=([A-Za-z0-9_-]+)$/);
+  if (!m) return false;
+  try {
+    const inv = JSON.parse(unb64url(m[1]));
+    if (inv.v !== 1 || !inv.treasury || !inv.account || !inv.key) throw new Error("malformed invite");
+    for (const f of PROFILE_FIELDS) $("#" + f).value = "";
+    $("#network").value = inv.network || "testnet"; $("#treasury").value = inv.treasury; $("#label").value = `${inv.label} as ${inv.account.split(".")[0]}`;
+    $("#operator").value = inv.account; $("#operatorKey").value = inv.key; $("#operatorRole").value = JSON.stringify(inv.role || {});
+    saveSettings();
+    history.replaceState(null, "", location.pathname); location.hash = "#attention";
+    return true;
+  } catch (e) { $("#sErr").textContent = `invite not accepted: ${e.message}`; $("#sErr").hidden = false; location.hash = "#settings"; return false; }
+}
+
 // ---------- router: one view at a time, by hash ----------
 const VIEWS = ["start", "overview", "invoices", "attention", "vendors", "orders", "analytics", "settings"];
 function route() {
@@ -1088,9 +1161,9 @@ $("#approve").addEventListener("click", async () => {
   if (!lastDecision) return;
   const btn = $("#approve"); btn.disabled = true; btn.textContent = "Approving...";
   try {
-    if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
-    const { hash } = await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "approve_payment", args: { id: lastDecision }, gasTgas: 100 });
-    await showDecision(lastDecision, hash, "approved by the owner");
+    if (!canAct("approve")) throw new Error("this needs the owner key, or an operator allowed to approve");
+    const { hash } = await functionCall({ ...actor(), receiverId: settings.treasury, method: "approve_payment", args: { id: lastDecision }, gasTgas: 100 });
+    await showDecision(lastDecision, hash, settings.ownerKey ? "approved by the owner" : `approved by ${settings.operator}`);
     loadTreasury();
   } catch (e) { $("#submitErr").textContent = e.message; $("#submitErr").hidden = false; }
   finally { btn.disabled = false; btn.textContent = "Approve as the owner"; }
@@ -1105,7 +1178,7 @@ async function showDecision(id, hash, signedBy) {
   const reason = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");
   $("#decReason").textContent = reason; $("#decReason").hidden = !reason;
   $("#decWhy").innerHTML = p ? why(p) : "";
-  $("#approveRow").hidden = !(status === "Approval" && p?.dao_proposal_id === null && settings.ownerKey);
+  $("#approveRow").hidden = !(status === "Approval" && p?.dao_proposal_id === null && canAct("approve"));
   $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, ${signedBy}`;
   $("#decision").hidden = false;
 }
@@ -1120,8 +1193,7 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files?.[0]); });
 $("#file").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
 loadSettings();
-route();
-loadTreasury();
+if (!acceptInvite()) { route(); loadTreasury(); }
 </script>
 </body>
 </html>
