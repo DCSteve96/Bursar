@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -86,5 +87,26 @@ describe("verifyReceipt", () => {
   it("flags a gateway signature as not a model TEE proof", async () => {
     const v = await verifyReceipt(receipt((r) => { r.signature_kind = "gateway"; }), { collateral: false, chain: false });
     expect(by(v.checks, "signer_kind")).toBe(false);
+  });
+});
+
+describe("a real receipt from NEAR AI Cloud", () => {
+  // Written by `bursar read` on 2026-10-20 against z-ai/glm-5.3-flash: exact bytes, provider_tee signature, TDX quote, nonce.
+  it("verifies offline, except the Intel collateral check which needs the network", async () => {
+    const rf = JSON.parse(await readFile(new URL("./fixtures/receipt-01-acme-hosting-0923.json", import.meta.url), "utf8")) as ReceiptFile;
+    const v = await verifyReceipt(rf, { collateral: false, chain: false });
+    for (const c of v.checks) expect(c.ok, `${c.name}: ${c.detail}`).not.toBe(false);
+    expect(by(v.checks, "quote_tcb")).toBe(null);
+    expect(v.ok).toBe(true);
+    expect(rf.extraction).toMatchObject({ vendor_id_guess: "acmehosting", invoice_number: "AH-0923", amount: "480.00", flags: [] });
+  });
+
+  it("fails when one byte of the signed response changes", async () => {
+    const rf = JSON.parse(await readFile(new URL("./fixtures/receipt-01-acme-hosting-0923.json", import.meta.url), "utf8")) as ReceiptFile;
+    rf.ai!.receipt.response_body = rf.ai!.receipt.response_body.replace("480.00", "480.01");
+    const v = await verifyReceipt(rf, { collateral: false, chain: false });
+    expect(by(v.checks, "bytes")).toBe(false);
+    expect(by(v.checks, "signed_text")).toBe(false);
+    expect(v.ok).toBe(false);
   });
 });

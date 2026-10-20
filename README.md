@@ -54,7 +54,7 @@ git clone <repo> && cd bursar
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 cd app && npm install && npm test
 ```
-See: `11 passed` from `cargo test`, `bursar_policy.wasm: 303102 bytes` (249 KB if `wasm-opt` is installed), and 7 passing app tests (signature recovery, receipt tampering, offline parser on the four samples).
+See: `11 passed` from `cargo test`, `bursar_policy.wasm: 303102 bytes` (249 KB if `wasm-opt` is installed), and 9 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples).
 
 **1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR: the faucet gives 10 per account, so create two and transfer from one to the other. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
 
@@ -111,17 +111,18 @@ npm run dev verify 1
 See, one line per check:
 
 ```
- ok   bytes                request and response hashes match the stored bytes
- ok   signed_text          signed text is z-ai/glm-5.3-flash:...
- ok   signature            ECDSA signature recovers to 0x...
- ok   signer_kind          signed inside the model TEE (provider_tee)
- ok   attestation_signer   attestation report lists signer 0x...
- ok   attestation_nonce    report echoes our fresh nonce
- ok   quote_report_data    TDX quote report_data binds signer and nonce (mrtd ...)
- ok   quote_tcb            quote verified against Intel collateral: TCB UpToDate
- ok   extraction           the claim was built from exactly this model output
- ok   attestation_ref      claim carries nearai:...
- ok   on_chain             payment #1 on treasury.you.testnet carries this reference
+ ok  bytes                request and response hashes match the stored bytes
+ ok  signed_text          signed text is z-ai/glm-5.3-flash:dc283fe4943454098c459...
+ ok  signature            ECDSA signature recovers to 0x3b753b4406613c5e70ae640508632b600424fa0c
+ ok  signer_kind          signed inside the model TEE (provider_tee)
+ ok  attestation_signer   attestation report lists signer 0x3b753b4406613c5e70ae640508632b600424fa0c
+ ok  attestation_nonce    report echoes our fresh nonce
+ ok  quote_report_data    TDX quote report_data binds signer and nonce (mrtd df4d77c857de652b...)
+ ok  quote_tcb            quote verified against Intel collateral: TCB UpToDate
+ ok  extraction           the claim was built from exactly this model output
+ ok  completion_id        completion id 1bf977a9c03c44508e709513c4c91c1e
+ ok  attestation_ref      claim carries nearai:z-ai/glm-5.3-flash:1bf977a9c03c44508e7095...
+ ok  on_chain             payment #1 on treasury.you.testnet carries this reference
 verified: the decision was made on this model output, inside an attested TEE
 ```
 Change one byte of the response in the receipt and run it again: `FAIL signed_text`, `FAIL extraction`. Receipts written with `--offline` have no AI receipt and fail at the first line, as they should.
@@ -132,6 +133,13 @@ To try the enclave reading without a treasury, relayer or NEAR account, read one
 NEAR_AI_API_KEY=... npm run dev read ../invoices/samples/04-acme-hosting-0924-fraud.pdf
 ```
 See: the extraction as JSON (`"flags": ["new_payment_details", "urgency"]`), the claim the agent would have sent, the receipt path `app/.bursar/receipts/read-04-acme-hosting-0924-fraud.json`, and the same check list as above minus `on_chain`. Nothing is submitted: the vendor id is the model's guess, and only the contract matches it against the allowlist.
+
+Without any key at all, check a receipt from a real run (invoice 1, read by `z-ai/glm-5.3-flash` on 2026-10-20, kept in the repo as a test fixture):
+
+```bash
+npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json --no-chain
+```
+See: the ten `ok` lines above, `quote_tcb` included (the Intel collateral is fetched live), and no `on_chain` line. The file holds the exact request (with the invoice page as PNG), the exact response, the signature and the attestation report with the TDX quote and GPU evidence: 444 KB, nothing secret.
 
 **7. Drive it from an assistant (MCP).** Add to Claude Desktop, Claude Code or Codex:
 
@@ -144,7 +152,7 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 **9. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. With `NEAR_NETWORK=mainnet`, real USDC in the treasury and a vendor on Base, `npm run executor -- --once` quotes USDC NEAR to USDC Base with the vendor's address as recipient, calls `settle`, and marks the payment `Settled` with the Base transaction hash.
 
-**Unit tests:** `cd contracts/policy && cargo test` (11 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request). `cd app && npm test` (receipt verification against tampering, offline parser).
+**Unit tests:** `cd contracts/policy && cargo test` (11 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
 
 ## NEAR features used, and why
 
