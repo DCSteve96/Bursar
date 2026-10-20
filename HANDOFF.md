@@ -106,7 +106,14 @@ Stefano ha chiesto un'estetica "intuitiva ed esplosiva" studiando NEAR. Riferime
 - Tema unico scuro con bande chiare, scelto apposta: niente toggle light/dark. Animazioni ridotte con `prefers-reduced-motion` (particelle ferme, niente timbro animato).
 - Retry nel browser: il gateway NEAR AI risponde 502 a tratti sulle richieste con immagine (nel pomeriggio del 20 ottobre circa una su due, anche dalla CLI che ritenta 3 volte), e una risposta d'errore arriva senza header CORS, quindi il browser la vede come "Failed to fetch". `app.html` ritenta attestazione (3), completion (6, backoff 2-12 s) e firma (3). Se la serie di 502 dura più dei tentativi, la pagina mostra l'errore e si riprova.
 - Screenshot desktop e telefono di landing e dashboard: nessun overflow orizzontale, nessun errore in console.
-- La repo pubblica `DCSteve96/treasury-console` (GitHub Pages da `main`, root) contiene una copia di `web/`: `https://dcsteve96.github.io/treasury-console/`. Va riallineata a mano quando `web/` cambia (copia dei quattro file e push). Da cancellare dopo i test o quando Bursar diventa pubblica.
+- La repo pubblica `DCSteve96/treasury-console` (GitHub Pages da `main`, root) contiene una copia di `web/`: `https://dcsteve96.github.io/treasury-console/`. Va riallineata a mano quando `web/` cambia (copia di `web/` e push). Da cancellare dopo i test o quando Bursar diventa pubblica.
+
+### 2.8 Logo e console senza chiavi (20 ottobre, stessa sessione)
+
+- Logo scelto da Stefano: tre barre (l'AI legge, il contratto decide in verde, l'executor muove) in un quadrato nero. `web/brand/mark.svg`, `favicon.svg`, `logo.svg` (lockup con la wordmark in Space Grotesk); il monogramma B scartato resta in `mark-monogram.svg`. Montato nelle tre pagine e nel titolo del README.
+- Domanda di Stefano: come la provano i giudici senza treasury, chiave dell'agente e chiave NEAR AI? Risposta nella console: pulsante "Use the demo treasury" (compila rete, treasury `treasury.bursar-c34d05b8.testnet`, agente, modello; non la chiave) e quattro "recorded readings" in `web/samples/` (i receipt 1-4 dell'agente con `tx` e `payment`, 450 KB l'uno, più i 5 PDF). La pagina li verifica come una lettura viva e prepara il claim; "Request payment" su un receipt registrato dà `Blocked duplicate_invoice`. Testato in Chromium senza chiavi: tutti i check ok, flags della fattura 4 mostrati.
+- Resta scoperto per chi non ha chiavi: premere "Request payment" richiede la chiave dell'agente. Opzione discussa: mettere nella pagina la chiave function-call dell'agente demo (potere limitato a `request_payment` sul treasury demo, 0,5 NEAR di gas, fornitori solo nostri): dimostrerebbe la tesi "anche con la chiave dell'agente non si ruba", ma va contro la lettera della regola 5 (niente segreti nella repo). Decisione a Stefano.
+- Per i test in Chromium la pagina va servita via HTTP (le `fetch` dei sample non funzionano da `file://`): `app/.bursar/sampletest.cjs` tira su un server sull'IP del container e passa `bypass` al proxy di Playwright.
 
 ## 3. Decisioni prese
 

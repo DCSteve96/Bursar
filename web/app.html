@@ -65,6 +65,7 @@
       </div>
       <div class="actions" style="margin-top:24px;align-items:center">
         <button id="save" type="button" class="btn-signal">Save</button>
+        <button id="demo" type="button" class="btn-ghost">Use the demo treasury</button>
         <button id="forget" type="button" class="btn-ghost">Forget keys</button>
         <span class="muted" style="font-size:14px;max-width:60ch">The agent key can only call <span class="mono">request_payment</span> on the treasury; it cannot move funds. Gas for this direct call comes from the agent account's own small balance (the CLI agent goes through a relayer instead).</span>
       </div>
@@ -79,6 +80,16 @@
       <input id="file" type="file" accept="application/pdf">
       <div class="big">Drop a PDF invoice here, or click to choose one.</div>
       <div class="muted" style="margin-top:8px">The file is rendered to PNG in this browser; the model inside the TEE sees pixels, and its answer comes back signed.</div>
+    </div>
+    <div class="samples" style="margin-top:24px">
+      <div class="eyebrow muted" style="margin-bottom:12px">No API key? Load a reading recorded on 20 October 2026, with its real receipt from the enclave</div>
+      <div class="actions" style="margin:0">
+        <button type="button" class="btn-ghost sample" data-file="01-acme-hosting-0923">Acme, 480 USDC</button>
+        <button type="button" class="btn-ghost sample" data-file="02-designco-1107">DesignCo on Base, 1,250 USDC</button>
+        <button type="button" class="btn-ghost sample" data-file="03-legalpartners-2210">Legal Partners, 9,800 USDC</button>
+        <button type="button" class="btn-ghost sample" data-file="04-acme-hosting-0924-fraud">Acme with a new wallet</button>
+      </div>
+      <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">The PDFs are in <a href="samples/">samples/</a> if you have a key and want the enclave to read them live. A recorded reading was already decided on chain, so asking again returns <span class="mono">Blocked duplicate_invoice</span>: the contract remembers.</p>
     </div>
     <div id="readErr" class="err" hidden></div>
     <div class="two" id="readOut" hidden style="margin-top:32px">
@@ -193,6 +204,10 @@ function saveSettings() {
   location.hash = "#read";
 }
 $("#save").addEventListener("click", saveSettings);
+// The demo treasury from the README: a throwaway testnet deployment. The agent key is not filled in: paste your own, or
+// read the recorded samples below, which need no key at all.
+const DEMO = { network: "testnet", treasury: "treasury.bursar-c34d05b8.testnet", agent: "agent.bursar-c34d05b8.testnet", model: "z-ai/glm-5.3-flash" };
+$("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); });
 $("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
 // ---------- small codecs ----------
@@ -448,26 +463,53 @@ async function handleFile(file) {
     step("pdf", "ok", `${pages.length} page(s) rendered to PNG; the enclave sees images, not the file`);
     const { extraction, receipt, attestation } = await readInTee(pages, text, step);
     const vendors = await view(settings.treasury, "list_vendors");
-    const vendorId = matchVendor(extraction, vendors);
     const claim = {
-      vendor_id: vendorId, invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
+      vendor_id: matchVendor(extraction, vendors), invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
       due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
       attestation_ref: attestationRef(receipt), flags: extraction.flags ?? [],
     };
-    current = { file: file.name, invoiceHash, extraction, receipt, attestation, claim };
-    showExtraction(extraction);
-    const v = verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
-    const checks = $("#checks"); checks.innerHTML = "";
-    for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "SKIP" : c.ok ? "OK" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
-    const li = document.createElement("li"); li.innerHTML = `<div class="verdict ${v.ok ? "" : "fail"}">${v.ok ? "Verified: the decision will be made on this model output, inside an attested TEE." : "Not verified: this page will not submit it."}</div>`; checks.appendChild(li);
-    $("#receipt").hidden = false;
-    const blob = new Blob([JSON.stringify({ file: file.name, extraction, claim, tx: null, payment: null, ai: { receipt, attestation } }, null, 2)], { type: "application/json" });
-    $("#dl").href = URL.createObjectURL(blob); $("#dl").download = `receipt-${file.name.replace(/\.pdf$/i, "")}.json`;
-    showClaim(claim, vendors, v.ok);
+    await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
   } catch (e) {
     $("#readErr").textContent = e.message; $("#readErr").hidden = false;
   }
 }
+/** Everything after a reading, live or recorded: show it, verify the receipt, offer the download, prepare the claim. */
+async function afterRead(read, vendors) {
+  const { extraction, receipt, attestation, claim } = read;
+  current = read;
+  showExtraction(extraction);
+  const v = verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
+  const checks = $("#checks"); checks.innerHTML = "";
+  for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "SKIP" : c.ok ? "OK" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
+  const li = document.createElement("li"); li.innerHTML = `<div class="verdict ${v.ok ? "" : "fail"}">${v.ok ? "Verified: the decision will be made on this model output, inside an attested TEE." : "Not verified: this page will not submit it."}</div>`; checks.appendChild(li);
+  $("#receipt").hidden = false;
+  const blob = new Blob([JSON.stringify({ file: read.file, extraction, claim, tx: read.tx ?? null, payment: read.payment ?? null, ai: { receipt, attestation } }, null, 2)], { type: "application/json" });
+  $("#dl").href = URL.createObjectURL(blob); $("#dl").download = `receipt-${read.file.replace(/\.pdf$/i, "")}.json`;
+  showClaim(claim, vendors, v.ok);
+}
+/** A reading recorded by the CLI agent on the demo treasury: same receipt format, already decided on chain. */
+async function loadSample(name) {
+  for (const k in stepEl) delete stepEl[k];
+  $("#readErr").hidden = true; $("#readOut").hidden = false; $("#extraction").hidden = true; $("#receipt").hidden = true;
+  $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true;
+  const step = stepper($("#readSteps"));
+  try {
+    if (!settings.treasury) throw new Error("set the treasury account in Settings first (or press \"Use the demo treasury\")");
+    step("sample", "wait", `loading samples/receipt-${name}.json`);
+    const [rf, pdfBytes] = await Promise.all([fetch(`samples/receipt-${name}.json`).then((r) => { if (!r.ok) throw new Error(`sample ${r.status}`); return r.json(); }), fetch(`samples/${name}.pdf`).then((r) => r.ok ? r.arrayBuffer() : null)]);
+    if (pdfBytes) await rasterize(new Uint8Array(pdfBytes)); else $("#preview").width = 0;
+    const r = rf.ai.receipt;
+    step("sample", "ok", `recorded reading of ${rf.file}${rf.payment ? `, decided as payment #${rf.payment.id} ${rf.payment.status}` : ""}`);
+    step("model", "ok", `completion ${r.inference_id} by ${r.model}`);
+    step("signature", r.signature ? "ok" : "fail", r.signature ? `${r.signature_kind} by ${r.signing_address}` : "no signature");
+    $("#fileInfo").textContent = `${rf.file}, sha256 ${rf.claim.invoice_hash.slice(0, 16)}...${rf.tx ? `, tx ${rf.tx.slice(0, 12)}...` : ""}`;
+    const vendors = await view(settings.treasury, "list_vendors");
+    await afterRead({ file: rf.file, invoiceHash: rf.claim.invoice_hash, extraction: rf.extraction, receipt: r, attestation: rf.ai.attestation, claim: rf.claim, tx: rf.tx, payment: rf.payment }, vendors);
+  } catch (e) {
+    $("#readErr").textContent = e.message; $("#readErr").hidden = false;
+  }
+}
+for (const b of document.querySelectorAll("button.sample")) b.addEventListener("click", () => loadSample(b.dataset.file));
 function matchVendor(ex, vendors) {
   const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const guess = norm(ex.vendor_id_guess || ex.vendor_name);
