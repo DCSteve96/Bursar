@@ -310,3 +310,11 @@ Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI
 - Lettore: `amount` è il totale prima della ritenuta, campo `withholding`; parser offline legge "Withholding tax ...: -200.00" e "Total:" oltre a "Total due:". Fattura 09 (Studio Bianchi Consulting, freelance fittizio, totale 1.000, ritenuta 200, netto 800). `setup.ts` crea `consultant.<root>`, lo registra su tUSDC e aggiunge il fornitore `consultant` con IT e 2000 bps. Demo console: creato `consultant.bursar-b48563e6.testnet` (registrato su tUSDC) e aggiunto ai DEMO_VENDORS con la ritenuta.
 - Console: Add a vendor con Country e Withholding %, colonne e azione "Withholding" per riga, stat "withheld for the state" in Overview, card in Analytics con "to remit now / kept this month / all time" e "Mark as remitted" (owner), colonne withheld per fornitore e per mese, testo del pagamento "800 al fornitore, 200 trattenuti". `status` della CLI stampa "withheld for the state, to remit". README 5d, docs.
 
+
+## 2.24 Dominio bursar.network e pagina console (21 ottobre)
+
+- Dominio `bursar.network` registrato su Namecheap (con Private Email), DNS su Cloudflare (nameserver becky/johnny), sito servito da GitHub Pages (`treasury-console`, file `CNAME`), HTTPS di GitHub. Record posta: MX privateemail, SPF, DKIM `privateemail._domainkey`, CNAME mail/autodiscover/autoconfig in DNS only.
+- Link interni senza `.html` (`/login`, `/console`, `/explorer`, `/docs`, `/dashboard`): GitHub Pages e Cloudflare Pages li servono entrambi.
+- `web/app.html` rinominata `web/console.html`; `app.html` resta come rimando che conserva query e hash (gli inviti vecchi `app#invite=...` continuano a funzionare).
+- Relay: `ALLOWED_ORIGINS` accetta anche voci `*.suffisso` (anteprime Cloudflare Pages); la variabile nel pannello contiene bursar.network, www e github.io.
+- Cloudflare Pages valutato e rimandato: GitHub Pages basta; passaggio possibile in dieci minuti (output directory `web`, branch `main`).

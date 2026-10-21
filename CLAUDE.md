@@ -42,7 +42,7 @@ app/src/              TypeScript, near-api-js 7
   mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
   setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
   cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
-web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), app.html (console: onboarding, lettura TEE, verifica, request_payment dal browser), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
+web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), console.html (la console: onboarding, lettura TEE, verifica, request_payment dal browser; app.html rimanda lì), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
 relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri)
 invoices/             make_invoices.py e 9 PDF di esempio (5 e 6 per la console, 7 e 8 per i tax id, 9 per la ritenuta)
 ```
