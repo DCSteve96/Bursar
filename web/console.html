@@ -560,7 +560,7 @@
           <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
           <label><span>Inbox token (Telegram)</span><input id="inboxToken" type="password" placeholder="set by Connect a Telegram chat" autocomplete="off"></label>
         </div>
-        <input id="model" type="hidden" value="z-ai/glm-5.3-flash">
+        <input id="model" type="hidden" value="Qwen/Qwen3-VL-30B-A3B-Instruct">
         <div class="actions" style="margin-top:16px;align-items:center">
           <button id="demo" type="button" class="btn-ghost">Use the README demo treasury</button>
           <span class="muted" style="font-size:13px">Loads the treasury of the README walkthrough, read-only.</span>
@@ -735,6 +735,8 @@ const aiBase = () => useOwnKey() ? AI_BASE : `${RELAY}/v1`;
 const settings = {};
 function loadSettings() {
   for (const f of FIELDS) { try { const v = localStorage.getItem("bursar." + f); if (v !== null) $("#" + f).value = v; } catch {} }
+  // The reading model moved from GLM (a reasoning model, 20 to 60 s a page) to Qwen3-VL (3 s), both in NEAR's TEE.
+  try { if (localStorage.getItem("bursar.model") === "z-ai/glm-5.3-flash") { localStorage.setItem("bursar.model", "Qwen/Qwen3-VL-30B-A3B-Instruct"); $("#model").value = "Qwen/Qwen3-VL-30B-A3B-Instruct"; } } catch {}
   if (q.get("treasury")) $("#treasury").value = q.get("treasury");
   if (q.get("network")) $("#network").value = q.get("network");
   if (q.get("agent")) $("#agent").value = q.get("agent");
@@ -773,7 +775,7 @@ $("#readMode").addEventListener("change", syncReadMode);
 $("#save").addEventListener("click", saveSettings);
 // The demo treasury from the README: a throwaway testnet deployment. The agent key is not filled in: paste your own, or
 // read the recorded samples below, which need no key at all.
-const DEMO = { network: "testnet", treasury: "treasury.bursar-b48563e6.testnet", agent: "agent.bursar-b48563e6.testnet", model: "z-ai/glm-5.3-flash", label: "README demo (read-only)", owner: "", ownerKey: "", agentKey: "" };
+const DEMO = { network: "testnet", treasury: "treasury.bursar-b48563e6.testnet", agent: "agent.bursar-b48563e6.testnet", model: "Qwen/Qwen3-VL-30B-A3B-Instruct", label: "README demo (read-only)", owner: "", ownerKey: "", agentKey: "" };
 $("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); location.hash = "#overview"; });
 $("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey", "operatorKey", "payerKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
@@ -823,10 +825,26 @@ async function rpc(method, params) {
   if (j.error) { const d = j.error.data; throw new Error(typeof d === "string" ? d : d?.message ?? (d ? JSON.stringify(d) : j.error.message) ?? JSON.stringify(j.error)); }
   return j.result;
 }
+// The height of the block where our last transaction ran. The RPC endpoint is a pool of nodes and one can
+// lag a second behind another: a view answered from a block older than that would show the state before
+// our own transaction, so view() asks again until a node caught up.
+let seenHeight = 0;
+async function noteTxBlock(res) {
+  const hash = res?.receipts_outcome?.at(-1)?.block_hash || res?.transaction_outcome?.block_hash; if (!hash) return;
+  for (let i = 0; i < 6; i++) {
+    try { const b = await rpc("block", { block_id: hash }); seenHeight = Math.max(seenHeight, b.header.height); return; }
+    catch (e) { if (!/unknown|not found|does not exist/i.test(e.message)) return; await new Promise((r) => setTimeout(r, 400)); }
+  }
+}
 async function view(contract, method, args = {}) {
   // optimistic: a view right after one of our own transactions must see it
-  const res = await rpc("query", { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: b64(te.encode(JSON.stringify(args))) });
-  if (res.error) throw new Error(res.error);
+  let res;
+  for (let i = 0; ; i++) {
+    res = await rpc("query", { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: b64(te.encode(JSON.stringify(args))) });
+    if (res.error) throw new Error(res.error);
+    if (!(res.block_height < seenHeight) || i >= 8) break;
+    await new Promise((r) => setTimeout(r, 400));
+  }
   return JSON.parse(td.decode(new Uint8Array(res.result)));
 }
 // NEAR actions, borsh-encoded by hand. Only the ones this page sends.
@@ -886,6 +904,7 @@ async function sendTx({ signerId, secretKey, receiverId, actions, gasTgas }) {
   if (st.Failure) throw new Error(txFailureText(st.Failure));
   for (const ro of res.receipts_outcome ?? []) { const f = ro.outcome?.status?.Failure; if (f) throw new Error("receipt failed: " + JSON.stringify(f).slice(0, 400)); }
   const value = st.SuccessValue ? td.decode(unb64(st.SuccessValue)) : "";
+  await noteTxBlock(res);
   return { hash: res.transaction?.hash, value };
 }
 async function waitForTx(hash, signerId) {
@@ -1579,7 +1598,7 @@ function renderSettings() {
     ...(settings.payer ? [["payer", esc(settings.payer), "A testnet account Bursar funded to create everything. Its key stays here to pay for invites and the DAO. It has no power over the treasury."]] : []),
     ["dao", esc(roles[3] ?? "none"), "The council that votes on held invoices, if the company created one."],
     ["token", esc(roles[4]), "The USDC contract the treasury holds and pays with. On testnet, a test token."],
-    ["model", esc(settings.model || "z-ai/glm-5.3-flash"), "The model that reads the invoices inside the enclave. Fixed: the receipt names it and the verifier checks it."],
+    ["model", esc(settings.model || "Qwen/Qwen3-VL-30B-A3B-Instruct"), "The model that reads the invoices inside the enclave. Fixed: the receipt names it and the verifier checks it."],
   ].map(([k, v, h]) => `<span class="k">${k}${help(h)}</span><span class="v mono">${v}</span>`).join("");
   $("#govNone").hidden = !!dao(); $("#govHas").hidden = !dao();
   if (dao()) {

@@ -24,7 +24,7 @@ Without installing anything: in the Cloudflare dashboard create a Worker, paste 
 
 ```bash
 curl https://bursar-relay.<you>.workers.dev/
-curl "https://bursar-relay.<you>.workers.dev/v1/attestation/report?model=z-ai/glm-5.3-flash&provider=near&signing_algo=ecdsa&nonce=$(openssl rand -hex 32)" | head -c 300
+curl "https://bursar-relay.<you>.workers.dev/v1/attestation/report?model=Qwen/Qwen3-VL-30B-A3B-Instruct&provider=near&signing_algo=ecdsa&nonce=$(openssl rand -hex 32)" | head -c 300
 ```
 
 ## Telegram inbox

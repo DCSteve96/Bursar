@@ -192,7 +192,7 @@ export default {
       if (body.byteLength > MAX_BODY) return json(413, { error: `request body over ${MAX_BODY} bytes` }, headers);
       let parsed;
       try { parsed = JSON.parse(new TextDecoder().decode(body)); } catch { return json(400, { error: "body is not JSON" }, headers); }
-      const models = (env.ALLOWED_MODELS || "z-ai/glm-5.3-flash").split(",").map((s) => s.trim());
+      const models = (env.ALLOWED_MODELS || "Qwen/Qwen3-VL-30B-A3B-Instruct,z-ai/glm-5.3-flash").split(",").map((s) => s.trim());
       if (!models.includes(parsed.model)) return json(400, { error: `model not allowed by this relay: ${parsed.model}` }, headers);
       if (parsed.stream) return json(400, { error: "streaming is not relayed: the signature needs the whole response" }, headers);
       const lim = await underLimits(env, ip);
