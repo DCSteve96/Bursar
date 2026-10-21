@@ -1944,12 +1944,14 @@ async function showDecision(id, hash, signedBy) {
 // Nothing here can be opened without that wallet; the contract stores an opaque string (set_vault, owner only).
 const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "inboxToken", "label", "aiKey", "readMode"];
 const vaultKeys = {}; // treasury -> CryptoKey, for this tab
-async function vaultKey(wallet) {
+/** The AES key for this treasury: from this tab, from this session, or from a fresh wallet signature (getWallet is called only then). */
+async function vaultKey(getWallet) {
   const t = settings.treasury;
   if (vaultKeys[t]) return vaultKeys[t];
   let raw = null;
   try { const h = sessionStorage.getItem(`bursar.vaultKey.${t}`); if (h) raw = fromHex(h); } catch {}
   if (!raw) {
+    const wallet = typeof getWallet === "function" ? await getWallet() : getWallet;
     const nonce = new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(`bursar vault nonce ${t}`)));
     const message = `Bursar vault key for ${t}. Signing this derives the key that locks this company's secrets in its own contract. It moves nothing.`;
     const r = await wallet.signMessage({ network: settings.network, message, nonce, recipient: t });
@@ -1973,7 +1975,7 @@ async function readVault() {
 async function vaultSave(wallet) {
   if (!settings.treasury || !settings.owner || !settings.ownerKey) throw new Error("only the owner, signed in, can write the vault");
   if (settings.ownerKeyKind !== "wallet") throw new Error("the vault is locked by a wallet signature: sign in with the wallet to use it");
-  const key = await vaultKey(wallet || await ownerWallet(settings.owner));
+  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, te.encode(JSON.stringify({ v: 1, owner: settings.owner, saved_at: new Date().toISOString(), data: JSON.parse(vaultPlain()) }))));
   const blob = `v1:${b64(iv)}:${b64(ct)}`;
@@ -1986,7 +1988,7 @@ async function vaultUnlock(wallet) {
   const blob = vaultOnChain || await readVault();
   if (!blob) throw new Error("this contract holds no vault yet");
   const [, ivB, ctB] = blob.split(":");
-  const key = await vaultKey(wallet || await ownerWallet(settings.owner));
+  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)));
   let plain;
   try { plain = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(ivB) }, key, unb64(ctB)))); }
   catch { throw new Error("the vault did not open with this wallet's signature: it was locked by another wallet key"); }
@@ -2027,7 +2029,8 @@ $("#vaultUnlock").addEventListener("click", () => withVaultButton($("#vaultUnloc
 $("#vaultUnlockTop").addEventListener("click", () => withVaultButton($("#vaultUnlockTop"), $("#vaultBarErr"), () => vaultUnlock()));
 /** After a change that created a secret (Telegram token, agent key), write the vault when this tab can do so without a prompt. */
 function vaultAutoSave() {
-  if (settings.ownerKeyKind !== "wallet" || !settings.ownerKey || !vaultKeys[settings.treasury] || vaultOnChain === false) return;
+  let known = !!vaultKeys[settings.treasury]; try { known = known || !!sessionStorage.getItem(`bursar.vaultKey.${settings.treasury}`); } catch {}
+  if (settings.ownerKeyKind !== "wallet" || !settings.ownerKey || !known || vaultOnChain === false) return;
   vaultSave().catch((e) => console.warn("vault:", e.message));
 }
 
