@@ -16,7 +16,7 @@ MAX_READS_PER_DAY = "300"
 # id = "..."
 
 # Telegram inbox (optional). Secrets:  wrangler secret put TELEGRAM_BOT_TOKEN   and   wrangler secret put TELEGRAM_WEBHOOK_SECRET
-# It needs a KV namespace:            wrangler kv namespace create INBOX   then uncomment and paste the id
-# [[kv_namespaces]]
-# binding = "INBOX"
-# id = "..."
+# It needs a KV namespace (created in the dashboard as bursar-inbox):
+[[kv_namespaces]]
+binding = "INBOX"
+id = "88d0ad9b7314401388361a5e439fade8"
