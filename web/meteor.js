@@ -17,7 +17,7 @@ export async function registerMeteorExtension() {
   const run = async (id, input) => (await mc.createAction({ id, input })).promptForExecution();
   const wallet = {
     manifest: {
-      id: "meteor-wallet", name: "Meteor Wallet", description: "Browser extension on this page", website: "https://meteorwallet.app",
+      id: "meteor-extension", name: "Meteor Wallet (extension)", description: "The browser extension installed here; the plain Meteor Wallet entry opens the web wallet", website: "https://meteorwallet.app",
       icon: "https://raw.githubusercontent.com/Meteor-Wallet/meteor_wallet_sdk/main/assets/meteor-logo-svg.svg", version: "3.24.0", executor: "", type: "injected", platform: [], permissions: {},
       features: { signMessage: true, signTransaction: false, signAndSendTransaction: true, signAndSendTransactions: true, signInWithoutAddKey: true, signInAndSignMessage: false, signDelegateActions: false, addFunctionCallKey: false, mainnet: true, testnet: true },
     },
