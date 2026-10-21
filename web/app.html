@@ -328,13 +328,15 @@
 <section class="band light view" id="vendors" hidden>
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ VENDORS ]</div><h2 class="heading">Who the company pays, and where. Written once, by the owner.</h2></div>
-    <div class="wrap"><table id="vendorsTable"><thead><tr><th>vendor</th><th>name</th><th>identifier</th><th>payout recorded by the owner</th><th>monthly budget</th><th>spent this month</th><th>orders</th><th>active</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="vendorsTable"><thead><tr><th>vendor</th><th>name</th><th>identifier</th><th>country</th><th>withholding</th><th>payout recorded by the owner</th><th>monthly budget</th><th>spent this month</th><th>orders</th><th>active</th><th></th></tr></thead><tbody></tbody></table></div>
     <div class="card" style="margin-top:32px">
       <div class="eyebrow muted" style="margin-bottom:16px">Add a vendor</div>
       <div class="grid cols-3">
         <label><span>Vendor id (slug) <i class="help" tabindex="0" data-help="A short handle in lowercase letters and digits, for example acmehosting. The AI reads the vendor name on the invoice and the contract matches it to this id. It cannot be changed later.">?</i></span><input id="vId" placeholder="acmehosting" autocomplete="off"></label>
         <label><span>Name <i class="help" tabindex="0" data-help="The vendor's name as printed on its invoices.">?</i></span><input id="vName" placeholder="Acme Hosting" autocomplete="off"></label>
         <label><span>Identifier printed on invoices <i class="help" tabindex="0" data-help="Optional. The VAT number, EIN, CNPJ, GSTIN, ABN or any tax id this vendor prints on its invoices. A private person or freelancer without one: give them a supplier code (for example SUP-0042) and ask them to print it. When set, an invoice that shows a different identifier waits for a person: the name can be imitated, the id cannot. Spaces and punctuation do not matter.">?</i></span><input id="vTax" placeholder="PT509876543 or SUP-0042" autocomplete="off"></label>
+        <label><span>Country <i class="help" tabindex="0" data-help="Where the vendor is based, two-letter code. Shown next to the vendor so whoever keeps the books knows which rules apply. Informational.">?</i></span><input id="vCountry" placeholder="IT" maxlength="2" autocomplete="off"></label>
+        <label><span>Withholding tax, % <i class="help" tabindex="0" data-help="Set by your accountant, not by Bursar. The share of each invoice total the treasury keeps back for the state (ritenuta d'acconto in Italy, TDS in India, retencion in Spain or Latin America). The vendor gets the rest; the kept share shows in Analytics as due until you remit it. 0 for companies and most foreign vendors. An invoice that shows a different withholding waits for a person.">?</i></span><input id="vWithhold" placeholder="0" inputmode="decimal" autocomplete="off"></label>
         <label><span>Monthly budget, USDC (0 = none) <i class="help" tabindex="0" data-help="The most this vendor is paid in one calendar month. Invoices past it are refused. 0 means no monthly limit.">?</i></span><input id="vBudget" placeholder="3000" autocomplete="off"></label>
         <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
         <label style="grid-column: span 2"><span>Account or address <i class="help" tabindex="0" data-help="The only place this vendor will ever be paid. An invoice that asks for a different account or address is refused, not paid: this is what stops the new bank details fraud. Confirm it with the vendor by phone before saving.">?</i></span><input id="vPayout" placeholder="vendor.testnet or 0x..." autocomplete="off"></label>
@@ -382,10 +384,16 @@
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ ANALYTICS ]</div><h2 class="heading">Where the money goes, from the chain, nothing else.</h2></div>
     <div class="grid stats" id="anStats"></div>
+    <div class="card" style="margin-top:24px" id="whCard" hidden>
+      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Withholding tax, to remit <i class="help" tabindex="0" data-help="Amounts the treasury kept back from vendors with a withholding rate set by your accountant. They are still in the treasury, earmarked for the state. Pay them with the usual tax procedure (in Italy the F24 by the 16th of the next month), withdraw the USDC, then press Mark as remitted so the counter goes down.">?</i></div>
+      <div class="kv" id="whKv"></div>
+      <div class="actions" style="margin-top:12px;align-items:center"><button id="whRemit" type="button" class="btn-inverse">Mark as remitted</button><span class="muted" style="font-size:13px">Owner only. Bursar does not pay the state; you do, and tell the contract.</span></div>
+      <div id="whErr" class="err" hidden></div>
+    </div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Spend by vendor</h3>
-    <div class="wrap"><table id="anVendors"><thead><tr><th>vendor</th><th>this month</th><th>budget</th><th>all time</th><th>paid</th><th>held or refused</th><th>share</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="anVendors"><thead><tr><th>vendor</th><th>this month</th><th>budget</th><th>all time</th><th>withheld</th><th>paid</th><th>held or refused</th><th>share</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Spend by month</h3>
-    <div class="wrap"><table id="anMonths"><thead><tr><th>month</th><th>paid or settling</th><th>payments</th><th>refused</th><th>held</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="anMonths"><thead><tr><th>month</th><th>paid or settling</th><th>withheld</th><th>payments</th><th>refused</th><th>held</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Decisions</h3>
     <div class="grid stats" id="anDecisions"></div>
   </div>
@@ -766,7 +774,7 @@ Fields:
 - vendor_name: the company issuing the invoice
 - vendor_id_guess: lowercase slug of the vendor name, letters and digits only (e.g. "acmehosting")
 - invoice_number: as printed
-- amount: total due as a decimal string, no currency symbol
+- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it
 - currency: ISO code (USDC, USD, EUR...)
 - due_date: YYYY-MM-DD
 - payout_seen: where the invoice asks to be paid. Either {"Near":{"account":"name.near"}} for a NEAR account,
@@ -779,6 +787,7 @@ Fields:
 - buyer_tax_id: the tax identifier of the company the invoice is addressed to ("Bill to"), as printed; empty string if none
 - subtotal: the amount before tax as a decimal string, empty string if not shown
 - tax_amount: the tax amount as a decimal string, empty string if not shown
+- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 // Checks on the reading that do not trust the model (same as app/src/ai.ts readingFlags): each failure is a flag, and a flag holds the payment for a person.
@@ -981,7 +990,7 @@ async function handleFile(file) {
       vendor_id: matchVendor(extraction, vendors), invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
       due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
       attestation_ref: attestationRef(receipt), flags: [...(extraction.flags ?? []), ...readingFlags(extraction, text)], order_ref: (extraction.order_ref || "").trim() || null,
-      vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(),
+      vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(), withholding_seen: toUnits(extraction.withholding || "0"),
     };
     await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
   } catch (e) {
@@ -1036,7 +1045,7 @@ function matchVendor(ex, vendors) {
 }
 const payoutText = (p) => p?.Near ? `NEAR ${p.Near.account}` : p?.Chain ? `${p.Chain.chain} ${p.Chain.address}` : "?";
 function showExtraction(ex) {
-  const rows = [["vendor", `${ex.vendor_name}${ex.vendor_tax_id ? ` (${ex.vendor_tax_id})` : ""}`], ["bill to", ex.buyer_tax_id || "no tax id printed"], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}${ex.subtotal ? ` (subtotal ${ex.subtotal}, tax ${ex.tax_amount || "0"})` : ""}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
+  const rows = [["vendor", `${ex.vendor_name}${ex.vendor_tax_id ? ` (${ex.vendor_tax_id})` : ""}`], ["bill to", ex.buyer_tax_id || "no tax id printed"], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}${ex.subtotal ? ` (subtotal ${ex.subtotal}, tax ${ex.tax_amount || "0"})` : ""}${ex.withholding ? `, withholding shown ${ex.withholding}` : ""}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
   $("#exKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
   $("#flags").innerHTML = (ex.flags?.length ? ex.flags.map((f) => `<span class="flag">${esc(f)}</span>`).join("") : `<span class="flag none">no flags</span>`);
   $("#extraction").hidden = false;
@@ -1075,7 +1084,7 @@ const REASON = {
   dao_proposal_failed: "the DAO refused to open the proposal; budget released",
   transfer_failed: "USDC transfer failed on the token contract; balance restored",
 };
-const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id" };
+const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what your accountant set for this vendor" };
 const holdText = (r) => (r || "over_threshold").split("+").map((x) => HOLD[x] ?? x).join(", ");
 function why(p) {
   const parts = [];
@@ -1086,6 +1095,7 @@ function why(p) {
   if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
   if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
   if (p.status === "Paid") parts.push(p.dao_proposal_id !== null ? `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR` : p.reason ? `held (${holdText(p.reason)}), approved by a person, then paid on NEAR` : "paid on NEAR in the same transaction");
+  if (BigInt(p.withheld || "0") > 0n) parts.push(`${usdc(BigInt(p.amount) - BigInt(p.withheld))} to the vendor, ${usdc(p.withheld)} kept back for the state as your accountant set`);
   if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
   return esc(parts.join(". "));
 }
@@ -1135,7 +1145,7 @@ function renderOverview() {
   const month = monthOf(String(Date.now() * 1000000));
   const spentMonth = payments.filter((p) => ["Paid", "Settling", "Settled", "Queued"].includes(p.status) && monthOf(p.created_at) === month).reduce((a, p) => a + BigInt(p.amount), 0n);
   const budgets = vendors.reduce((a, [, v]) => a + BigInt(v.monthly_budget), 0n);
-  $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (stats.paused ? stat("paused", "yes", "bad") : "");
+  $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (BigInt(stats.withheld_due || "0") > 0n ? stat("withheld for the state", usdc(stats.withheld_due), "warn") : "") + (stats.paused ? stat("paused", "yes", "bad") : "");
   $("#ovAttention").innerHTML = held().slice(-5).reverse().map((p) => `<li><span class="st wait">#${p.id}</span><span><b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}: ${esc(holdText(p.reason))}</span></li>`).join("") || `<li><span class="st ok">OK</span><span>nothing waits for you</span></li>`;
   $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${p.id}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
   $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard.html?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
@@ -1161,10 +1171,11 @@ document.addEventListener("click", async (e) => {
     }
     const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner" }[act];
     if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
-    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", removeOp: "remove_operator" }[act];
-    let tax = null;
+    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", setWithhold: "update_vendor", removeOp: "remove_operator" }[act];
+    let tax = null, bps = null;
     if (act === "setTax") { tax = prompt("Identifier this vendor prints on its invoices (VAT number, EIN, CNPJ, or a supplier code you assign). Leave empty to stop checking it.", b.dataset.tax || ""); if (tax === null) return; }
-    const args = act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "removeOp" ? { account: b.dataset.id } : { id };
+    if (act === "setWithhold") { const w = prompt("Withholding tax to keep back on this vendor's invoices, in percent (for example 20). As set by your accountant. 0 for none.", String((Number(b.dataset.w) || 0) / 100)); if (w === null) return; bps = Math.round(Number(w.replace(",", ".") || "0") * 100); if (!Number.isFinite(bps) || bps < 0 || bps > 5000) throw new Error("a percentage between 0 and 50"); }
+    const args = act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
     await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
     await loadTreasury();
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
@@ -1178,7 +1189,7 @@ $("#attnSync").addEventListener("click", async () => {
   } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; } finally { b.disabled = false; }
 });
 function renderVendors() {
-  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
+  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td class="mono">${v.country ? esc(v.country) : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
   const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
 }
@@ -1189,8 +1200,8 @@ $("#vAdd").addEventListener("click", async () => {
     const id = $("#vId").value.trim().toLowerCase().replace(/[^a-z0-9]/g, ""), name = $("#vName").value.trim(), chain = $("#vChain").value, addr = $("#vPayout").value.trim();
     if (!id || !name || !addr) throw new Error("vendor id, name and payout are required");
     const payout = chain === "near" ? { Near: { account: addr.toLowerCase() } } : { Chain: { chain, address: addr } };
-    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0"), tax_id: $("#vTax").value.trim() || null }, gasTgas: 30 });
-    for (const f of ["vId", "vName", "vBudget", "vPayout", "vTax"]) $("#" + f).value = "";
+    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0"), tax_id: $("#vTax").value.trim() || null, country: $("#vCountry").value.trim().toUpperCase() || null, withholding_bps: Math.round(Number($("#vWithhold").value.replace(",", ".") || "0") * 100) }, gasTgas: 30 });
+    for (const f of ["vId", "vName", "vBudget", "vPayout", "vTax", "vCountry", "vWithhold"]) $("#" + f).value = "";
     await loadTreasury();
   } catch (e) { $("#vErr").textContent = e.message; $("#vErr").hidden = false; }
 });
@@ -1222,10 +1233,14 @@ function renderAnalytics() {
   const month = monthOf(String(Date.now() * 1000000));
   const all = spent(payments.filter(isSpend));
   const stat = (k, v) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const withheld = (ps) => ps.reduce((a, p) => a + BigInt(p.withheld || "0"), 0n);
+  const due = BigInt(stats.withheld_due || "0");
+  $("#whCard").hidden = due === 0n && withheld(payments) === 0n;
+  $("#whKv").innerHTML = [["to remit now", usdc(due)], ["kept this month", usdc(withheld(payments.filter((p) => isSpend(p) && monthOf(p.created_at) === month)))], ["kept all time", usdc(withheld(payments.filter(isSpend)))]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${v}</span>`).join("");
   $("#anStats").innerHTML = stat("spent all time", usdc(all)) + stat("spent this month", usdc(spent(payments.filter((p) => isSpend(p) && monthOf(p.created_at) === month)))) + stat("refused", usdc(spent(payments.filter((p) => p.status === "Blocked")))) + stat("waiting", usdc(spent(held()))) + stat("balance", usdc(stats.balance));
-  $("#anVendors tbody").innerHTML = vendors.map(([id, v]) => { const ps = payments.filter((p) => p.vendor_id === id); const tot = spent(ps.filter(isSpend)); const m = spent(ps.filter((p) => isSpend(p) && monthOf(p.created_at) === month)); const b = BigInt(v.monthly_budget); const share = all > 0n ? Number(tot * 100n / all) : 0; return `<tr><td><b>${esc(v.name)}</b><div class="mono muted">${esc(id)}</div></td><td>${usdc(m)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, Number(m * 100n / b))}%"></i></div>` : ""}</td><td>${b > 0n ? usdc(b) : "<span class=muted>none</span>"}</td><td>${usdc(tot)}</td><td>${ps.filter(isSpend).length}</td><td>${ps.filter((p) => !isSpend(p)).length}</td><td style="min-width:140px">${share}%<div class="bar-meter"><i style="width:${share}%"></i></div></td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">no vendors</td></tr>`;
-  const months = {}; for (const p of payments) { const k = monthOf(p.created_at); months[k] ??= { spend: 0n, n: 0, refused: 0, held: 0 }; if (isSpend(p)) { months[k].spend += BigInt(p.amount); months[k].n++; } if (p.status === "Blocked") months[k].refused++; if (p.status === "Approval") months[k].held++; }
-  $("#anMonths tbody").innerHTML = Object.keys(months).sort().reverse().map((k) => `<tr><td class="mono">${k}</td><td>${usdc(months[k].spend)}</td><td>${months[k].n}</td><td>${months[k].refused}</td><td>${months[k].held}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no payments yet</td></tr>`;
+  $("#anVendors tbody").innerHTML = vendors.map(([id, v]) => { const ps = payments.filter((p) => p.vendor_id === id); const tot = spent(ps.filter(isSpend)); const m = spent(ps.filter((p) => isSpend(p) && monthOf(p.created_at) === month)); const b = BigInt(v.monthly_budget); const share = all > 0n ? Number(tot * 100n / all) : 0; return `<tr><td><b>${esc(v.name)}</b><div class="mono muted">${esc(id)}</div></td><td>${usdc(m)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, Number(m * 100n / b))}%"></i></div>` : ""}</td><td>${b > 0n ? usdc(b) : "<span class=muted>none</span>"}</td><td>${usdc(tot)}</td><td>${(() => { const w = withheld(ps.filter(isSpend)); return w > 0n ? usdc(w) : `<span class="muted">-</span>`; })()}</td><td>${ps.filter(isSpend).length}</td><td>${ps.filter((p) => !isSpend(p)).length}</td><td style="min-width:140px">${share}%<div class="bar-meter"><i style="width:${share}%"></i></div></td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">no vendors</td></tr>`;
+  const months = {}; for (const p of payments) { const k = monthOf(p.created_at); months[k] ??= { spend: 0n, n: 0, refused: 0, held: 0, withheld: 0n }; if (isSpend(p)) { months[k].spend += BigInt(p.amount); months[k].n++; months[k].withheld += BigInt(p.withheld || "0"); } if (p.status === "Blocked") months[k].refused++; if (p.status === "Approval") months[k].held++; }
+  $("#anMonths tbody").innerHTML = Object.keys(months).sort().reverse().map((k) => `<tr><td class="mono">${k}</td><td>${usdc(months[k].spend)}</td><td>${months[k].withheld > 0n ? usdc(months[k].withheld) : `<span class="muted">-</span>`}</td><td>${months[k].n}</td><td>${months[k].refused}</td><td>${months[k].held}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no payments yet</td></tr>`;
   const counts = {}; for (const p of payments) counts[p.status] = (counts[p.status] || 0) + 1;
   $("#anDecisions").innerHTML = ["Paid", "Queued", "Approval", "Blocked", "Settled", "Cancelled"].filter((k) => counts[k]).map((k) => `<div class="stat"><div class="k">${k}</div><div class="v ${k}">${counts[k]}</div></div>`).join("") || `<div class="stat"><div class="k">decisions</div><div class="v">0</div></div>`;
 }
@@ -1260,6 +1275,16 @@ async function ownerCall(method, args, gasTgas = 30) {
 }
 const onErr = (e) => { $("#sErr").textContent = e.message; $("#sErr").hidden = false; };
 $("#cSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_company", { name: $("#cName").value.trim(), description: $("#cDesc").value.trim(), country: $("#cCountry").value.trim().toUpperCase() || null, tax_id: $("#cTax").value.trim() || null }); await loadTreasury(); } catch (e) { onErr(e); } });
+$("#whRemit").addEventListener("click", async () => {
+  $("#whErr").hidden = true;
+  try {
+    if (!settings.ownerKey) throw new Error("only the owner marks a remittance");
+    const w = prompt("Amount remitted to the state, in USDC", usdc(state.stats.withheld_due || "0").replace(" USDC", "").replace(/,/g, ""));
+    if (w === null) return;
+    await ownerCall("mark_withholding_remitted", { amount: toUnits(w.replace(",", ".")) });
+    await loadTreasury();
+  } catch (e) { $("#whErr").textContent = e.message; $("#whErr").hidden = false; }
+});
 $("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
 // ---------- governance: a Sputnik DAO for the company, from the console ----------
@@ -1455,6 +1480,8 @@ const DEMO_VENDORS = [
   { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-b48563e6.testnet" } }, monthly_budget: "3000000000", tax_id: null },
   { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: "legalpartners.bursar-b48563e6.testnet" } }, monthly_budget: "0", tax_id: null },
   { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0", tax_id: null },
+  // a freelancer whose invoices show a withholding tax: the accountant set 20%, the treasury keeps that share for the state
+  { vendor_id: "consultant", name: "Studio Bianchi Consulting", payout: { Near: { account: "consultant.bursar-b48563e6.testnet" } }, monthly_budget: "0", tax_id: "IT05555555555", country: "IT", withholding_bps: 2000 },
 ];
 async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
 /** Set by login.html when a wallet account signed in and owns no treasury yet: the one created here belongs to it. */
@@ -1556,7 +1583,7 @@ async function createTreasury() {
     else {
       step("vendors", "wait", "registering the three demo vendors");
       const t4 = await send(treasury, DEMO_VENDORS.map((v) => A.functionCall("add_vendor", v, 30)));
-      step("vendors", "ok", "acmehosting, legalpartners (NEAR) and designco (Base) allowlisted with their payouts", t4.hash);
+      step("vendors", "ok", "acmehosting, legalpartners, consultant (NEAR, 20% withholding) and designco (Base) allowlisted with their payouts", t4.hash);
     }
     const orders = await view(treasury, "list_orders", { vendor_id: null });
     if (orders.length) step("orders", "ok", `${orders.length} orders already recorded`);

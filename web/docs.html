@@ -101,9 +101,12 @@
     <span class="k">flagged</span><span>The reading carries a flag: the model noticed something (urgency, new payment details), or one of the cross-checks on its reading failed (see below). Held for a person. The AI can add scrutiny, never remove it.</span>
     <span class="k">identity_mismatch</span><span>The vendor's tax id printed on the invoice is not the one the owner recorded for that vendor. A name can be imitated; the id cannot. Held for a person.</span>
     <span class="k">buyer_mismatch</span><span>The invoice is not addressed to the company's own tax id: someone else's invoice, by mistake or on purpose. Held for a person.</span>
+    <span class="k">withholding_mismatch</span><span>The withholding tax the invoice shows differs from the rate the company's accountant set on this vendor, or the vendor has none set and the invoice shows one. Held for a person.</span>
   </div>
   <h3>Reading errors made harmless</h3>
   <p>The model can misread a number. Five checks that do not trust the model run on every reading, and each failure is a flag the contract holds on: the total must appear in the PDF's text layer; no larger amount may appear in the document (a subtotal taken for the total is caught); subtotal plus tax must equal the total when the invoice shows them; the model's confidence must be at least 0.6; the currency must be USDC. A scan without a text layer is always held. What remains possible is paying less than the invoice says, to the right account, within the orders and caps: the vendor will say so.</p>
+  <h3>Withholding tax, set by your accountant</h3>
+  <p>Bursar knows no tax rules and does not try to. Many countries make the payer keep back part of what it pays certain vendors, typically freelancers, and remit it to the state: ritenuta d'acconto in Italy, TDS in India, retencion in Spain and Latin America, with rates and bases that differ and change. So the rule lives where it belongs: whoever keeps the company's books sets, per vendor, a country and a withholding percentage (0 for companies and most foreign vendors). The contract then pays the vendor the net, keeps the withheld share in the treasury, earmarked, and shows in Analytics what is due. Remitting it is the company's job; afterwards the owner marks it remitted and the counter goes down. An invoice whose own withholding line disagrees with the rate set waits for a person.</p>
   <h3>Who is who: tax ids</h3>
   <p>Every vendor record can carry the identifier the vendor prints on its invoices: a VAT number in Europe, an EIN in the United States, a CNPJ in Brazil, a GSTIN in India, an ABN in Australia, or, for a freelancer with none, a supplier code the company assigns and asks them to print. The company records its own in Settings. Spaces and punctuation do not matter. Both checks are optional and both hold rather than block, so a tax id read wrong never refuses a real invoice.</p>
   <p style="margin-top:20px">Only the owner changes a vendor's payout. The executor cannot redirect funds: the contract compares the recipient it reports with the vendor record before releasing USDC. A transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked <code>transfer_failed</code>.</p>
@@ -170,9 +173,9 @@
     <span class="k">Overview</span><span>Balance, spent this month, budgets, what waits for a person, the last decisions.</span>
     <span class="k">Invoices</span><span>Drop a PDF or load a recorded reading; watch the enclave read it, the receipt verify, the contract answer. "Request payment" signs with the agent key.</span>
     <span class="k">Attention</span><span>Held payments to approve or cancel, council votes when there is a DAO, and what was refused, with the reason.</span>
-    <span class="k">Vendors</span><span>The allowlist: id, name, the identifier printed on invoices, payout on record, monthly budget, active or not.</span>
+    <span class="k">Vendors</span><span>The allowlist: id, name, the identifier printed on invoices, country, withholding rate set by the accountant, payout on record, monthly budget, active or not.</span>
     <span class="k">Orders</span><span>Purchase orders and standing orders, what each has consumed, close.</span>
-    <span class="k">Analytics</span><span>Spend by vendor and by month, straight from the payments.</span>
+    <span class="k">Analytics</span><span>Spend by vendor and by month, straight from the payments, and the withholding kept back for the state with "Mark as remitted".</span>
     <span class="k">Settings</span><span>Company (name, country, tax id), limits, strict order mode, collaborators and invites, Telegram inbox, governance (create the DAO), keys and reading plan.</span>
   </div>
 </section>

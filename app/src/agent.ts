@@ -102,6 +102,7 @@ function buildClaim(read: ReadResult, vendorId: string): InvoiceClaim {
     order_ref: extraction.order_ref?.trim() || null,
     vendor_tax_id: (extraction.vendor_tax_id || "").trim(),
     buyer_tax_id: (extraction.buyer_tax_id || "").trim(),
+    withholding_seen: toUnits(extraction.withholding || "0"),
   };
 }
 

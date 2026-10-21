@@ -11,16 +11,17 @@ from reportlab.lib.units import mm
 ap = argparse.ArgumentParser()
 ap.add_argument("--near-vendor", default="acmehosting.testnet")
 ap.add_argument("--near-vendor-legal", default="legalpartners.testnet")
+ap.add_argument("--near-vendor-consultant", default="consultant.testnet")
 ap.add_argument("--base-address", default="0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801")
 ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "samples"))
 # Tax ids printed on the invoices: the vendors' (what `bursar setup` records for them) and the buyer's. Fictional.
-VAT = {"Acme Hosting": "PT509876543", "DesignCo": "NL862345678B01", "Legal Partners LLP": "IT09876543210"}
+VAT = {"Acme Hosting": "PT509876543", "DesignCo": "NL862345678B01", "Legal Partners LLP": "IT09876543210", "Studio Bianchi Consulting": "IT05555555555"}
 BUYER_VAT = "IT01234567890"
 a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
 
 
-def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, pay_lines, note=None, stamp=None, po=None, vat=None, buyer_vat=BUYER_VAT, subtotal=None, tax=None):
+def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, pay_lines, note=None, stamp=None, po=None, vat=None, buyer_vat=BUYER_VAT, subtotal=None, tax=None, withholding=None, net=None):
     c = canvas.Canvas(path, pagesize=A4)
     w, h = A4
     y = h - 30 * mm
@@ -66,7 +67,16 @@ def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, 
         c.drawRightString(w - 20 * mm, y, f"VAT (0%, reverse charge): {tax}")
         y -= 8 * mm
     c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(w - 20 * mm, y, f"Total due: {total} USDC")
+    if withholding is not None:
+        c.drawRightString(w - 20 * mm, y, f"Total: {total} USDC")
+        y -= 7 * mm
+        c.setFont("Helvetica", 10)
+        c.drawRightString(w - 20 * mm, y, f"Withholding tax 20% (ritenuta d'acconto): -{withholding}")
+        y -= 7 * mm
+        c.setFont("Helvetica-Bold", 12)
+        c.drawRightString(w - 20 * mm, y, f"Net payable: {net} USDC")
+    else:
+        c.drawRightString(w - 20 * mm, y, f"Total due: {total} USDC")
     y -= 16 * mm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(20 * mm, y, "Payment details")
@@ -137,5 +147,11 @@ invoice(os.path.join(a.out, "08-acme-hosting-1003-other-customer.pdf"), "Acme Ho
         "AH-1003", "2026-11-27", "2026-12-11",
         [("Dedicated server EU-West, December", "480.00")], "480.00",
         [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"], buyer_vat="FR40123456789")
+
+# 9. A freelancer whose invoice shows the withholding tax: the company's accountant set 20% on this vendor -> Paid net, 200 kept for the state
+invoice(os.path.join(a.out, "09-studio-bianchi-0044.pdf"), "Studio Bianchi Consulting", "Via Roma 18, Torino (sole trader)", "studio@bianchi-consulting.example",
+        "SB-0044", "2026-11-28", "2026-12-28",
+        [("Brand strategy workshop, two days", "1,000.00")], "1,000.00",
+        [f"Pay to NEAR account: {a.near_vendor_consultant}", "Token: USDC"], withholding="200.00", net="800.00")
 
 print("written to", a.out)

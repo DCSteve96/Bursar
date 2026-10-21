@@ -29,6 +29,8 @@ export interface Extraction {
   /** Subtotal before tax and the tax amount, decimal strings, empty if the invoice does not show them. */
   subtotal?: string;
   tax_amount?: string;
+  /** Withholding tax the invoice shows as deducted from the total (ritenuta d'acconto, TDS, retencion), empty if none. */
+  withholding?: string;
 }
 
 /** Everything needed to re-verify one inference independently. Stored next to the payment, never on chain. */
@@ -83,7 +85,7 @@ Fields:
 - vendor_name: the company issuing the invoice
 - vendor_id_guess: lowercase slug of the vendor name, letters and digits only (e.g. "acmehosting")
 - invoice_number: as printed
-- amount: total due as a decimal string, no currency symbol
+- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it
 - currency: ISO code (USDC, USD, EUR...)
 - due_date: YYYY-MM-DD
 - payout_seen: where the invoice asks to be paid. Either {"Near":{"account":"name.near"}} for a NEAR account,
@@ -96,6 +98,7 @@ Fields:
 - buyer_tax_id: the tax identifier of the company the invoice is addressed to ("Bill to"), as printed; empty string if none
 - subtotal: the amount before tax as a decimal string, empty string if not shown
 - tax_amount: the tax amount as a decimal string, empty string if not shown
+- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 
@@ -207,8 +210,9 @@ export function readInvoiceOffline(text: string): Extraction {
     vendor_name: vendor,
     vendor_id_guess: vendor.toLowerCase().replace(/[^a-z0-9]/g, ""),
     invoice_number: pick(/Invoice\s*(?:#|No\.?|number)\s*:?\s*([A-Z]{1,4}-?[0-9]{2,8})/i),
-    amount: pick(/Total due:\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
-    currency: pick(/Total due:\s*[0-9.,]+\s*([A-Z]{3,4})/i) || "USDC",
+    amount: pick(/\bTotal(?: due)?:\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
+    withholding: pick(/(?:Withholding|Ritenuta)[^:\n]*:\s*-?\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
+    currency: pick(/\bTotal(?: due)?:\s*[0-9.,]+\s*([A-Z]{3,4})/i) || "USDC",
     due_date: pick(/Due date:\s*(\d{4}-\d{2}-\d{2})/i),
     payout_seen: near ? { Near: { account: near } } : { Chain: { chain, address: addr } },
     flags,

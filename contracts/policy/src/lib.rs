@@ -79,6 +79,13 @@ pub struct Vendor {
     /// code the company assigned. Compared after normalization. None = not checked.
     #[serde(default)]
     pub tax_id: Option<String>,
+    /// ISO country code of the vendor, informational: it tells the company's accountant which rules apply.
+    #[serde(default)]
+    pub country: Option<String>,
+    /// Withholding the company must keep back when paying this vendor, in basis points of the invoice total
+    /// (2000 = 20%). Set by the company's accountant; Bursar applies it and never decides it. 0 = none.
+    #[serde(default)]
+    pub withholding_bps: u32,
 }
 
 #[near(serializers = [borsh, json])]
@@ -134,6 +141,9 @@ pub struct InvoiceClaim {
     /// The buyer's tax id as printed on the invoice, empty if none.
     #[serde(default)]
     pub buyer_tax_id: String,
+    /// Withholding tax the invoice itself shows as deducted (ritenuta d'acconto, TDS, retencion), 0 if none.
+    #[serde(default)]
+    pub withholding_seen: U128,
     /// Purchase order or reference printed on the invoice, if any.
     #[serde(default)]
     pub order_ref: Option<String>,
@@ -161,6 +171,9 @@ pub struct Payment {
     pub dao_proposal_id: Option<u64>,
     /// The order this payment consumed, if any.
     pub order_id: Option<u64>,
+    /// Part of `amount` kept back in the treasury as withholding tax, owed to the state; the vendor gets the rest.
+    #[serde(default)]
+    pub withheld: u128,
 }
 
 #[near(serializers = [borsh, json])]
@@ -218,6 +231,9 @@ pub struct Stats {
     pub day: u64,
     pub payments: u64,
     pub paused: bool,
+    /// Withholding kept back and not yet remitted to the state, in token units.
+    #[serde(default)]
+    pub withheld_due: U128,
 }
 
 // ---------- external contracts ----------
@@ -295,6 +311,8 @@ pub struct Bursar {
     spent_today: u128,
     day: u64,
     paused: bool,
+    /// Withholding kept in the treasury for the state, not yet remitted (see `mark_withholding_remitted`).
+    withheld_due: u128,
 }
 
 #[near]
@@ -336,14 +354,17 @@ impl Bursar {
             spent_today: 0,
             day: 0,
             paused: false,
+            withheld_due: 0,
         }
     }
 
     // ----- owner -----
 
-    pub fn add_vendor(&mut self, vendor_id: String, name: String, payout: Payout, monthly_budget: U128, tax_id: Option<String>) {
+    pub fn add_vendor(&mut self, vendor_id: String, name: String, payout: Payout, monthly_budget: U128, tax_id: Option<String>, country: Option<String>, withholding_bps: Option<u32>) {
         self.assert_can(|r| r.manage_vendors, "manage vendors");
         require!(!self.vendors.contains_key(&vendor_id), "vendor exists");
+        let withholding_bps = withholding_bps.unwrap_or(0);
+        require!(withholding_bps <= 5000, "withholding above 50%");
         self.vendors.insert(
             vendor_id.clone(),
             Vendor {
@@ -354,15 +375,24 @@ impl Bursar {
                 month: Self::month_key(),
                 active: true,
                 tax_id: tax_id.filter(|t| !Self::norm_id(t).is_empty()),
+                country: country.filter(|c| !c.trim().is_empty()).map(|c| c.trim().to_ascii_uppercase()),
+                withholding_bps,
             },
         );
         self.emit("vendor_added", &vendor_id);
     }
 
     /// Changing a payout is an owner action, never something an invoice can do.
-    pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>, tax_id: Option<String>) {
+    pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>, tax_id: Option<String>, country: Option<String>, withholding_bps: Option<u32>) {
         self.assert_can(|r| r.manage_vendors, "manage vendors");
         let mut v = self.vendors.get(&vendor_id).cloned().expect("unknown vendor");
+        if let Some(c) = country {
+            v.country = if c.trim().is_empty() { None } else { Some(c.trim().to_ascii_uppercase()) };
+        }
+        if let Some(w) = withholding_bps {
+            require!(w <= 5000, "withholding above 50%");
+            v.withholding_bps = w;
+        }
         if let Some(p) = payout {
             v.payout = p;
         }
@@ -479,6 +509,14 @@ impl Bursar {
         self.emit(if paused { "paused" } else { "unpaused" }, "");
     }
 
+    /// The company paid the withheld tax to the state (off chain, from a `withdraw`): clear that much of the debt.
+    pub fn mark_withholding_remitted(&mut self, amount: U128) {
+        self.assert_owner();
+        require!(amount.0 <= self.withheld_due, "more than is due");
+        self.withheld_due -= amount.0;
+        self.emit("withholding_remitted", &amount.0.to_string());
+    }
+
     pub fn withdraw(&mut self, amount: U128) -> Promise {
         self.assert_owner();
         require!(amount.0 <= self.balance, "insufficient balance");
@@ -527,6 +565,7 @@ impl Bursar {
             dest_tx: None,
             dao_proposal_id: None,
             order_id: None,
+            withheld: 0,
         };
 
         match self.decide(&claim) {
@@ -569,6 +608,20 @@ impl Bursar {
                     if Self::norm_id(&claim.buyer_tax_id) != Self::norm_id(t) {
                         holds.push("buyer_mismatch");
                     }
+                }
+                // Withholding, as the company's accountant set it on the vendor: the treasury keeps that share back
+                // for the state and pays the rest. An invoice that shows a different withholding, or shows one the
+                // company did not configure, waits for a person.
+                let bps = self.vendors.get(&claim.vendor_id).map(|v| v.withholding_bps).unwrap_or(0) as u128;
+                let expected = amount * bps / 10_000;
+                let seen = claim.withholding_seen.0;
+                if bps > 0 {
+                    p.withheld = expected;
+                    if seen > 0 && seen.abs_diff(expected) > amount / 100 {
+                        holds.push("withholding_mismatch");
+                    }
+                } else if seen > 0 {
+                    holds.push("withholding_mismatch");
                 }
                 if !holds.is_empty() {
                     let reason = holds.join("+");
@@ -671,6 +724,7 @@ impl Bursar {
         self.balance += amount.0;
         if let Some(id) = id {
             if let Some(mut p) = self.payments.get(&id).cloned() {
+                self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
                 match p.status {
                     Status::Paid => {
                         self.release_reservation(&p);
@@ -705,16 +759,18 @@ impl Bursar {
         let v = self.vendors.get(&p.vendor_id).expect("unknown vendor");
         require!(v.payout.same_as(&recipient), "recipient does not match vendor payout");
         require!(matches!(v.payout, Payout::Chain { .. }), "near vendors are paid directly");
-        require!(p.amount <= self.balance, "insufficient balance");
-        self.balance -= p.amount;
+        let net = p.amount - p.withheld;
+        require!(net <= self.balance, "insufficient balance");
+        self.balance -= net;
+        self.withheld_due += p.withheld;
         p.status = Status::Settling;
         p.quote_id = Some(quote_id.clone());
         p.deposit_address = Some(deposit_address.to_string());
         p.updated_at = env::block_timestamp();
         self.payments.insert(id, p.clone());
         self.emit("payment_settling", &format!("{id}:{quote_id}"));
-        self.ft_transfer(deposit_address, p.amount, format!("bursar payment {id} invoice {}", p.invoice_number))
-            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(p.amount)))
+        self.ft_transfer(deposit_address, net, format!("bursar payment {id} invoice {}", p.invoice_number))
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(net)))
     }
 
     pub fn mark_settled(&mut self, id: u64, dest_tx: String) {
@@ -805,6 +861,7 @@ impl Bursar {
             day: self.day,
             payments: self.next_id - 1,
             paused: self.paused,
+            withheld_due: U128(self.withheld_due),
         }
     }
 
@@ -856,16 +913,19 @@ impl Bursar {
         p.updated_at = env::block_timestamp();
         match v.payout {
             Payout::Near { account } => {
-                require!(p.amount <= self.balance, "insufficient balance");
-                self.balance -= p.amount;
+                // the withheld share stays in the treasury, earmarked for the state; the vendor gets the net
+                let net = p.amount - p.withheld;
+                require!(net <= self.balance, "insufficient balance");
+                self.balance -= net;
+                self.withheld_due += p.withheld;
                 p.status = Status::Paid;
                 let id = p.id;
                 let memo = format!("bursar payment {id} invoice {}", p.invoice_number);
                 self.payments.insert(id, p.clone());
                 self.emit("payment_paid", &id.to_string());
                 let _ = self
-                    .ft_transfer(account, p.amount, memo)
-                    .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(p.amount)));
+                    .ft_transfer(account, net, memo)
+                    .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(net)));
             }
             Payout::Chain { .. } => {
                 p.status = Status::Queued;
@@ -1103,12 +1163,16 @@ mod tests {
             Payout::Near { account: accounts(5) },
             U128(10_000_000_000),
             None,
+            None,
+            None,
         );
         c.add_vendor(
             "design".into(),
             "DesignCo".into(),
             Payout::Chain { chain: "base".into(), address: "0xabc".into() },
             U128(0),
+            None,
+            None,
             None,
         );
         // fund
@@ -1122,6 +1186,7 @@ mod tests {
             order_ref: None,
             vendor_tax_id: String::new(),
             buyer_tax_id: String::new(),
+            withholding_seen: U128(0),
             vendor_id: vendor.into(),
             invoice_number: number.into(),
             amount: U128(amount),
@@ -1200,7 +1265,7 @@ mod tests {
     fn without_a_dao_the_owner_approves_above_threshold() {
         testing_env!(ctx(accounts(0)).build());
         let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
-        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None);
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None, None, None);
         testing_env!(ctx(accounts(4)).build());
         let _ = c.ft_on_transfer(accounts(0), U128(15_000_000_000), "".into());
         testing_env!(ctx(accounts(1)).build());
@@ -1219,7 +1284,7 @@ mod tests {
     fn identity_on_the_invoice_is_checked_when_recorded() {
         let mut c = setup();
         testing_env!(ctx(accounts(0)).build());
-        c.update_vendor("hosting".into(), None, None, None, Some("PT 123 456 789".into()));
+        c.update_vendor("hosting".into(), None, None, None, Some("PT 123 456 789".into()), None, None);
         c.set_company("Northwind".into(), "".into(), Some("IT".into()), Some("IT01234567890".into()));
         testing_env!(ctx(accounts(1)).build());
         // right ids in any formatting: paid
@@ -1247,6 +1312,47 @@ mod tests {
     }
 
     #[test]
+    fn withholding_set_by_the_accountant_is_kept_back_for_the_state() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_vendor("consultant".into(), "Studio Bianchi".into(), Payout::Near { account: accounts(5) }, U128(0), None, Some("it".into()), Some(2000));
+        assert_eq!(c.get_vendor("consultant".into()).unwrap().country.as_deref(), Some("IT"));
+        testing_env!(ctx(accounts(1)).build());
+        // the invoice shows the 20% withholding: paid net, the share stays in the treasury as a debt to the state
+        let mut inv = claim("consultant", "C-1", 1_000_000_000, Payout::Near { account: accounts(5) });
+        inv.withholding_seen = U128(200_000_000);
+        let before = c.get_stats().balance.0;
+        let id = c.request_payment(inv);
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Paid);
+        assert_eq!(p.withheld, 200_000_000);
+        assert_eq!(before - c.get_stats().balance.0, 800_000_000, "only the net leaves");
+        assert_eq!(c.get_stats().withheld_due.0, 200_000_000);
+        assert_eq!(c.get_vendor("consultant".into()).unwrap().spent_this_month, 1_000_000_000, "budgets count the gross");
+        // the invoice shows another withholding than the accountant set: held
+        let mut odd = claim("consultant", "C-2", 1_000_000_000, Payout::Near { account: accounts(5) });
+        odd.withholding_seen = U128(100_000_000);
+        let id = c.request_payment(odd);
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("withholding_mismatch"));
+        // an invoice that shows a withholding for a vendor with none configured: held too
+        let mut unexpected = claim("hosting", "H-9", 1_000_000_000, Payout::Near { account: accounts(5) });
+        unexpected.withholding_seen = U128(200_000_000);
+        let id = c.request_payment(unexpected);
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("withholding_mismatch"));
+        // not printed on the invoice: the accountant's rate applies anyway; a failed transfer gives the share back
+        let id3 = c.request_payment(claim("consultant", "C-3", 1_000_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(id3).unwrap().withheld, 200_000_000);
+        assert_eq!(c.get_stats().withheld_due.0, 400_000_000);
+        testing_env!(ctx(env::current_account_id()).build());
+        assert!(!c.on_ft_transfer(Some(id3), U128(800_000_000), Err(PromiseError::Failed)));
+        assert_eq!(c.get_stats().withheld_due.0, 200_000_000);
+        // the owner remits to the state and clears the debt
+        testing_env!(ctx(accounts(0)).build());
+        c.mark_withholding_remitted(U128(200_000_000));
+        assert_eq!(c.get_stats().withheld_due.0, 0);
+    }
+
+    #[test]
     fn transfer_ownership_moves_every_owner_power() {
         let mut c = setup();
         testing_env!(ctx(accounts(0)).build());
@@ -1262,8 +1368,8 @@ mod tests {
     fn no_dao() -> Bursar {
         testing_env!(ctx(accounts(0)).build());
         let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
-        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None);
-        c.add_vendor("design".into(), "DesignCo".into(), Payout::Near { account: accounts(5) }, U128(0), None);
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None, None, None);
+        c.add_vendor("design".into(), "DesignCo".into(), Payout::Near { account: accounts(5) }, U128(0), None, None, None);
         testing_env!(ctx(accounts(4)).build());
         let _ = c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
         testing_env!(ctx(accounts(0)).build());
@@ -1360,7 +1466,7 @@ mod tests {
         assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
         // the approver may add orders but not vendors
         c.add_order("hosting".into(), "PO-1".into(), "".into(), U128(1), None);
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_vendor("x".into(), "X".into(), Payout::Near { account: accounts(5) }, U128(0), None)));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_vendor("x".into(), "X".into(), Payout::Near { account: accounts(5) }, U128(0), None, None, None)));
         assert!(r.is_err());
         // a stranger can do neither
         testing_env!(ctx(accounts(5)).build());

@@ -21,6 +21,8 @@ export interface InvoiceClaim {
   vendor_tax_id?: string;
   /** The buyer's tax id as printed on the invoice, empty if none. */
   buyer_tax_id?: string;
+  /** Withholding tax the invoice shows as deducted, token units, "0" if none. */
+  withholding_seen?: string;
 }
 
 export interface Order {
@@ -64,6 +66,8 @@ export interface Payment {
   dest_tx: string | null;
   dao_proposal_id: number | null;
   order_id: number | null;
+  /** Part of amount kept in the treasury as withholding tax, token units. */
+  withheld?: string;
 }
 
 export interface Vendor {
@@ -75,6 +79,9 @@ export interface Vendor {
   active: boolean;
   /** What the vendor prints on its invoices to identify itself (VAT number, EIN, CNPJ, or a supplier code). */
   tax_id?: string | null;
+  country?: string | null;
+  /** Withholding the company keeps back when paying this vendor, basis points of the invoice total. */
+  withholding_bps?: number;
 }
 
 export const provider = new JsonRpcProvider({ url: config.rpc });

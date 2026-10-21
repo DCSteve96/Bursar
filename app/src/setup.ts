@@ -42,6 +42,7 @@ export async function setup(o: Opts) {
     usdc: o.usdc ?? (o.network === "mainnet" ? USDC_MAINNET : sub(`${o.prefix}tusdc`)),
     vendorHosting: sub(`${o.prefix}acmehosting`),
     vendorLegal: sub(`${o.prefix}legalpartners`),
+    vendorConsultant: sub(`${o.prefix}consultant`),
     dao: "",
   };
   const log = (m: string) => console.log(`[setup] ${m}`);
@@ -72,6 +73,7 @@ export async function setup(o: Opts) {
   const executor = await create(names.executor, 1);
   const vendorHosting = await create(names.vendorHosting, 0.1);
   const vendorLegal = await create(names.vendorLegal, 0.1);
+  await create(names.vendorConsultant, 0.1); // a freelancer: the accountant sets a 20% withholding on this vendor
 
   // 2. test USDC on testnet
   const wasmDir = resolve(process.cwd(), "..", "contracts");
@@ -83,7 +85,7 @@ export async function setup(o: Opts) {
       await usdc.signAndSendTransaction({ receiverId: names.usdc, actions: [actions.deployContract(code), actions.functionCall("new", {}, TGAS(30), 0n)] });
       log(`deployed tUSDC at ${names.usdc}`);
     }
-    for (const [to, amount] of [[names.treasury, "0"], [names.vendorHosting, "0"], [names.vendorLegal, "0"], [o.root, "100000000000"]] as const) {
+    for (const [to, amount] of [[names.treasury, "0"], [names.vendorHosting, "0"], [names.vendorLegal, "0"], [names.vendorConsultant, "0"], [o.root, "100000000000"]] as const) {
       await root.callFunction({ contractId: names.usdc, methodName: "mint", args: { to, amount }, gas: TGAS(30), deposit: NEAR(0.01) });
     }
     log(`minted 100,000 tUSDC to ${o.root} and registered treasury and vendors`);
@@ -132,7 +134,8 @@ export async function setup(o: Opts) {
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: names.vendorHosting } }, monthly_budget: "3000000000", tax_id: "PT509876543" }, gas: TGAS(30) });
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: names.vendorLegal } }, monthly_budget: "0", tax_id: "IT09876543210" }, gas: TGAS(30) });
     await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0", tax_id: "NL862345678B01" }, gas: TGAS(30) });
-    log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base), each with the tax id it prints on invoices");
+    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "consultant", name: "Studio Bianchi Consulting", payout: { Near: { account: names.vendorConsultant } }, monthly_budget: "0", tax_id: "IT05555555555", country: "IT", withholding_bps: 2000 }, gas: TGAS(30) });
+    log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base), consultant (NEAR, 20% withholding set by the accountant), each with the tax id it prints on invoices");
   }
   // 5b. what the company agreed to buy: a standing order for hosting, purchase orders for the two projects
   const orders = await provider.callFunction({ contractId: names.treasury, method: "list_orders", args: {} }) as unknown[];
@@ -199,7 +202,7 @@ export async function setup(o: Opts) {
 
   // 9. regenerate the demo invoices with the real vendor accounts
   try {
-    execFileSync("python3", [resolve(process.cwd(), "..", "invoices", "make_invoices.py"), "--near-vendor", names.vendorHosting, "--near-vendor-legal", names.vendorLegal], { stdio: "inherit" });
+    execFileSync("python3", [resolve(process.cwd(), "..", "invoices", "make_invoices.py"), "--near-vendor", names.vendorHosting, "--near-vendor-legal", names.vendorLegal, "--near-vendor-consultant", names.vendorConsultant], { stdio: "inherit" });
   } catch { log("could not regenerate invoices (python3 + reportlab needed); the samples folder still works if you pass the same vendor names"); }
 
   console.log("\nDone. Next:\n  set -a; source .env." + o.network + "; set +a\n  npm run relayer &\n  npm run agent -- --once --offline   # or without --offline with NEAR_AI_API_KEY set\n  npm run dev status\n");
