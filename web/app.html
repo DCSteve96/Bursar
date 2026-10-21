@@ -433,10 +433,14 @@
     <div class="card" style="margin-top:24px" id="tgCard">
       <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Telegram inbox <i class="help" tabindex="0" data-help="A Telegram chat connected to this treasury. Every PDF posted in it shows up in Inbox, where a person reads it and the contract decides. Invite the vendor to a group with the bot, or forward their emails' attachments yourself. The bot never pays anything.">?</i></div>
       <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:72ch">Press Connect, open the link on your phone, press Start in the chat. From then on, PDFs sent to that chat land in Inbox and the bot tells the chat how each one was decided. Connect as many chats as you like: one per vendor, or one for the whole company.</p>
-      <div class="actions" style="margin:0;align-items:center"><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button><span class="muted" style="font-size:14px" id="tgStatus"></span></div>
+      <div class="grid cols-3" style="align-items:end">
+        <label><span>Who is this chat for <i class="help" tabindex="0" data-help="A vendor's name, a colleague, or the company itself. It is shown next to every invoice that arrives from that chat. Optional.">?</i></span><input id="tgFor" placeholder="Acme Hosting" autocomplete="off"></label>
+        <label><span>&nbsp;</span><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button></label>
+        <span class="muted" style="font-size:14px;padding-bottom:12px" id="tgStatus"></span>
+      </div>
       <div id="tgOut" hidden style="margin-top:16px">
         <div class="kv"><span class="k">link</span><span class="v"><a id="tgLink" href="#" target="_blank" rel="noopener"></a></span><span class="k">or send</span><span class="v mono" id="tgCmd"></span></div>
-        <p class="muted" style="font-size:13px;margin:12px 0 0">The code works once and for a day. Each chat gets its own.</p>
+        <div class="actions" style="margin-top:12px;align-items:center"><a id="tgShare" class="btn btn-signal" href="#" target="_blank" rel="noopener">Send via Telegram</a><button id="tgCopy" type="button" class="btn-ghost">Copy link</button><span class="muted" style="font-size:13px">A bot cannot write first: the other side opens the link and presses Start. The code works once and for a day.</span></div>
       </div>
       <div id="tgErr" class="err" hidden></div>
     </div>
@@ -1361,14 +1365,18 @@ async function inboxAfterDecision(id, p, hash) {
     loadInbox();
   } catch {}
 }
+$("#tgCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#tgLink").href); $("#tgCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#tgCopy").textContent = "Copy link"; }, 1500); });
 $("#tgConnect").addEventListener("click", async () => {
   $("#tgErr").hidden = true; $("#tgOut").hidden = true; const b = $("#tgConnect"); b.disabled = true;
   try {
     if (!settings.treasury) throw new Error("no treasury selected");
     if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
-    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: state.company?.name || settings.label || settings.treasury }) });
+    const company = state.company?.name || settings.label || settings.treasury, who = $("#tgFor").value.trim();
+    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
     $("#tgLink").href = j.link; $("#tgLink").textContent = j.link; $("#tgCmd").textContent = `/start ${j.code}  to @${j.bot}`;
+    const msg = `${who ? who + ", send" : "Send"} your invoices for ${company} here as PDF. Open the link, press Start, then just send the file: the bot confirms and tells you the outcome.`;
+    $("#tgShare").href = `https://t.me/share/url?url=${encodeURIComponent(j.link)}&text=${encodeURIComponent(msg)}`;
     $("#tgOut").hidden = false;
     loadInbox();
   } catch (e) { $("#tgErr").textContent = e.message; $("#tgErr").hidden = false; }
