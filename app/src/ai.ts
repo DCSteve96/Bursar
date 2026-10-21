@@ -31,6 +31,11 @@ export interface Extraction {
   tax_amount?: string;
   /** Withholding tax the invoice shows as deducted from the total (ritenuta d'acconto, TDS, retencion), empty if none. */
   withholding?: string;
+  /** The amount and the withholding exactly as printed: the client parses these itself, the model's decimal conversion is not trusted. */
+  amount_printed?: string;
+  withholding_printed?: string;
+  /** A deposit or prepayment the invoice subtracts before the amount due, empty if none; the claim carries the remaining due. */
+  deposit?: string;
 }
 
 /** Everything needed to re-verify one inference independently. Stored next to the payment, never on chain. */
@@ -82,23 +87,26 @@ export interface AttestationReport {
 const SYSTEM = `You are the reading half of an AI treasurer. You read one invoice and return JSON only.
 You never decide whether to pay: a smart contract does that. Report exactly what the document says.
 Fields:
-- vendor_name: the company issuing the invoice
+- vendor_name: the company issuing the invoice (the letterhead, "From", "Emittente", "Von", "Fornitore"), never the company it is addressed to ("Bill to", "Spett.le", "Rechnung an")
 - vendor_id_guess: lowercase slug of the vendor name, letters and digits only (e.g. "acmehosting")
 - invoice_number: as printed
-- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it
+- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it. Use a dot for decimals and no thousands separator (European invoices print 1.234,56: return 1234.56)
+- amount_printed: that same amount exactly as printed on the document, character by character
 - currency: ISO code (USDC, USD, EUR...)
-- due_date: YYYY-MM-DD
+- due_date: YYYY-MM-DD (European invoices print DD/MM/YYYY or DD.MM.YYYY, US invoices MM/DD/YYYY)
 - payout_seen: where the invoice asks to be paid. Either {"Near":{"account":"name.near"}} for a NEAR account,
-  or {"Chain":{"chain":"base|arb|sol|sui|eth","address":"0x..."}} for another chain. Copy the address exactly.
+  or {"Chain":{"chain":"base|arb|sol|sui|eth","address":"0x..."}} for another chain (Arbitrum is "arb", Ethereum "eth", Solana "sol"). Copy the address exactly.
 - flags: list any of: "new_payment_details" (text like new bank details, updated wallet, please note our new address),
   "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
 - order_ref: the purchase order or reference number printed on the invoice (labels like "Purchase order", "PO", "Order ref"), as printed; empty string if none
-- vendor_tax_id: the issuing company's tax identifier as printed (VAT number, EIN, CNPJ, GSTIN, ABN, supplier code...), empty string if none
+- vendor_tax_id: the issuing company's tax identifier as printed (VAT number, EIN, CNPJ, GSTIN, ABN, supplier code...), often in the letterhead; empty string if none
 - buyer_tax_id: the tax identifier of the company the invoice is addressed to ("Bill to"), as printed; empty string if none
-- subtotal: the amount before tax as a decimal string, empty string if not shown
+- subtotal: the amount before tax as a decimal string (same format as amount), empty string if not shown
 - tax_amount: the tax amount as a decimal string, empty string if not shown
-- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none
+- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none. A deposit or prepayment already received is not withholding
+- withholding_printed: the withholding amount exactly as printed, empty string if none
+- deposit: a deposit, prepayment or credit the invoice shows as already received and subtracted before the amount due, decimal string, empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 
@@ -120,11 +128,15 @@ export async function fetchAttestation(nonce: string): Promise<AttestationReport
 
 /** Ask the gateway for the signature over (request, response) of a completion id. */
 export async function fetchSignature(id: string): Promise<SignatureRecord | null> {
-  const r = await fetch(`${config.aiBaseUrl}/signature/${encodeURIComponent(id)}?signing_algo=ecdsa`, { headers: headers() });
-  if (!r.ok) return null;
-  const j = (await r.json()) as Partial<SignatureRecord>;
-  if (!j.signature || !j.text || !j.signing_address) return null;
-  return j as SignatureRecord;
+  // The signature can lag the completion by a few seconds: ask a few times before giving up.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(`${config.aiBaseUrl}/signature/${encodeURIComponent(id)}?signing_algo=ecdsa`, { headers: headers() });
+      if (r.ok) { const j = (await r.json()) as Partial<SignatureRecord>; if (j.signature && j.text && j.signing_address) return j as SignatureRecord; }
+    } catch {}
+    await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
+  }
+  return null;
 }
 
 /**
@@ -137,7 +149,7 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
   const attestation = await fetchAttestation(nonce).catch((e) => ({ error: String(e) }) as AttestationReport);
 
   const content: unknown[] = [{ type: "text", text: "Read this invoice." }];
-  for (const p of pngPages) content.push({ type: "image_url", image_url: { url: `data:image/png;base64,${p.toString("base64")}` } });
+  for (const p of pngPages) content.push({ type: "image_url", image_url: { url: `data:${p[0] === 0xff && p[1] === 0xd8 ? "image/jpeg" : "image/png"};base64,${p.toString("base64")}` } });
   if (textFallback) content.push({ type: "text", text: `Extracted text, in case the image is unclear:\n${textFallback.slice(0, 12000)}` });
 
   const body = {
@@ -161,7 +173,7 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
       body: requestBody,
     });
     responseBody = await r.text();
-    if (r.ok || attempt >= 3 || ![429, 502, 503, 504].includes(r.status)) break;
+    if (r.ok || attempt >= 3 || ![429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530].includes(r.status)) break;
     await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
   }
   if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 500)}`);
@@ -246,6 +258,69 @@ export function readingFlags(ex: Extraction, text: string): string[] {
   if (typeof ex.confidence === "number" && ex.confidence < 0.6) flags.push("low_confidence");
   if (ex.currency && ex.currency.toUpperCase() !== "USDC") flags.push("currency_not_usdc");
   return flags;
+}
+const CHAIN_ALIASES: Record<string, string> = { arbitrum: "arb", "arbitrum one": "arb", arb: "arb", ethereum: "eth", eth: "eth", mainnet: "eth", solana: "sol", sol: "sol", sui: "sui", base: "base", near: "near" };
+/**
+ * The values a claim carries, taken from the model's reading without trusting its number formatting: the amount printed on
+ * the document, parsed here ("1.234,56" and "1,234.56" both read as 1234.56), wins over the model's decimal conversion;
+ * a negative or missing withholding is zero; chain names are the short ones the contract knows. The extraction itself is
+ * left as the model wrote it, because the receipt is verified against the signed response.
+ */
+export function claimValues(ex: Extraction): { amount: string; withholding: string; payout_seen: Payout } {
+  const fix = (decimal: string | undefined, printed: string | undefined): string => {
+    const fromPrinted = printed && /\d/.test(printed) ? parseMoney(printed.replace(/[^\d.,]/g, "")) : NaN;
+    let n = Number.isFinite(fromPrinted) ? fromPrinted : parseMoney(String(decimal ?? "").replace(/[^\d.,]/g, ""));
+    // "5.04656" is what a model makes of "5.046,56": a dot followed by five digits is a thousands dot plus two decimals
+    const m = String(decimal ?? "").match(/^(\d{1,3})\.(\d{3})(\d{2})$/);
+    if (!Number.isFinite(fromPrinted) && m) n = Number(`${m[1]}${m[2]}.${m[3]}`);
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    return n.toFixed(2);
+  };
+  let payout = ex.payout_seen;
+  if (payout && "Chain" in payout && payout.Chain) {
+    const key = String(payout.Chain.chain ?? "").toLowerCase().trim();
+    payout = { Chain: { chain: CHAIN_ALIASES[key] ?? key, address: String(payout.Chain.address ?? "").trim() } };
+  } else if (payout && "Near" in payout && payout.Near) payout = { Near: { account: String(payout.Near.account ?? "").trim().toLowerCase() } };
+  const deposit = ex.deposit ? Number(fix(ex.deposit, undefined)) : 0;
+  let withholding = ex.withholding || ex.withholding_printed ? fix(ex.withholding, ex.withholding_printed) : "0";
+  if (deposit > 0 && Math.abs(Number(withholding) - deposit) < 0.005) withholding = "0"; // the model put the deposit in both places
+  let amount = Number(fix(ex.amount, ex.amount_printed));
+  // Reconcile with the printed subtotal and tax, as a bookkeeper would: the contract wants the total before withholding,
+  // less a deposit already received. The model sometimes reports the net after withholding, or the total before the deposit.
+  const near = (x: number, y: number) => Math.abs(x - y) < 0.011;
+  const gross = ex.subtotal && ex.tax_amount ? Number(fix(ex.subtotal, undefined)) + Number(fix(ex.tax_amount, undefined)) : NaN;
+  if (Number.isFinite(gross) && gross > 0) {
+    const w = Number(withholding);
+    if (w > 0 && !near(amount, gross) && near(amount + w, gross)) amount = gross; // net after withholding was reported
+    if (deposit > 0 && near(amount, gross)) amount = gross - deposit; // the total before the deposit was reported
+  } else if (deposit > 0 && amount > deposit && ex.deposit && !near(amount, deposit)) {
+    // no subtotal to check against: trust the model's amount as what is due (it already subtracted the deposit when it filled the field)
+  }
+  return { amount: Math.max(0, amount).toFixed(2), withholding, payout_seen: payout };
+}
+const KNOWN_FLAGS = new Set(["new_payment_details", "urgency", "mismatched_contact", "handwritten_or_altered", "missing_invoice_number", "unreadable"]);
+/**
+ * The flags a claim carries: the model's, kept to the names the prompt defines (it invents others, like the text of a
+ * watermark), minus the ones its own reading contradicts, plus the client checks of readingFlags. "new_payment_details"
+ * when the payout read is the one the owner registered is a contradiction too (a notice pointing at the recorded
+ * destination changes nothing; a different destination is refused by the contract whatever the flags say):
+ * on a thousand invented invoices the model raised it on one legitimate invoice in seven.
+ */
+export function claimFlags(ex: Extraction, text: string, registeredPayout?: Payout | null): string[] {
+  const values = claimValues(ex);
+  const model = (ex.flags ?? []).filter((f) => KNOWN_FLAGS.has(f)).filter((f) => {
+    if (f === "missing_invoice_number" && (ex.invoice_number ?? "").trim()) return false;
+    if (f === "new_payment_details" && registeredPayout && JSON.stringify(values.payout_seen) === JSON.stringify(claimValues({ ...ex, payout_seen: registeredPayout }).payout_seen)) return false;
+    return true;
+  });
+  return [...new Set([...model, ...readingFlags(ex, text)])];
+}
+/** Why a payout read from the invoice cannot go to the contract as it is (an abbreviated or garbled NEAR account would not even deserialize), or null. */
+export function payoutProblem(p: Payout | null | undefined): string | null {
+  if (!p || !("Near" in p ? p.Near : "Chain" in p ? p.Chain : null)) return "no payout destination was read on the invoice";
+  if ("Near" in p && p.Near) { const a = p.Near.account; if (a.length < 2 || a.length > 64 || !/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(a)) return `the NEAR account read on the invoice is not a valid account id: ${a}`; }
+  if ("Chain" in p && p.Chain && !p.Chain.address) return "the payout address read on the invoice is empty";
+  return null;
 }
 /** "1.250,00", "1,250.00", "1250" all read as 1250. */
 export function parseMoney(s: string): number {

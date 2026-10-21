@@ -923,27 +923,79 @@ const functionCall = ({ signerId, secretKey, receiverId, method, args, gasTgas, 
 const SYSTEM = `You are the reading half of an AI treasurer. You read one invoice and return JSON only.
 You never decide whether to pay: a smart contract does that. Report exactly what the document says.
 Fields:
-- vendor_name: the company issuing the invoice
+- vendor_name: the company issuing the invoice (the letterhead, "From", "Emittente", "Von", "Fornitore"), never the company it is addressed to ("Bill to", "Spett.le", "Rechnung an")
 - vendor_id_guess: lowercase slug of the vendor name, letters and digits only (e.g. "acmehosting")
 - invoice_number: as printed
-- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it
+- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it. Use a dot for decimals and no thousands separator (European invoices print 1.234,56: return 1234.56)
+- amount_printed: that same amount exactly as printed on the document, character by character
 - currency: ISO code (USDC, USD, EUR...)
-- due_date: YYYY-MM-DD
+- due_date: YYYY-MM-DD (European invoices print DD/MM/YYYY or DD.MM.YYYY, US invoices MM/DD/YYYY)
 - payout_seen: where the invoice asks to be paid. Either {"Near":{"account":"name.near"}} for a NEAR account,
-  or {"Chain":{"chain":"base|arb|sol|sui|eth","address":"0x..."}} for another chain. Copy the address exactly.
+  or {"Chain":{"chain":"base|arb|sol|sui|eth","address":"0x..."}} for another chain (Arbitrum is "arb", Ethereum "eth", Solana "sol"). Copy the address exactly.
 - flags: list any of: "new_payment_details" (text like new bank details, updated wallet, please note our new address),
   "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
 - order_ref: the purchase order or reference number printed on the invoice (labels like "Purchase order", "PO", "Order ref"), as printed; empty string if none
-- vendor_tax_id: the issuing company's tax identifier as printed (VAT number, EIN, CNPJ, GSTIN, ABN, supplier code...), empty string if none
+- vendor_tax_id: the issuing company's tax identifier as printed (VAT number, EIN, CNPJ, GSTIN, ABN, supplier code...), often in the letterhead; empty string if none
 - buyer_tax_id: the tax identifier of the company the invoice is addressed to ("Bill to"), as printed; empty string if none
-- subtotal: the amount before tax as a decimal string, empty string if not shown
+- subtotal: the amount before tax as a decimal string (same format as amount), empty string if not shown
 - tax_amount: the tax amount as a decimal string, empty string if not shown
-- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none
+- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none. A deposit or prepayment already received is not withholding
+- withholding_printed: the withholding amount exactly as printed, empty string if none
+- deposit: a deposit, prepayment or credit the invoice shows as already received and subtracted before the amount due, decimal string, empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 // Checks on the reading that do not trust the model (same as app/src/ai.ts readingFlags): each failure is a flag, and a flag holds the payment for a person.
 function parseMoney(str) { const t = str.replace(/\s/g, ""); const d = t.lastIndexOf("."), c = t.lastIndexOf(","); let n; if (d >= 0 && c >= 0) n = d > c ? t.replace(/,/g, "") : t.replace(/\./g, "").replace(",", "."); else if (c >= 0) n = t.length - c === 3 ? t.replace(",", ".") : t.replace(/,/g, ""); else n = t; return Number(n); }
+const CHAIN_ALIASES = { arbitrum: "arb", "arbitrum one": "arb", arb: "arb", ethereum: "eth", eth: "eth", mainnet: "eth", solana: "sol", sol: "sol", sui: "sui", base: "base", near: "near" };
+/** Same as app/src/ai.ts claimValues: the amount as printed wins over the model's decimal conversion, negative withholding is zero, chain names are the short ones. */
+function claimValues(ex) {
+  const fix = (decimal, printed) => {
+    const fromPrinted = printed && /\d/.test(printed) ? parseMoney(String(printed).replace(/[^\d.,]/g, "")) : NaN;
+    let n = Number.isFinite(fromPrinted) ? fromPrinted : parseMoney(String(decimal ?? "").replace(/[^\d.,]/g, ""));
+    const m = String(decimal ?? "").match(/^(\d{1,3})\.(\d{3})(\d{2})$/);
+    if (!Number.isFinite(fromPrinted) && m) n = Number(`${m[1]}${m[2]}.${m[3]}`);
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    return n.toFixed(2);
+  };
+  let payout = ex.payout_seen;
+  if (payout?.Chain) { const key = String(payout.Chain.chain ?? "").toLowerCase().trim(); payout = { Chain: { chain: CHAIN_ALIASES[key] ?? key, address: String(payout.Chain.address ?? "").trim() } }; }
+  else if (payout?.Near) payout = { Near: { account: String(payout.Near.account ?? "").trim().toLowerCase() } };
+  const deposit = ex.deposit ? Number(fix(ex.deposit, undefined)) : 0;
+  let withholding = ex.withholding || ex.withholding_printed ? fix(ex.withholding, ex.withholding_printed) : "0";
+  if (deposit > 0 && Math.abs(Number(withholding) - deposit) < 0.005) withholding = "0"; // the model put the deposit in both places
+  let amount = Number(fix(ex.amount, ex.amount_printed));
+  // Reconcile with the printed subtotal and tax, as a bookkeeper would: the contract wants the total before withholding,
+  // less a deposit already received. The model sometimes reports the net after withholding, or the total before the deposit.
+  const near = (x, y) => Math.abs(x - y) < 0.011;
+  const gross = ex.subtotal && ex.tax_amount ? Number(fix(ex.subtotal, undefined)) + Number(fix(ex.tax_amount, undefined)) : NaN;
+  if (Number.isFinite(gross) && gross > 0) {
+    const w = Number(withholding);
+    if (w > 0 && !near(amount, gross) && near(amount + w, gross)) amount = gross; // net after withholding was reported
+    if (deposit > 0 && near(amount, gross)) amount = gross - deposit; // the total before the deposit was reported
+  } else if (deposit > 0 && amount > deposit && ex.deposit && !near(amount, deposit)) {
+    // no subtotal to check against: trust the model's amount as what is due (it already subtracted the deposit when it filled the field)
+  }
+  return { amount: Math.max(0, amount).toFixed(2), withholding, payout_seen: payout };
+}
+const KNOWN_FLAGS = new Set(["new_payment_details", "urgency", "mismatched_contact", "handwritten_or_altered", "missing_invoice_number", "unreadable"]);
+/** Same as app/src/ai.ts claimFlags: the model's flags kept to the known names, minus the ones its own reading contradicts ("new_payment_details" with the registered payout, "missing_invoice_number" with a number), plus the client checks. */
+function claimFlags(ex, text, registeredPayout) {
+  const values = claimValues(ex);
+  const model = (ex.flags ?? []).filter((f) => KNOWN_FLAGS.has(f)).filter((f) => {
+    if (f === "missing_invoice_number" && (ex.invoice_number ?? "").trim()) return false;
+    if (f === "new_payment_details" && registeredPayout && JSON.stringify(values.payout_seen) === JSON.stringify(claimValues({ ...ex, payout_seen: registeredPayout }).payout_seen)) return false;
+    return true;
+  });
+  return [...new Set([...model, ...readingFlags(ex, text)])];
+}
+/** Why a payout read from the invoice cannot go to the contract as it is (an abbreviated or garbled NEAR account would not even deserialize), or null. */
+function payoutProblem(p) {
+  if (!p || (!p.Near && !p.Chain)) return "no payout destination was read on the invoice";
+  if (p.Near && !/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(p.Near.account) || (p.Near && (p.Near.account.length < 2 || p.Near.account.length > 64))) return `the NEAR account read on the invoice is not a valid account id: ${p.Near.account}`;
+  if (p.Chain && !p.Chain.address) return "the payout address read on the invoice is empty";
+  return null;
+}
 function readingFlags(ex, text) {
   const flags = []; const amount = Number(ex.amount || "0");
   const nums = (text.match(/\d[\d.,]*\d|\d/g) ?? []).map(parseMoney).filter(Number.isFinite);
@@ -980,7 +1032,7 @@ async function readInTee(pngPages, textFallback, step) {
   step("attestation", attestation.error ? "fail" : "ok", attestation.error ?? `${attestation.model_attestations?.length ?? 0} model attestation(s), TDX quote bound to our nonce`);
 
   const content = [{ type: "text", text: "Read this invoice." }];
-  for (const p of pngPages) content.push({ type: "image_url", image_url: { url: `data:image/png;base64,${p}` } });
+  for (const p of pngPages) content.push({ type: "image_url", image_url: { url: p.startsWith("data:") ? p : `data:image/png;base64,${p}` } });
   if (textFallback) content.push({ type: "text", text: `Extracted text, in case the image is unclear:\n${textFallback.slice(0, 12000)}` });
   const body = { model: settings.model, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false };
   const requestBody = JSON.stringify(body);
@@ -1111,13 +1163,16 @@ function stepper(list) {
 async function rasterize(bytes) {
   const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
   const pages = []; let text = "";
+  // 110 dpi is plenty for a born-digital PDF; a scan with no text layer gets 160, the model has only the pixels there
+  const first = await (await pdf.getPage(1)).getTextContent(); const dpi = first.items.some((it) => it.str.trim()) ? 110 : 160;
   for (let i = 1; i <= Math.min(2, pdf.numPages); i++) {
     const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 110 / 72 });
+    const viewport = page.getViewport({ scale: dpi / 72 });
     const canvas = i === 1 ? $("#preview") : document.createElement("canvas");
     canvas.width = viewport.width; canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-    pages.push(canvas.toDataURL("image/png").split(",")[1]);
+    // a scan goes as JPEG: a noisy page as PNG is several times larger and the relay caps a request at 2 MB
+    pages.push(dpi > 110 ? canvas.toDataURL("image/jpeg", 0.85) : canvas.toDataURL("image/png"));
     const tc = await page.getTextContent();
     text += tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("") + "\n";
   }
@@ -1136,14 +1191,16 @@ async function handleFile(file) {
     $("#fileInfo").textContent = `${file.name}, ${(bytes.length / 1024).toFixed(0)} KB, sha256 ${invoiceHash.slice(0, 16)}...`;
     step("pdf", "wait", "rasterizing the PDF in this browser");
     const { pages, text } = await rasterize(bytes);
-    step("pdf", "ok", `${pages.length} page(s) rendered to PNG; the enclave sees images, not the file`);
-    const { extraction, receipt, attestation } = await readInTee(pages, text, step);
+    step("pdf", "ok", `${pages.length} page(s) rendered to PNG${text.trim() ? "" : " at 160 dpi, the file has no text layer"}; the enclave sees images, not the file`);
+    const { extraction, receipt, attestation } = await readInTee(pages, text.trim() ? text : "", step);
     const vendors = await view(settings.treasury, "list_vendors");
+    const values = claimValues(extraction);
+    const vendorId = matchVendor(extraction, vendors); const registered = vendors.find(([id]) => id === vendorId)?.[1]?.payout ?? null;
     const claim = {
-      vendor_id: matchVendor(extraction, vendors), invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
-      due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
-      attestation_ref: attestationRef(receipt), flags: [...(extraction.flags ?? []), ...readingFlags(extraction, text), ...chatFlags(matchVendor(extraction, vendors))], order_ref: (extraction.order_ref || "").trim() || null,
-      vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(), withholding_seen: toUnits(extraction.withholding || "0"),
+      vendor_id: vendorId, invoice_number: extraction.invoice_number || "unknown", amount: toUnits(values.amount),
+      due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: values.payout_seen,
+      attestation_ref: attestationRef(receipt), flags: [...claimFlags(extraction, text, registered), ...chatFlags(vendorId)], order_ref: (extraction.order_ref || "").trim() || null,
+      vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(), withholding_seen: toUnits(values.withholding),
     };
     await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
   } catch (e) {
@@ -1210,12 +1267,14 @@ function showExtraction(ex) {
 }
 function showClaim(claim, vendors, verified) {
   const known = vendors.some(([id]) => id === claim.vendor_id);
+  const problem = payoutProblem(claim.payout_seen);
+  if (problem) verified = false;
   const rows = [["vendor id", `${claim.vendor_id}${known ? "" : " (not in the allowlist)"}`], ["invoice", claim.invoice_number], ["amount", usdc(claim.amount)], ["payout on the invoice", payoutText(claim.payout_seen)], ["invoice hash", claim.invoice_hash], ["attestation ref", claim.attestation_ref], ["flags", claim.flags.map(flagText).join("; ") || "none"]];
   $("#claimKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
   $("#submit").disabled = !verified;
-  $("#submitNote").textContent = verified ? "The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address." : "The receipt did not verify: this page will not submit it.";
+  $("#submitNote").textContent = verified ? "The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address." : problem ? `Not submitted: ${problem}. A person has to read this invoice; the page never corrects an address.` : "The receipt did not verify: this page will not submit it.";
   $("#claimBox").hidden = false; $("#claimEmpty").hidden = true;
-  showPreview(claim);
+  if (!problem) showPreview(claim); else $("#verdictPreview").hidden = true;
 }
 /** What the contract would answer right now: the same checks it will run when the button is pressed, read from the chain, recording nothing. */
 async function showPreview(claim) {

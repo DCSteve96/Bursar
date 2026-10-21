@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "./config.js";
-import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, readingFlags } from "./ai.js";
+import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, claimFlags, claimValues, payoutProblem } from "./ai.js";
+import type { Payout } from "./near.js";
 import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
 
 const exec = promisify(execFile);
@@ -23,12 +24,14 @@ export interface AgentResult {
 }
 
 /** Rasterize a PDF to PNG pages with pdftoppm (poppler). Falls back to text only if poppler is missing. */
-async function rasterize(pdfPath: string): Promise<Buffer[]> {
+/** 110 dpi is plenty for a born-digital PDF; a scan with no text layer gets 160, the model has only the pixels there. */
+async function rasterize(pdfPath: string, dpi = 110): Promise<Buffer[]> {
   try {
     const out = join(config.state, "pages", basename(pdfPath, ".pdf"));
     await mkdir(out, { recursive: true });
-    await exec("pdftoppm", ["-png", "-r", "110", "-f", "1", "-l", "2", pdfPath, join(out, "p")]);
-    const files = (await readdir(out)).filter((f) => f.endsWith(".png")).sort();
+    // a scan is sent as JPEG: a noisy page as PNG is several times larger and the relay caps a request at 2 MB
+    await exec("pdftoppm", [...(dpi > 110 ? ["-jpeg", "-jpegopt", "quality=85"] : ["-png"]), "-r", String(dpi), "-f", "1", "-l", "2", pdfPath, join(out, "p")]);
+    const files = (await readdir(out)).filter((f) => /\.(png|jpg)$/.test(f)).sort();
     return Promise.all(files.map((f) => readFile(join(out, f))));
   } catch {
     return [];
@@ -51,8 +54,7 @@ async function pdfText(pdfPath: string): Promise<string> {
 }
 
 /** Map the model's vendor guess to a vendor id known by the contract (by id or by name, case-insensitive). */
-async function matchVendor(ex: Extraction): Promise<string> {
-  const vendors = await view<[string, Vendor][]>("list_vendors");
+async function matchVendor(ex: Extraction, vendors: [string, Vendor][]): Promise<string> {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const guess = norm(ex.vendor_id_guess || ex.vendor_name);
   for (const [id, v] of vendors) {
@@ -83,26 +85,27 @@ export async function readInvoiceFile(pdfPath: string, opts: { offline?: boolean
   if (opts.offline || !config.aiApiKey) {
     return { file: basename(pdfPath), invoiceHash, text, extraction: readInvoiceOffline(text), ai: null, attestationRef: `offline:${invoiceHash.slice(0, 16)}` };
   }
-  const pages = await rasterize(pdfPath);
-  const r = await readInvoice(pages, text);
+  const pages = await rasterize(pdfPath, text.trim() ? 110 : 160);
+  const r = await readInvoice(pages, text.trim() ? text : undefined);
   return { file: basename(pdfPath), invoiceHash, text, extraction: r.extraction, ai: { receipt: r.receipt, attestation: r.attestation }, attestationRef: attestationRef(r.receipt) };
 }
 
-function buildClaim(read: ReadResult, vendorId: string): InvoiceClaim {
+function buildClaim(read: ReadResult, vendorId: string, registeredPayout: Payout | null = null): InvoiceClaim {
   const { extraction, invoiceHash } = read;
+  const values = claimValues(extraction);
   return {
     vendor_id: vendorId,
     invoice_number: extraction.invoice_number || "unknown",
-    amount: toUnits(extraction.amount || "0"),
+    amount: toUnits(values.amount),
     due_date: extraction.due_date || "",
     invoice_hash: invoiceHash,
-    payout_seen: extraction.payout_seen,
+    payout_seen: values.payout_seen,
     attestation_ref: read.attestationRef,
-    flags: [...(extraction.flags ?? []), ...readingFlags(extraction, read.text)],
+    flags: claimFlags(extraction, read.text, registeredPayout),
     order_ref: extraction.order_ref?.trim() || null,
     vendor_tax_id: (extraction.vendor_tax_id || "").trim(),
     buyer_tax_id: (extraction.buyer_tax_id || "").trim(),
-    withholding_seen: toUnits(extraction.withholding || "0"),
+    withholding_seen: toUnits(values.withholding),
   };
 }
 
@@ -124,7 +127,12 @@ export async function processInvoice(pdfPath: string, opts: { offline?: boolean;
   const read = await readInvoiceFile(pdfPath, opts);
   const { extraction } = read;
   const receipt = read.ai;
-  const claim = buildClaim(read, await matchVendor(extraction));
+  const vendors = await view<[string, Vendor][]>("list_vendors");
+  const vendorId = await matchVendor(extraction, vendors);
+  const claim = buildClaim(read, vendorId, vendors.find(([id]) => id === vendorId)?.[1].payout ?? null);
+  // An abbreviated or garbled payout would not even deserialize in the contract: a person has to read this one.
+  const problem = payoutProblem(claim.payout_seen);
+  if (problem) throw new Error(`not submitted: ${problem}; a person has to read this invoice`);
 
   const sent = opts.direct ? await requestPaymentDirect(claim) : await requestPaymentViaRelayer(claim);
   // The view may lag the transaction by a block on some RPC nodes: retry briefly instead of recording null.
