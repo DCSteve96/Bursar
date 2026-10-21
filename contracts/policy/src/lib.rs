@@ -72,6 +72,10 @@ const REQUESTS_TODAY_KEY: &[u8] = b"requests_today";
 const REQUESTS_PER_DAY: u32 = 500;
 const HOLDS_TODAY_KEY: &[u8] = b"holds_today";
 const HOLDS_PER_DAY: u32 = 50;
+/// DAO proposals opened by the contract for a non-owner's holds per day: each one locks a bond; past the quota the
+/// hold waits without a proposal until a person opens one (`open_dao_proposal_for`).
+const DAO_TODAY_KEY: &[u8] = b"dao_today";
+const DAO_PROPOSALS_PER_DAY: u32 = 10;
 /// The NEAR the account must keep above its storage stake before it opens a DAO proposal (bond + headroom).
 const NEAR_HEADROOM: u128 = 1_000_000_000_000_000_000_000_000;
 /// The Intents account the executor may send queued payments to (raw storage: `set_settlement_account`).
@@ -504,6 +508,9 @@ impl Bursar {
     /// Unset, nothing is settled: the executor cannot pick a destination on its own.
     pub fn set_settlement_account(&mut self, account: Option<AccountId>) {
         self.assert_owner();
+        if let Some(a) = &account {
+            require!(a.as_str().contains('.'), "a top-level name would make every account a valid deposit address");
+        }
         match &account {
             Some(a) => env::storage_write(SETTLEMENT_KEY, a.as_bytes()),
             None => env::storage_remove(SETTLEMENT_KEY),
@@ -556,6 +563,7 @@ impl Bursar {
     pub fn add_operator(&mut self, account: AccountId, role: Role) {
         self.assert_owner();
         require!(account != self.owner, "the owner is not an operator");
+        require!(account != self.agent && account != self.executor, "the agent and the executor only do their own job");
         require!(role.approve || role.manage_vendors || role.manage_orders, "an operator needs at least one role");
         self.operators.insert(account.clone(), role);
         self.emit("operator_added", account.as_str());
@@ -686,6 +694,7 @@ impl Bursar {
         let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(matches!(p.status, Status::Queued | Status::Approval), "cannot cancel in this state");
         self.release_reservation(&p);
+        self.forget_payment_keys(id);
         p.status = Status::Cancelled;
         p.updated_at = env::block_timestamp();
         self.payments.insert(id, p);
@@ -704,9 +713,12 @@ impl Bursar {
             "only the agent, the owner or an operator"
         );
         Self::check_claim_size(&claim);
+        require!(!self.paused, "paused");
+        // quotas per caller: a flooding agent key does not lock an operator out
         let counted = caller != self.owner;
+        let quota = |k: &[u8]| Self::key(k, caller.as_bytes());
         if counted {
-            self.bump_daily(REQUESTS_TODAY_KEY, REQUESTS_PER_DAY, "daily quota of requests reached: the agent is sending too many claims, the owner should look at its key");
+            self.bump_daily(&quota(REQUESTS_TODAY_KEY), REQUESTS_PER_DAY, "daily quota of requests reached: this key is sending too many claims, the owner should look at it");
         }
         self.roll_day();
         let id = self.next_id;
@@ -737,18 +749,19 @@ impl Bursar {
             // a hold costs a person's time and, with a DAO, a bond: the agent gets a daily quota of them,
             // and no proposal opens when the account could not pay the bond
             let would_hold = !self.holds(&claim, self.find_order(&claim).is_some()).0.is_empty();
-            if would_hold && counted && self.daily_count(HOLDS_TODAY_KEY) >= HOLDS_PER_DAY {
+            if would_hold && counted && self.daily_count(&quota(HOLDS_TODAY_KEY)) >= HOLDS_PER_DAY {
                 return Err("hold_quota_reached".into());
-            }
-            if would_hold && self.dao.is_some() && !self.can_pay_bond() {
-                return Err("dao_bond_missing".into());
             }
             Ok(())
         });
         match decision {
             Err(reason) => {
                 if counted {
-                    self.bump_daily(BLOCKED_TODAY_KEY, BLOCKED_PER_DAY, "daily quota of refused requests reached: the agent is sending bad claims, the owner should look at its key");
+                    self.bump_daily(&quota(BLOCKED_TODAY_KEY), BLOCKED_PER_DAY, "daily quota of refused requests reached: this key is sending bad claims, the owner should look at it");
+                    // a refusal is recorded small: the reason, not the agent's payload
+                    p.flags.truncate(2);
+                    p.attestation_ref.truncate(64);
+                    p.invoice_hash.truncate(64);
                 }
                 p.reason = Some(reason.clone());
                 self.payments.insert(id, p);
@@ -770,14 +783,23 @@ impl Bursar {
                 p.withheld = withheld;
                 if !holds.is_empty() {
                     if counted {
-                        self.bump_daily(HOLDS_TODAY_KEY, HOLDS_PER_DAY, "daily quota of holds reached");
+                        self.bump_daily(&quota(HOLDS_TODAY_KEY), HOLDS_PER_DAY, "daily quota of holds reached");
                     }
                     let reason = holds.join("+");
                     p.status = Status::Approval;
                     p.reason = Some(reason.clone());
                     self.payments.insert(id, p);
                     self.emit("payment_needs_approval", &format!("{id}:{reason}"));
-                    if self.dao.is_some() {
+                    // a proposal costs a bond: not for a hold the council could not approve anyway, not past the day's
+                    // quota for this key, not without NEAR for it; then the hold waits for a person to open one
+                    let opens = self.dao.is_some()
+                        && !holds.contains(&"payout_unconfirmed")
+                        && (!counted || self.daily_count(&quota(DAO_TODAY_KEY)) < DAO_PROPOSALS_PER_DAY)
+                        && self.can_pay_bond();
+                    if opens {
+                        if counted {
+                            self.bump_daily(&quota(DAO_TODAY_KEY), DAO_PROPOSALS_PER_DAY, "daily quota of proposals reached");
+                        }
                         self.open_dao_proposal(id, amount, &claim.vendor_id, &reason);
                     }
                     id
@@ -792,6 +814,20 @@ impl Bursar {
     }
 
     // ----- dao -----
+
+    /// A held payment with no proposal (the day's quota was spent, the account had no NEAR for the bond, or the
+    /// vendor's payout was unconfirmed): the owner or an approver opens the proposal now, bond from the contract.
+    pub fn open_dao_proposal_for(&mut self, id: u64) {
+        self.assert_can(|r| r.approve, "approve");
+        require!(self.dao.is_some(), "no dao");
+        let p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
+        require!(p.status == Status::Approval, "not waiting for approval");
+        require!(p.dao_proposal_id.is_none() && self.payment_dao(id).is_none(), "a proposal is already open");
+        require!(!self.is_unconfirmed(&p.vendor_id), "the vendor's payout was set by an operator: the owner must confirm it first");
+        require!(self.can_pay_bond(), "the treasury account has no NEAR for the bond");
+        let reason = p.reason.clone().unwrap_or_default();
+        self.open_dao_proposal(id, p.amount, &p.vendor_id, &reason);
+    }
 
     /// Called by the DAO when the council approves the proposal, or by the owner or an approver when there is no DAO.
     pub fn approve_payment(&mut self, id: u64) {
@@ -883,14 +919,15 @@ impl Bursar {
         self.balance += amount.0;
         if let Some(id) = id {
             if let Some(mut p) = self.payments.get(&id).cloned() {
-                self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
                 match p.status {
                     Status::Paid => {
+                        self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
                         self.release_reservation(&p);
                         p.status = Status::Blocked;
                         p.reason = Some("transfer_failed".into());
                     }
                     Status::Settling => {
+                        self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
                         p.status = Status::Queued;
                         p.quote_id = None;
                         p.deposit_address = None;
@@ -950,6 +987,7 @@ impl Bursar {
         require!(p.status == Status::Settling, "not settling");
         require!(self.in_flight() == 0, "the transfer to the deposit address has not landed yet");
         p.status = Status::Settled;
+        self.forget_payment_keys(id);
         p.dest_tx = Some(dest_tx);
         p.updated_at = env::block_timestamp();
         self.payments.insert(id, p);
@@ -959,19 +997,38 @@ impl Bursar {
     /// Intents did not deliver and refunded the USDC to this account with a plain transfer (the quote expired, the
     /// route failed). The executor or the owner puts the payment back in the queue; the refund itself is counted
     /// with `sync_balance`. Only once the deposit transfer's callback has run.
-    pub fn mark_settlement_failed(&mut self, id: u64) {
+    pub fn mark_settlement_failed(&mut self, id: u64) -> Promise {
         let caller = env::predecessor_account_id();
         require!(caller == self.executor || caller == self.owner, "only the executor or the owner");
         require!(self.in_flight() == 0, "the transfer to the deposit address has not landed yet");
+        let p = self.payments.get(&id).unwrap_or_else(|| crate::fail("unknown payment"));
+        require!(p.status == Status::Settling, "not settling");
+        // nobody's word: the token says whether the USDC came back before the payment can move again
+        ext_ft::ext(self.usdc.clone())
+            .with_static_gas(GAS_FT_VIEW)
+            .ft_balance_of(env::current_account_id())
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_settlement_failed(id))
+    }
+
+    #[private]
+    pub fn on_settlement_failed(&mut self, id: u64, #[callback_result] held: Result<U128, PromiseError>) -> bool {
+        let held = held.unwrap_or_else(|_| crate::fail("the token did not answer")).0;
+        require!(self.in_flight() == 0, "a transfer started meanwhile: ask again in a few seconds");
         let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Settling, "not settling");
+        let net = p.amount - p.withheld;
+        require!(held >= self.balance.saturating_add(net), "the refund has not arrived: the token holds less than the books plus this payment");
+        // the refund is on the account: count it, and only now can the payment be settled again
+        let old = self.balance;
+        self.balance = held;
         self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
         p.status = Status::Queued;
         p.quote_id = None;
         p.deposit_address = None;
         p.updated_at = env::block_timestamp();
         self.payments.insert(id, p);
-        self.emit("settlement_failed", &id.to_string());
+        self.emit("settlement_failed", &format!("{id}:{old}:{held}"));
+        true
     }
 
     // ----- token deposits (NEP-141 receiver) -----
@@ -1030,7 +1087,7 @@ impl Bursar {
         // ids are dense: walk them instead of scanning the map from the start
         let from = from.unwrap_or(0);
         let limit = limit.unwrap_or(50).min(500);
-        (from + 1..self.next_id).filter_map(|id| self.payments.get(&id).cloned()).take(limit as usize).collect()
+        (from.saturating_add(1)..self.next_id).filter_map(|id| self.payments.get(&id).cloned()).take(limit as usize).collect()
     }
 
     pub fn get_vendor(&self, vendor_id: String) -> Option<Vendor> {
@@ -1198,7 +1255,7 @@ impl Bursar {
         let v = self.vendors.get(&p.vendor_id).cloned().unwrap_or_else(|| crate::fail("unknown vendor"));
         // the payout may have been edited since the claim was checked: then this payment goes nowhere
         if let Some(seen) = self.payout_snapshot(p.id) {
-            require!(v.payout.same_as(&seen), "the vendor's payout changed since this claim was checked: cancel it and read the invoice again");
+            require!(v.payout.same_as(&seen), "the vendor's payout changed since this claim was checked: cancel it; the vendor sends an invoice with the new details, or the owner restores the payout first");
         }
         p.updated_at = env::block_timestamp();
         match v.payout {
@@ -1211,6 +1268,7 @@ impl Bursar {
                 p.status = Status::Paid;
                 let id = p.id;
                 let memo = format!("bursar payment {id}");
+                self.forget_payment_keys(id);
                 self.payments.insert(id, p.clone());
                 self.emit("payment_paid", &id.to_string());
                 let _ = self
@@ -1440,6 +1498,12 @@ impl Bursar {
         [prefix, rest].concat()
     }
 
+    /// The snapshot and the proposal's DAO are only read while the payment can still move: drop them after.
+    fn forget_payment_keys(&self, id: u64) {
+        env::storage_remove(&Self::key(PAYOUT_SNAPSHOT_PREFIX, &id.to_le_bytes()));
+        env::storage_remove(&Self::key(PAYMENT_DAO_PREFIX, &id.to_le_bytes()));
+    }
+
     fn set_payout_snapshot(&self, id: u64, payout: &Payout) {
         env::storage_write(&Self::key(PAYOUT_SNAPSHOT_PREFIX, &id.to_le_bytes()), &near_sdk::borsh::to_vec(payout).unwrap());
     }
@@ -1553,6 +1617,10 @@ impl Bursar {
             Ok(()) => {
                 let order = self.find_order(&claim);
                 let (holds, withheld) = self.holds(&claim, order.is_some());
+                // the caller's hold quota, as request_payment would apply it (a view has no predecessor: the agent's)
+                if !holds.is_empty() && self.daily_count(&Self::key(HOLDS_TODAY_KEY, self.agent.as_bytes())) >= HOLDS_PER_DAY {
+                    return Preview { status: Status::Blocked, reason: Some("hold_quota_reached".into()), withheld: U128(0), order_id: None };
+                }
                 let paid = match self.vendors.get(&claim.vendor_id).map(|v| &v.payout) {
                     Some(Payout::Near { .. }) => Status::Paid,
                     _ => Status::Queued,
@@ -2048,6 +2116,8 @@ mod tests {
     }
     const T0: u64 = 1_760_000_000_000_000_000;
     fn near(a: AccountId) -> Payout { Payout::Near { account: a } }
+    fn intents() -> AccountId { "intents.near".parse().unwrap() }
+    fn deposit() -> AccountId { "d1.intents.near".parse().unwrap() }
 
     #[test]
     fn audit_cancelling_yesterdays_hold_does_not_free_todays_cap() {
@@ -2095,21 +2165,29 @@ mod tests {
     fn audit_refunded_settlement_goes_back_to_the_queue() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(accounts(5)));
+        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(id, "q1".into(), accounts(5), pay.clone());
+        let _ = c.settle(id, "q1".into(), deposit(), pay.clone());
         assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 1_250_000_000);
         testing_env!(as_self().build());
         assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
-        // Intents refunded with a plain transfer: the executor puts the payment back in the queue, the owner syncs
+        // the executor says Intents refunded; the token has not seen the money back: nothing moves
         testing_env!(ctx(accounts(2)).build());
-        c.mark_settlement_failed(id);
-        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+        let _ = c.mark_settlement_failed(id);
         testing_env!(as_self().build());
-        c.on_sync_balance(Ok(U128(50_000_000_000)));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.on_settlement_failed(id, Ok(U128(50_000_000_000 - 1_250_000_000)))));
+        assert!(r.is_err(), "no refund on the account, no second chance");
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Settling);
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q2".into(), deposit(), pay.clone()); }));
+        assert!(r.is_err(), "still settling: cannot be paid twice");
+        // the refund lands (plain transfer): now the token says so, the payment is queued again and the balance counted
+        testing_env!(as_self().build());
+        assert!(c.on_settlement_failed(id, Ok(U128(50_000_000_000))));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
         assert_eq!(c.get_stats().balance.0, 50_000_000_000);
         testing_env!(ctx(accounts(0)).build());
         c.cancel_payment(id);
@@ -2156,6 +2234,8 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q1".into(), accounts(2), pay.clone()); }));
         assert!(r.is_err(), "no settlement account registered: nothing moves");
         testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_settlement_account(Some("near".parse().unwrap()))));
+        assert!(r.is_err(), "a top-level name would allow every account");
         c.set_settlement_account(Some("intents.near".parse().unwrap()));
         testing_env!(ctx(accounts(2)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q1".into(), accounts(2), pay.clone()); }));
@@ -2170,14 +2250,14 @@ mod tests {
     fn audit_settle_honours_pause_and_deactivation() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(accounts(5)));
+        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "Q1", 1_000_000_000, pay.clone()));
         testing_env!(ctx(accounts(0)).build());
         c.set_paused(true);
         testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q".into(), accounts(5), pay.clone()); }));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q".into(), deposit(), pay.clone()); }));
         assert!(r.is_err());
         assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
     }
@@ -2253,8 +2333,49 @@ mod tests {
         let mut cl = claim("hosting", "poor", 1, near(accounts(5))); cl.flags = vec!["x".into()];
         let id = c.request_payment(cl);
         let p = c.get_payment(id).unwrap();
-        assert_eq!(p.status, Status::Blocked);
-        assert_eq!(p.reason.as_deref(), Some("dao_bond_missing"));
+        assert_eq!(p.status, Status::Approval, "the hold is recorded");
+        assert!(c.payment_dao(id).is_none(), "but no proposal was opened: the account could not pay the bond");
+        // with NEAR back on the account, an approver opens it by hand
+        testing_env!(ctx(accounts(0)).account_balance(NearToken::from_near(20)).build());
+        c.open_dao_proposal_for(id);
+        assert!(c.payment_dao(id).is_some());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.open_dao_proposal_for(id)));
+        assert!(r.is_err(), "once");
+        // the agent's proposals are quota'd per day; the owner's are not
+        let mut c = setup();
+        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_near(100)).build());
+        let mut opened = 0;
+        for i in 0..(DAO_PROPOSALS_PER_DAY + 5) {
+            let mut cl = claim("hosting", &format!("q{i}"), 1, near(accounts(5))); cl.flags = vec!["x".into()];
+            let id = c.request_payment(cl);
+            if c.payment_dao(id).is_some() { opened += 1; }
+        }
+        assert_eq!(opened, DAO_PROPOSALS_PER_DAY);
+    }
+
+    #[test]
+    fn audit_agent_flood_does_not_lock_out_operators() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: false });
+        testing_env!(ctx(accounts(1)).build());
+        for i in 0..(BLOCKED_PER_DAY + 5) { let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("nobody", &format!("f{i}"), 1, near(accounts(5)))))); }
+        testing_env!(ctx(accounts(3)).build());
+        let id = c.request_payment(claim("nobody", "op1", 1, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("unknown_vendor"), "an operator has its own quota");
+        // a refused claim is stored small (the operator's quota is fresh), and nothing is recorded while paused
+        testing_env!(ctx(accounts(3)).build());
+        let mut cl = claim("nobody", &"n".repeat(128), 1, near(accounts(5))); cl.attestation_ref = "a".repeat(512); cl.flags = vec!["f".repeat(64); 16];
+        let id = c.request_payment(cl);
+        let p = c.get_payment(id).unwrap();
+        assert!(p.flags.len() <= 2 && p.attestation_ref.len() <= 64);
+        testing_env!(ctx(accounts(0)).build());
+        c.set_paused(true);
+        let before = c.get_stats().payments;
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("hosting", "paused1", 1, near(accounts(5))))));
+        assert!(r.is_err());
+        assert_eq!(c.get_stats().payments, before);
+        assert_eq!(c.list_payments(Some(u64::MAX), None).len(), 0);
     }
 
     #[test]
@@ -2276,12 +2397,12 @@ mod tests {
     fn audit_mark_settled_waits_for_the_transfer() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(accounts(5)));
+        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(id, "q1".into(), accounts(5), pay);
+        let _ = c.settle(id, "q1".into(), deposit(), pay);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.mark_settled(id, "0xtx".into())));
         assert!(r.is_err(), "the deposit transfer has not landed");
         testing_env!(as_self().build());
