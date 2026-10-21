@@ -66,11 +66,35 @@ const IN_FLIGHT_KEY: &[u8] = b"inflight";
 /// the contract's storage with blocked claims and drain the NEAR that pays for it.
 const BLOCKED_TODAY_KEY: &[u8] = b"blocked_today";
 const BLOCKED_PER_DAY: u32 = 200;
+/// Requests and holds the agent (or an operator) may make per day: a stolen key cannot flood the books, the council
+/// or the DAO bonds. The owner is not counted.
+const REQUESTS_TODAY_KEY: &[u8] = b"requests_today";
+const REQUESTS_PER_DAY: u32 = 500;
+const HOLDS_TODAY_KEY: &[u8] = b"holds_today";
+const HOLDS_PER_DAY: u32 = 50;
+/// The NEAR the account must keep above its storage stake before it opens a DAO proposal (bond + headroom).
+const NEAR_HEADROOM: u128 = 1_000_000_000_000_000_000_000_000;
+/// The Intents account the executor may send queued payments to (raw storage: `set_settlement_account`).
+const SETTLEMENT_KEY: &[u8] = b"settle_to";
+/// Per payment: the vendor payout the claim was checked against (`b"ps"` + id), the DAO a proposal was opened on
+/// (`b"pd"` + id). Per vendor: a payout set by an operator and not yet confirmed by the owner (`b"pu"` + vendor),
+/// and the open order ids (`b"vo"` + vendor). Raw storage, no migration for deployed contracts.
+const PAYOUT_SNAPSHOT_PREFIX: &[u8] = b"ps";
+const PAYMENT_DAO_PREFIX: &[u8] = b"pd";
+const UNCONFIRMED_PREFIX: &[u8] = b"pu";
+const VENDOR_ORDERS_PREFIX: &[u8] = b"vo";
+/// Per vendor: it had an order once, so its invoices need one (`b"vb"`); invoices paid without a person today
+/// (`b"vd"` + vendor, a day/count pair). Per invoice file: its hash, for the duplicate check (`b"ih"` + hash).
+const ORDER_BOUND_PREFIX: &[u8] = b"vb";
+const VENDOR_DAY_PREFIX: &[u8] = b"vd";
+const HASH_INDEX_PREFIX: &[u8] = b"ih";
+/// Invoices one vendor can get paid without a person in one day: a bill split in many small invoices still meets a human.
+const AUTOPAY_PER_VENDOR_PER_DAY: u32 = 5;
 const GAS_FT_VIEW: Gas = Gas::from_tgas(5);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_DAO_PROPOSAL: Gas = Gas::from_tgas(30);
 const GAS_DAO_VIEW: Gas = Gas::from_tgas(10);
-const GAS_CALLBACK: Gas = Gas::from_tgas(10);
+const GAS_CALLBACK: Gas = Gas::from_tgas(30);
 const DAY_NS: u64 = 86_400_000_000_000;
 const EVENT_STANDARD: &str = "bursar";
 const EVENT_VERSION: &str = "1.0.0";
@@ -96,7 +120,10 @@ impl Payout {
         match (self, other) {
             (Payout::Near { account: a }, Payout::Near { account: b }) => a == b,
             (Payout::Chain { chain: c1, address: a1 }, Payout::Chain { chain: c2, address: a2 }) => {
-                c1.eq_ignore_ascii_case(c2) && a1.trim().eq_ignore_ascii_case(a2.trim())
+                let (a1, a2) = (a1.trim(), a2.trim());
+                // only hex addresses carry their checksum in the letter case; base58 and others are exact
+                let hex = a1.starts_with("0x") && a2.starts_with("0x");
+                c1.trim().eq_ignore_ascii_case(c2.trim()) && if hex { a1.eq_ignore_ascii_case(a2) } else { a1 == a2 }
             }
             _ => false,
         }
@@ -415,6 +442,9 @@ impl Bursar {
         require!(!self.vendors.contains_key(&vendor_id), "vendor exists");
         let withholding_bps = withholding_bps.unwrap_or(0);
         require!(withholding_bps <= 5000, "withholding above 50%");
+        if env::predecessor_account_id() != self.owner {
+            self.set_unconfirmed(&vendor_id, true);
+        }
         self.vendors.insert(
             vendor_id.clone(),
             Vendor {
@@ -445,6 +475,8 @@ impl Bursar {
         }
         if let Some(p) = payout {
             v.payout = p;
+            // an operator changed where the money goes: nothing is paid there until the owner confirms it
+            self.set_unconfirmed(&vendor_id, env::predecessor_account_id() != self.owner);
         }
         if let Some(t) = tax_id {
             // an empty string clears the check
@@ -460,8 +492,32 @@ impl Bursar {
         self.emit("vendor_updated", &vendor_id);
     }
 
+    /// The owner has checked the payout an operator recorded: payments to this vendor may go out again.
+    pub fn confirm_vendor_payout(&mut self, vendor_id: String) {
+        self.assert_owner();
+        require!(self.vendors.contains_key(&vendor_id), "unknown vendor");
+        self.set_unconfirmed(&vendor_id, false);
+        self.emit("vendor_payout_confirmed", &vendor_id);
+    }
+
+    /// Where the executor may send queued cross-chain payments: the Intents deposit account (or its sub-accounts).
+    /// Unset, nothing is settled: the executor cannot pick a destination on its own.
+    pub fn set_settlement_account(&mut self, account: Option<AccountId>) {
+        self.assert_owner();
+        match &account {
+            Some(a) => env::storage_write(SETTLEMENT_KEY, a.as_bytes()),
+            None => env::storage_remove(SETTLEMENT_KEY),
+        };
+        self.emit("settlement_account_set", account.as_ref().map(|a| a.as_str()).unwrap_or(""));
+    }
+
+    pub fn get_settlement_account(&self) -> Option<AccountId> {
+        env::storage_read(SETTLEMENT_KEY).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
+    }
+
     pub fn set_limits(&mut self, per_payment_cap: U128, daily_cap: U128, approval_threshold: U128) {
         self.assert_owner();
+        require!(per_payment_cap.0 > 0, "a zero per-payment cap would refuse everything: pause the treasury instead");
         self.limits = Limits {
             per_payment_cap: per_payment_cap.0,
             daily_cap: daily_cap.0,
@@ -489,6 +545,8 @@ impl Bursar {
     /// wallet owner, and to move a company to new keys.
     pub fn transfer_ownership(&mut self, new_owner: AccountId) {
         self.assert_owner();
+        require!(new_owner != self.agent && new_owner != self.executor && new_owner != env::current_account_id(), "the agent, the executor and the treasury itself cannot own the treasury");
+        self.operators.remove(&new_owner);
         self.owner = new_owner.clone();
         self.emit("owner_changed", new_owner.as_str());
     }
@@ -498,6 +556,7 @@ impl Bursar {
     pub fn add_operator(&mut self, account: AccountId, role: Role) {
         self.assert_owner();
         require!(account != self.owner, "the owner is not an operator");
+        require!(role.approve || role.manage_vendors || role.manage_orders, "an operator needs at least one role");
         self.operators.insert(account.clone(), role);
         self.emit("operator_added", account.as_str());
     }
@@ -524,14 +583,26 @@ impl Bursar {
         self.assert_can(|r| r.manage_orders, "manage orders");
         require!(self.vendors.contains_key(&vendor_id), "unknown vendor");
         require!(amount_per_period.0 > 0 && period_days > 0, "zero amount or period");
+        require!(period_days <= 3660, "period too long");
         let kind = OrderKind::Recurring { amount_per_period: amount_per_period.0, period_days, last_period: None };
         self.insert_order(vendor_id, String::new(), description, kind, expires_at.unwrap_or(0))
+    }
+
+    /// Whether this vendor's invoices must match an order. Set when its first order is recorded; the owner lifts it here.
+    pub fn set_order_bound(&mut self, vendor_id: String, bound: bool) {
+        self.assert_owner();
+        require!(self.vendors.contains_key(&vendor_id), "unknown vendor");
+        let k = Self::key(ORDER_BOUND_PREFIX, vendor_id.as_bytes());
+        if bound { env::storage_write(&k, b"1"); } else { env::storage_remove(&k); }
+        self.emit("order_bound_set", &format!("{vendor_id}:{bound}"));
     }
 
     pub fn close_order(&mut self, id: u64) {
         self.assert_can(|r| r.manage_orders, "manage orders");
         let mut o = self.orders.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown order"));
         o.active = false;
+        let open: Vec<u64> = self.vendor_order_ids(&o.vendor_id).into_iter().filter(|x| *x != id).collect();
+        env::storage_write(&Self::key(VENDOR_ORDERS_PREFIX, o.vendor_id.as_bytes()), &near_sdk::borsh::to_vec(&open).unwrap());
         self.orders.insert(id, o);
         self.emit("order_closed", &id.to_string());
     }
@@ -553,7 +624,7 @@ impl Bursar {
         self.emit("roles_set", "");
     }
 
-    /// Back to the owner and the approvers deciding held payments; proposals already open stay with the DAO's answer.
+    /// Back to the owner and the approvers deciding held payments, the ones with a proposal already open included.
     pub fn clear_dao(&mut self) {
         self.assert_owner();
         self.dao = None;
@@ -566,7 +637,6 @@ impl Bursar {
         self.emit(if paused { "paused" } else { "unpaused" }, "");
     }
 
-    /// The company paid the withheld tax to the state (off chain, from a `withdraw`): clear that much of the debt.
     pub fn mark_withholding_remitted(&mut self, amount: U128) {
         self.assert_owner();
         require!(amount.0 <= self.withheld_due, "more than is due");
@@ -574,14 +644,42 @@ impl Bursar {
         self.emit("withholding_remitted", &amount.0.to_string());
     }
 
+    /// The company's own money leaves to the owner; the withheld tax does not, see `remit_withholding`.
     pub fn withdraw(&mut self, amount: U128) -> Promise {
         self.assert_owner();
-        require!(amount.0 <= self.balance, "insufficient balance");
+        require!(amount.0 <= self.spendable(), "insufficient balance: the withheld tax is not spendable, remit it with remit_withholding");
         self.balance -= amount.0;
         self.emit("withdraw", &amount.0.to_string());
         self.ft_transfer(self.owner.clone(), amount.0, "bursar withdraw".into())
             .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(None, amount))
     }
+
+    /// The withheld tax goes to the owner, who pays the state with it: both the balance and the debt drop together.
+    pub fn remit_withholding(&mut self, amount: U128) -> Promise {
+        self.assert_owner();
+        require!(amount.0 > 0 && amount.0 <= self.withheld_due, "more than is due");
+        require!(amount.0 <= self.balance, "insufficient balance");
+        self.balance -= amount.0;
+        self.withheld_due -= amount.0;
+        self.emit("withholding_remitted", &amount.0.to_string());
+        self.ft_transfer(self.owner.clone(), amount.0, "bursar withholding remittance".into())
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_remit(amount))
+    }
+
+    #[private]
+    pub fn on_remit(&mut self, amount: U128, #[callback_result] result: Result<(), PromiseError>) -> bool {
+        self.set_in_flight(self.in_flight().saturating_sub(amount.0));
+        if result.is_ok() {
+            return true;
+        }
+        self.balance += amount.0;
+        self.withheld_due += amount.0;
+        self.emit("transfer_failed", "remit");
+        false
+    }
+
+    /// Nothing moved: the owner paid the state from elsewhere and clears that much of the debt, which frees the same
+    /// amount of the balance. Prefer `remit_withholding`, which moves the money and clears the debt in one step.
 
     pub fn cancel_payment(&mut self, id: u64) {
         self.assert_can(|r| r.approve, "approve");
@@ -606,6 +704,10 @@ impl Bursar {
             "only the agent, the owner or an operator"
         );
         Self::check_claim_size(&claim);
+        let counted = caller != self.owner;
+        if counted {
+            self.bump_daily(REQUESTS_TODAY_KEY, REQUESTS_PER_DAY, "daily quota of requests reached: the agent is sending too many claims, the owner should look at its key");
+        }
         self.roll_day();
         let id = self.next_id;
         self.next_id += 1;
@@ -631,10 +733,22 @@ impl Bursar {
             withheld: 0,
         };
 
-        match self.decide(&claim) {
+        let decision = self.decide(&claim).and_then(|()| {
+            // a hold costs a person's time and, with a DAO, a bond: the agent gets a daily quota of them,
+            // and no proposal opens when the account could not pay the bond
+            let would_hold = !self.holds(&claim, self.find_order(&claim).is_some()).0.is_empty();
+            if would_hold && counted && self.daily_count(HOLDS_TODAY_KEY) >= HOLDS_PER_DAY {
+                return Err("hold_quota_reached".into());
+            }
+            if would_hold && self.dao.is_some() && !self.can_pay_bond() {
+                return Err("dao_bond_missing".into());
+            }
+            Ok(())
+        });
+        match decision {
             Err(reason) => {
-                if caller == self.agent {
-                    self.count_refusal();
+                if counted {
+                    self.bump_daily(BLOCKED_TODAY_KEY, BLOCKED_PER_DAY, "daily quota of refused requests reached: the agent is sending bad claims, the owner should look at its key");
                 }
                 p.reason = Some(reason.clone());
                 self.payments.insert(id, p);
@@ -644,14 +758,20 @@ impl Bursar {
             Ok(()) => {
                 // Reserve budget now so two invoices cannot both pass the same cap.
                 self.reserve(&claim.vendor_id, amount);
+                // the payout this claim was checked against: the money goes there or nowhere
+                self.set_payout_snapshot(id, &claim.payout_seen);
                 let key = Self::invoice_key(&claim.vendor_id, &claim.invoice_number);
                 self.invoice_index.insert(key);
+                self.set_hash_seen(&claim.invoice_hash, true);
                 // What the company agreed to buy: consume the matching order, or note that there is none.
                 let (order_id, covered) = self.consume_order(&claim);
                 p.order_id = order_id;
                 let (holds, withheld) = self.holds(&claim, covered);
                 p.withheld = withheld;
                 if !holds.is_empty() {
+                    if counted {
+                        self.bump_daily(HOLDS_TODAY_KEY, HOLDS_PER_DAY, "daily quota of holds reached");
+                    }
                     let reason = holds.join("+");
                     p.status = Status::Approval;
                     p.reason = Some(reason.clone());
@@ -662,6 +782,8 @@ impl Bursar {
                     }
                     id
                 } else {
+                    // paid without a person: one more of the vendor's daily allowance
+                    self.bump_daily(&Self::key(VENDOR_DAY_PREFIX, claim.vendor_id.as_bytes()), u32::MAX, "");
                     self.execute(p);
                     id
                 }
@@ -683,6 +805,7 @@ impl Bursar {
         require!(!self.paused, "paused");
         let v = self.vendors.get(&p.vendor_id).unwrap_or_else(|| crate::fail("unknown vendor"));
         require!(v.active, "vendor deactivated by the owner since the hold");
+        require!(!self.is_unconfirmed(&p.vendor_id), "the vendor's payout was set by an operator: the owner must confirm it first");
         self.emit("payment_approved", &id.to_string());
         self.execute(p);
     }
@@ -722,6 +845,9 @@ impl Bursar {
         let p = self.payments.get(&id).unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Approval, "not waiting for approval");
         let proposal_id = p.dao_proposal_id.unwrap_or_else(|| crate::fail("proposal id not recorded yet"));
+        if let Some(opened_on) = self.payment_dao(id) {
+            require!(opened_on == dao, "this proposal was opened on another dao");
+        }
         ext_dao::ext(dao)
             .with_static_gas(GAS_DAO_VIEW)
             .get_proposal(proposal_id)
@@ -787,13 +913,24 @@ impl Bursar {
     /// Funds move only if that recipient is exactly the vendor's recorded payout.
     pub fn settle(&mut self, id: u64, quote_id: String, deposit_address: AccountId, recipient: Payout) -> Promise {
         require!(env::predecessor_account_id() == self.executor, "only the executor");
+        require!(quote_id.len() <= 128, "quote_id too long");
+        require!(!self.paused, "paused");
         let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Queued, "not queued");
         let v = self.vendors.get(&p.vendor_id).unwrap_or_else(|| crate::fail("unknown vendor"));
+        require!(v.active, "vendor deactivated by the owner");
         require!(v.payout.same_as(&recipient), "recipient does not match vendor payout");
         require!(matches!(v.payout, Payout::Chain { .. }), "near vendors are paid directly");
+        if let Some(seen) = self.payout_snapshot(id) {
+            require!(v.payout.same_as(&seen), "the vendor's payout changed since this claim was checked");
+        }
+        require!(!self.is_unconfirmed(&p.vendor_id), "the vendor's payout was set by an operator: the owner must confirm it first");
+        // the USDC goes to the Intents deposit account the owner registered, or to one of its sub-accounts, never elsewhere
+        let settlement = self.get_settlement_account().unwrap_or_else(|| crate::fail("no settlement account set: the owner registers the Intents deposit account first"));
+        require!(deposit_address == settlement || deposit_address.as_str().ends_with(&format!(".{settlement}")), "deposit address is not the registered settlement account");
         let net = p.amount - p.withheld;
-        require!(net <= self.balance, "insufficient balance");
+        require!(net <= self.spendable(), "insufficient balance");
+        require!(self.in_flight() == 0, "a transfer is in flight: ask again in a few seconds");
         self.balance -= net;
         self.withheld_due += p.withheld;
         p.status = Status::Settling;
@@ -802,14 +939,16 @@ impl Bursar {
         p.updated_at = env::block_timestamp();
         self.payments.insert(id, p.clone());
         self.emit("payment_settling", &format!("{id}:{quote_id}"));
-        self.ft_transfer(deposit_address, net, format!("bursar payment {id} invoice {}", p.invoice_number))
+        self.ft_transfer(deposit_address, net, format!("bursar payment {id}"))
             .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(net)))
     }
 
     pub fn mark_settled(&mut self, id: u64, dest_tx: String) {
         require!(env::predecessor_account_id() == self.executor, "only the executor");
+        require!(dest_tx.len() <= 128, "dest_tx too long");
         let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Settling, "not settling");
+        require!(self.in_flight() == 0, "the transfer to the deposit address has not landed yet");
         p.status = Status::Settled;
         p.dest_tx = Some(dest_tx);
         p.updated_at = env::block_timestamp();
@@ -817,7 +956,35 @@ impl Bursar {
         self.emit("payment_settled", &id.to_string());
     }
 
+    /// Intents did not deliver and refunded the USDC to this account with a plain transfer (the quote expired, the
+    /// route failed). The executor or the owner puts the payment back in the queue; the refund itself is counted
+    /// with `sync_balance`. Only once the deposit transfer's callback has run.
+    pub fn mark_settlement_failed(&mut self, id: u64) {
+        let caller = env::predecessor_account_id();
+        require!(caller == self.executor || caller == self.owner, "only the executor or the owner");
+        require!(self.in_flight() == 0, "the transfer to the deposit address has not landed yet");
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
+        require!(p.status == Status::Settling, "not settling");
+        self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
+        p.status = Status::Queued;
+        p.quote_id = None;
+        p.deposit_address = None;
+        p.updated_at = env::block_timestamp();
+        self.payments.insert(id, p);
+        self.emit("settlement_failed", &id.to_string());
+    }
+
     // ----- token deposits (NEP-141 receiver) -----
+
+    /// If a transfer callback never ran (out of gas, a storage-starved account), the in-flight counter would stay up
+    /// and block `sync_balance` for good. The owner clears it after checking the token's balance; the next
+    /// `sync_balance` then reads the truth.
+    pub fn reset_in_flight(&mut self) {
+        self.assert_owner();
+        let was = self.in_flight();
+        self.set_in_flight(0);
+        self.emit("in_flight_reset", &was.to_string());
+    }
 
     /// Align the balance with what the token contract actually holds. USDC sent with a plain `ft_transfer`
     /// (a wallet, an exchange) lands in the account without `ft_on_transfer` running, so the contract would
@@ -860,14 +1027,10 @@ impl Bursar {
     }
 
     pub fn list_payments(&self, from: Option<u64>, limit: Option<u64>) -> Vec<Payment> {
+        // ids are dense: walk them instead of scanning the map from the start
         let from = from.unwrap_or(0);
-        let limit = limit.unwrap_or(50);
-        self.payments
-            .iter()
-            .filter(|(id, _)| **id > from)
-            .take(limit as usize)
-            .map(|(_, p)| p.clone())
-            .collect()
+        let limit = limit.unwrap_or(50).min(500);
+        (from + 1..self.next_id).filter_map(|id| self.payments.get(&id).cloned()).take(limit as usize).collect()
     }
 
     pub fn get_vendor(&self, vendor_id: String) -> Option<Vendor> {
@@ -876,6 +1039,15 @@ impl Bursar {
 
     pub fn list_vendors(&self) -> Vec<(String, Vendor)> {
         self.vendors.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    /// What the raw-storage marks say about a vendor: its payout waits for the owner's confirmation; its invoices need an order.
+    pub fn vendor_state(&self, vendor_id: String) -> (bool, bool) {
+        (self.is_unconfirmed(&vendor_id), env::storage_has_key(&Self::key(ORDER_BOUND_PREFIX, vendor_id.as_bytes())))
+    }
+
+    pub fn get_in_flight(&self) -> U128 {
+        U128(self.in_flight())
     }
 
     pub fn get_limits(&self) -> Limits {
@@ -946,6 +1118,12 @@ impl Bursar {
         if !claim.flags.is_empty() {
             holds.push("flagged");
         }
+        if self.is_unconfirmed(&claim.vendor_id) {
+            holds.push("payout_unconfirmed");
+        }
+        if self.daily_count(&Self::key(VENDOR_DAY_PREFIX, claim.vendor_id.as_bytes())) >= AUTOPAY_PER_VENDOR_PER_DAY {
+            holds.push("many_invoices");
+        }
         // Identity, when the owner recorded it: a misread id must not refuse a real invoice, so these are holds, not blocks.
         if let Some(t) = self.vendors.get(&claim.vendor_id).and_then(|v| v.tax_id.as_ref()) {
             if Self::norm_id(&claim.vendor_tax_id) != Self::norm_id(t) {
@@ -986,7 +1164,13 @@ impl Bursar {
             // The classic invoice fraud: same vendor, "new bank details".
             return Err("payout_changed".into());
         }
-        if self.invoice_index.contains(&Self::invoice_key(&c.vendor_id, &c.invoice_number)) {
+        if c.invoice_number.trim().is_empty() && c.invoice_hash.trim().is_empty() {
+            return Err("no_invoice_identity".into());
+        }
+        if self.invoice_index.contains(&Self::invoice_key(&c.vendor_id, &c.invoice_number))
+            || self.invoice_index.contains(&Self::old_invoice_key(&c.vendor_id, &c.invoice_number))
+            || self.hash_seen(&c.invoice_hash)
+        {
             return Err("duplicate_invoice".into());
         }
         let amount = c.amount.0;
@@ -997,14 +1181,14 @@ impl Bursar {
             return Err("over_payment_cap".into());
         }
         let spent_month = if v.month == Self::month_key() { v.spent_this_month } else { 0 };
-        if v.monthly_budget > 0 && spent_month + amount > v.monthly_budget {
+        if v.monthly_budget > 0 && spent_month.saturating_add(amount) > v.monthly_budget {
             return Err("over_monthly_budget".into());
         }
         let spent_today = if self.day == Self::day_key() { self.spent_today } else { 0 };
-        if self.limits.daily_cap > 0 && spent_today + amount > self.limits.daily_cap {
+        if self.limits.daily_cap > 0 && spent_today.saturating_add(amount) > self.limits.daily_cap {
             return Err("over_daily_cap".into());
         }
-        if amount > self.balance {
+        if amount > self.spendable() {
             return Err("insufficient_treasury".into());
         }
         Ok(())
@@ -1012,17 +1196,21 @@ impl Bursar {
 
     fn execute(&mut self, mut p: Payment) {
         let v = self.vendors.get(&p.vendor_id).cloned().unwrap_or_else(|| crate::fail("unknown vendor"));
+        // the payout may have been edited since the claim was checked: then this payment goes nowhere
+        if let Some(seen) = self.payout_snapshot(p.id) {
+            require!(v.payout.same_as(&seen), "the vendor's payout changed since this claim was checked: cancel it and read the invoice again");
+        }
         p.updated_at = env::block_timestamp();
         match v.payout {
             Payout::Near { account } => {
                 // the withheld share stays in the treasury, earmarked for the state; the vendor gets the net
                 let net = p.amount - p.withheld;
-                require!(net <= self.balance, "insufficient balance");
+                require!(net <= self.spendable(), "insufficient balance");
                 self.balance -= net;
                 self.withheld_due += p.withheld;
                 p.status = Status::Paid;
                 let id = p.id;
-                let memo = format!("bursar payment {id} invoice {}", p.invoice_number);
+                let memo = format!("bursar payment {id}");
                 self.payments.insert(id, p.clone());
                 self.emit("payment_paid", &id.to_string());
                 let _ = self
@@ -1040,6 +1228,7 @@ impl Bursar {
 
     fn open_dao_proposal(&mut self, id: u64, amount: u128, vendor_id: &str, reason: &str) {
         let dao = self.dao.clone().unwrap();
+        env::storage_write(&Self::key(PAYMENT_DAO_PREFIX, &id.to_le_bytes()), dao.as_bytes());
         let args = near_sdk::base64::Engine::encode(
             &near_sdk::base64::prelude::BASE64_STANDARD,
             format!("{{\"id\":{id}}}"),
@@ -1052,7 +1241,7 @@ impl Bursar {
                     method_name: "approve_payment".into(),
                     args,
                     deposit: U128(0),
-                    gas: near_sdk::json_types::U64(Gas::from_tgas(50).as_gas()),
+                    gas: near_sdk::json_types::U64(Gas::from_tgas(80).as_gas()),
                 }],
             },
         };
@@ -1077,16 +1266,19 @@ impl Bursar {
 
     /// Undo what `reserve` did for a payment that will not happen: monthly budget, daily cap, duplicate index.
     fn release_reservation(&mut self, p: &Payment) {
+        // the counters belong to a day and a month; subtract only if they are the ones the reservation went into
         if let Some(mut v) = self.vendors.get(&p.vendor_id).cloned() {
-            if v.month == Self::month_key() {
+            if v.month == Self::month_key_at(p.created_at) {
                 v.spent_this_month = v.spent_this_month.saturating_sub(p.amount);
                 self.vendors.insert(p.vendor_id.clone(), v);
             }
         }
-        if self.day == Self::day_key() {
+        if self.day == p.created_at / DAY_NS {
             self.spent_today = self.spent_today.saturating_sub(p.amount);
         }
         self.invoice_index.remove(&Self::invoice_key(&p.vendor_id, &p.invoice_number));
+        self.invoice_index.remove(&Self::old_invoice_key(&p.vendor_id, &p.invoice_number));
+        self.set_hash_seen(&p.invoice_hash, false);
         if let Some(oid) = p.order_id {
             if let Some(mut o) = self.orders.get(&oid).cloned() {
                 match &mut o.kind {
@@ -1105,17 +1297,36 @@ impl Bursar {
     fn insert_order(&mut self, vendor_id: String, reference: String, description: String, kind: OrderKind, expires_at: u64) -> u64 {
         let id = self.next_order_id;
         self.next_order_id += 1;
+        let mut open = self.vendor_order_ids(&vendor_id);
+        require!(open.len() < 64, "too many open orders for this vendor: close some first");
+        env::storage_write(&Self::key(ORDER_BOUND_PREFIX, vendor_id.as_bytes()), b"1");
+        open.push(id);
+        env::storage_write(&Self::key(VENDOR_ORDERS_PREFIX, vendor_id.as_bytes()), &near_sdk::borsh::to_vec(&open).unwrap());
         self.orders.insert(id, Order { id, vendor_id, reference: reference.trim().to_string(), description, kind, expires_at, active: true, created_at: env::block_timestamp() });
         self.emit("order_added", &id.to_string());
         id
+    }
+
+    /// The open order ids of a vendor, from the index. A contract from before the index scans its orders instead
+    /// (views cannot write storage); the index is written the next time an order is added or closed.
+    fn vendor_order_ids(&self, vendor_id: &str) -> Vec<u64> {
+        match env::storage_read(&Self::key(VENDOR_ORDERS_PREFIX, vendor_id.as_bytes())) {
+            Some(b) => near_sdk::borsh::from_slice::<Vec<u64>>(&b).unwrap_or_default(),
+            None => self.orders.iter().filter(|(_, o)| o.vendor_id == vendor_id && o.active).map(|(id, _)| *id).collect(),
+        }
+    }
+
+    fn vendor_open_orders(&self, vendor_id: &str) -> Vec<Order> {
+        self.vendor_order_ids(vendor_id).into_iter().filter_map(|id| self.orders.get(&id).cloned()).filter(Self::order_is_open).collect()
     }
 
     fn order_is_open(o: &Order) -> bool {
         o.active && (o.expires_at == 0 || env::block_timestamp() <= o.expires_at)
     }
 
+    /// A vendor that ever had an order is held to orders, even once they are all closed; `set_order_bound` lifts it.
     fn vendor_has_orders(&self, vendor_id: &str) -> bool {
-        self.orders.iter().any(|(_, o)| o.vendor_id == vendor_id && Self::order_is_open(o))
+        env::storage_has_key(&Self::key(ORDER_BOUND_PREFIX, vendor_id.as_bytes())) || !self.vendor_open_orders(vendor_id).is_empty()
     }
 
     /// Find the order this claim fits and consume it. A purchase order is matched by the reference printed on
@@ -1124,12 +1335,7 @@ impl Bursar {
     fn find_order(&self, c: &InvoiceClaim) -> Option<Order> {
         let amount = c.amount.0;
         let reference = c.order_ref.as_deref().map(|r| r.trim().to_lowercase()).unwrap_or_default();
-        let candidates: Vec<Order> = self
-            .orders
-            .iter()
-            .filter(|(_, o)| o.vendor_id == c.vendor_id && Self::order_is_open(o))
-            .map(|(_, o)| o.clone())
-            .collect();
+        let candidates: Vec<Order> = self.vendor_open_orders(&c.vendor_id);
         if !reference.is_empty() {
             for mut o in candidates.iter().cloned() {
                 if let OrderKind::Single { remaining } = &mut o.kind {
@@ -1203,19 +1409,61 @@ impl Bursar {
         require!(ok, "claim field too long");
     }
 
-    /// The agent's refused requests are recorded up to a daily quota; past it the request fails and nothing is stored.
-    fn count_refusal(&self) {
+    /// A (day, count) pair in raw storage.
+    fn daily_count(&self, key: &[u8]) -> u32 {
         let day = Self::day_key();
-        let (d, n) = env::storage_read(BLOCKED_TODAY_KEY)
+        env::storage_read(key)
             .and_then(|b| b.try_into().ok())
             .map(|b: [u8; 12]| (u64::from_le_bytes(b[..8].try_into().unwrap()), u32::from_le_bytes(b[8..].try_into().unwrap())))
-            .unwrap_or((0, 0));
-        let n = if d == day { n } else { 0 };
-        require!(n < BLOCKED_PER_DAY, "daily quota of refused requests reached: the agent is sending bad claims, the owner should look at its key");
+            .filter(|(d, _)| *d == day)
+            .map(|(_, n)| n)
+            .unwrap_or(0)
+    }
+
+    /// Count one more today, or refuse with `why` when the quota is spent (nothing is stored then).
+    fn bump_daily(&self, key: &[u8], max: u32, why: &str) {
+        let n = self.daily_count(key);
+        require!(n < max, why);
         let mut b = [0u8; 12];
-        b[..8].copy_from_slice(&day.to_le_bytes());
+        b[..8].copy_from_slice(&Self::day_key().to_le_bytes());
         b[8..].copy_from_slice(&(n + 1).to_le_bytes());
-        env::storage_write(BLOCKED_TODAY_KEY, &b);
+        env::storage_write(key, &b);
+    }
+
+    /// Liquid NEAR above the storage stake covers the DAO bond plus headroom.
+    fn can_pay_bond(&self) -> bool {
+        let staked = env::storage_usage() as u128 * env::storage_byte_cost().as_yoctonear();
+        env::account_balance().as_yoctonear().saturating_sub(staked) >= self.dao_bond.as_yoctonear().saturating_add(NEAR_HEADROOM)
+    }
+
+    fn key(prefix: &[u8], rest: &[u8]) -> Vec<u8> {
+        [prefix, rest].concat()
+    }
+
+    fn set_payout_snapshot(&self, id: u64, payout: &Payout) {
+        env::storage_write(&Self::key(PAYOUT_SNAPSHOT_PREFIX, &id.to_le_bytes()), &near_sdk::borsh::to_vec(payout).unwrap());
+    }
+
+    fn payout_snapshot(&self, id: u64) -> Option<Payout> {
+        env::storage_read(&Self::key(PAYOUT_SNAPSHOT_PREFIX, &id.to_le_bytes())).and_then(|b| near_sdk::borsh::from_slice(&b).ok())
+    }
+
+    fn payment_dao(&self, id: u64) -> Option<AccountId> {
+        env::storage_read(&Self::key(PAYMENT_DAO_PREFIX, &id.to_le_bytes())).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
+    }
+
+    fn set_unconfirmed(&self, vendor_id: &str, unconfirmed: bool) {
+        let k = Self::key(UNCONFIRMED_PREFIX, vendor_id.as_bytes());
+        if unconfirmed { env::storage_write(&k, b"1"); } else { env::storage_remove(&k); }
+    }
+
+    fn is_unconfirmed(&self, vendor_id: &str) -> bool {
+        env::storage_has_key(&Self::key(UNCONFIRMED_PREFIX, vendor_id.as_bytes()))
+    }
+
+    /// What the company may spend: the balance minus the tax it holds for the state.
+    fn spendable(&self) -> u128 {
+        self.balance.saturating_sub(self.withheld_due)
     }
 
     fn in_flight(&self) -> u128 {
@@ -1248,7 +1496,11 @@ impl Bursar {
 
     /// YYYYMM from the block timestamp (civil calendar, UTC).
     fn month_key() -> u32 {
-        let days = (env::block_timestamp() / DAY_NS) as i64;
+        Self::month_key_at(env::block_timestamp())
+    }
+
+    fn month_key_at(ts: u64) -> u32 {
+        let days = (ts / DAY_NS) as i64;
         // Howard Hinnant's civil_from_days
         let z = days + 719_468;
         let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
@@ -1267,8 +1519,28 @@ impl Bursar {
         s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).collect()
     }
 
+    /// "AH-0923", "ah 0923" and "AH0923." are the same invoice: letters and digits only, uppercase.
     fn invoice_key(vendor_id: &str, invoice_number: &str) -> String {
+        format!("{}|{}", vendor_id.to_lowercase(), Self::norm_id(invoice_number))
+    }
+
+    /// The key contracts wrote before the normalization above; still checked, so old payments stay duplicates.
+    fn old_invoice_key(vendor_id: &str, invoice_number: &str) -> String {
         format!("{}|{}", vendor_id.to_lowercase(), invoice_number.trim().to_lowercase())
+    }
+
+    fn hash_seen(&self, hash: &str) -> bool {
+        let h = Self::norm_id(hash);
+        !h.is_empty() && env::storage_has_key(&Self::key(HASH_INDEX_PREFIX, h.as_bytes()))
+    }
+
+    fn set_hash_seen(&self, hash: &str, seen: bool) {
+        let h = Self::norm_id(hash);
+        if h.is_empty() {
+            return;
+        }
+        let k = Self::key(HASH_INDEX_PREFIX, h.as_bytes());
+        if seen { env::storage_write(&k, b"1"); } else { env::storage_remove(&k); }
     }
 
     // ----- preview -----
@@ -1319,13 +1591,24 @@ impl Bursar {
     }
 
     fn emit(&self, event: &str, data: &str) {
-        log!(
-            "EVENT_JSON:{{\"standard\":\"{}\",\"version\":\"{}\",\"event\":\"{}\",\"data\":\"{}\"}}",
-            EVENT_STANDARD,
-            EVENT_VERSION,
-            event,
-            data
-        );
+        // quotes, backslashes and control characters are escaped: a vendor id or a quote id cannot forge another event
+        log!("EVENT_JSON:{{\"standard\":\"{}\",\"version\":\"{}\",\"event\":\"{}\",\"data\":\"{}\"}}", EVENT_STANDARD, EVENT_VERSION, event, Self::json_escape(data));
+    }
+
+    fn json_escape(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out
     }
 }
 
@@ -1387,7 +1670,8 @@ mod tests {
             invoice_number: number.into(),
             amount: U128(amount),
             due_date: "2026-11-30".into(),
-            invoice_hash: "deadbeef".into(),
+            // one file per invoice: the hash follows the number (a shared hash would be a duplicate now)
+            invoice_hash: format!("{:0>8}{}", vendor.len(), number.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>()),
             payout_seen: payout,
             attestation_ref: "att:1".into(),
             flags: vec![],
@@ -1749,6 +2033,352 @@ mod tests {
         assert!(r.is_err());
     }
 
+
+
+    // ----- audit round two: one test per finding -----
+
+    fn plain() -> Bursar {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None, None, None);
+        c.add_vendor("design".into(), "DesignCo".into(), Payout::Chain { chain: "base".into(), address: "0xabc".into() }, U128(0), None, None, None);
+        testing_env!(ctx(accounts(4)).build());
+        let _ = c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
+        c
+    }
+    const T0: u64 = 1_760_000_000_000_000_000;
+    fn near(a: AccountId) -> Payout { Payout::Near { account: a } }
+
+    #[test]
+    fn audit_cancelling_yesterdays_hold_does_not_free_todays_cap() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.update_vendor("hosting".into(), None, Some(U128(0)), None, None, None, None);
+        testing_env!(ctx(accounts(1)).build());
+        let h = c.request_payment(claim("hosting", "H", 4_999_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(h).unwrap().status, Status::Approval);
+        let t1 = T0 + DAY_NS;
+        testing_env!(ctx(accounts(1)).block_timestamp(t1).build());
+        for i in 0..5 { c.request_payment(claim("hosting", &format!("D{i}"), 1_999_000_000, near(accounts(5)))); }
+        assert_eq!(c.get_stats().spent_today.0, 5 * 1_999_000_000);
+        testing_env!(ctx(accounts(0)).block_timestamp(t1).build());
+        c.cancel_payment(h);
+        assert_eq!(c.get_stats().spent_today.0, 5 * 1_999_000_000, "a day-1 hold must not reduce day-2 spend");
+        // monthly: a hold from October cancelled in November leaves November's budget alone
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let h = c.request_payment(claim("hosting", "M", 4_999_000_000, near(accounts(5))));
+        let t2 = T0 + 30 * DAY_NS;
+        testing_env!(ctx(accounts(1)).block_timestamp(t2).build());
+        c.request_payment(claim("hosting", "N", 1_000_000_000, near(accounts(5))));
+        testing_env!(ctx(accounts(0)).block_timestamp(t2).build());
+        c.cancel_payment(h);
+        assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 1_000_000_000);
+    }
+
+    #[test]
+    fn audit_many_small_invoices_meet_a_person() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        for i in 0..5 { let id = c.request_payment(claim("hosting", &format!("S{i}"), 100_000_000, near(accounts(5)))); assert_eq!(c.get_payment(id).unwrap().status, Status::Paid); }
+        let sixth = c.request_payment(claim("hosting", "S5", 100_000_000, near(accounts(5))));
+        let p = c.get_payment(sixth).unwrap();
+        assert_eq!(p.status, Status::Approval);
+        assert_eq!(p.reason.as_deref(), Some("many_invoices"));
+        // the next day the allowance is back
+        testing_env!(ctx(accounts(1)).block_timestamp(T0 + DAY_NS).build());
+        let id = c.request_payment(claim("hosting", "S6", 100_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+    }
+
+    #[test]
+    fn audit_refunded_settlement_goes_back_to_the_queue() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_settlement_account(Some(accounts(5)));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.settle(id, "q1".into(), accounts(5), pay.clone());
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 1_250_000_000);
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
+        // Intents refunded with a plain transfer: the executor puts the payment back in the queue, the owner syncs
+        testing_env!(ctx(accounts(2)).build());
+        c.mark_settlement_failed(id);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+        testing_env!(as_self().build());
+        c.on_sync_balance(Ok(U128(50_000_000_000)));
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+        testing_env!(ctx(accounts(0)).build());
+        c.cancel_payment(id);
+        testing_env!(ctx(accounts(1)).build());
+        let again = c.request_payment(claim("design", "1107", 1_250_000_000, pay));
+        assert_eq!(c.get_payment(again).unwrap().status, Status::Queued, "the invoice is free again");
+    }
+
+    #[test]
+    fn audit_withheld_tax_is_not_spendable() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_vendor("consultant".into(), "Studio".into(), near(accounts(5)), U128(0), None, None, Some(2000));
+        c.set_limits(U128(50_000_000_000), U128(0), U128(100_000_000_000));
+        c.update_vendor("hosting".into(), None, Some(U128(0)), None, None, None, None);
+        testing_env!(ctx(accounts(1)).build());
+        c.request_payment(claim("consultant", "C-1", 10_000_000_000, near(accounts(5))));
+        assert_eq!(c.get_stats().withheld_due.0, 2_000_000_000);
+        assert_eq!(c.get_stats().balance.0, 42_000_000_000);
+        let id = c.request_payment(claim("hosting", "H-1", 41_000_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("insufficient_treasury"), "the state's 2000 are not the company's");
+        let id = c.request_payment(claim("hosting", "H-2", 40_000_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.withdraw(U128(1_000_000_000))));
+        assert!(r.is_err(), "withdraw cannot touch the withheld tax");
+        let _ = c.remit_withholding(U128(2_000_000_000));
+        assert_eq!(c.get_stats().withheld_due.0, 0);
+        assert_eq!(c.get_stats().balance.0, 0);
+        // a failed remittance puts both back
+        testing_env!(as_self().build());
+        assert!(!c.on_remit(U128(2_000_000_000), Err(PromiseError::Failed)));
+        assert_eq!(c.get_stats().withheld_due.0, 2_000_000_000);
+        assert_eq!(c.get_stats().balance.0, 2_000_000_000);
+    }
+
+    #[test]
+    fn audit_executor_cannot_choose_the_deposit_account() {
+        let mut c = plain();
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q1".into(), accounts(2), pay.clone()); }));
+        assert!(r.is_err(), "no settlement account registered: nothing moves");
+        testing_env!(ctx(accounts(0)).build());
+        c.set_settlement_account(Some("intents.near".parse().unwrap()));
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q1".into(), accounts(2), pay.clone()); }));
+        assert!(r.is_err(), "the executor's own account is not the settlement account");
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+        let _ = c.settle(id, "q1".into(), "deposit1.intents.near".parse().unwrap(), pay);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Settling);
+    }
+
+    #[test]
+    fn audit_settle_honours_pause_and_deactivation() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_settlement_account(Some(accounts(5)));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "Q1", 1_000_000_000, pay.clone()));
+        testing_env!(ctx(accounts(0)).build());
+        c.set_paused(true);
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q".into(), accounts(5), pay.clone()); }));
+        assert!(r.is_err());
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+    }
+
+    #[test]
+    fn audit_payout_changed_after_the_hold_is_not_paid() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "2210", 3_000_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
+        testing_env!(ctx(accounts(0)).build());
+        c.update_vendor("hosting".into(), Some(near(accounts(3))), None, None, None, None, None);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err(), "the claim was checked against another payout");
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+    }
+
+    #[test]
+    fn audit_operator_payout_waits_for_the_owner() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_operator(accounts(3), Role { approve: true, manage_vendors: true, manage_orders: false });
+        testing_env!(ctx(accounts(3)).build());
+        c.add_vendor("me".into(), "Me".into(), near(accounts(3)), U128(0), None, None, None);
+        let id = c.request_payment(claim("me", "1", 500_000_000, near(accounts(3))));
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Approval);
+        assert_eq!(p.reason.as_deref(), Some("payout_unconfirmed"));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err(), "the same operator cannot approve it either");
+        testing_env!(ctx(accounts(0)).build());
+        c.confirm_vendor_payout("me".into());
+        c.approve_payment(id);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        // an operator editing an existing payout puts the vendor back on hold
+        testing_env!(ctx(accounts(3)).build());
+        c.update_vendor("hosting".into(), Some(near(accounts(3))), None, None, None, None, None);
+        let id = c.request_payment(claim("hosting", "7", 500_000_000, near(accounts(3))));
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("payout_unconfirmed"));
+    }
+
+    #[test]
+    fn audit_agent_holds_and_requests_have_daily_quotas() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let mut held = 0;
+        for i in 0..80 {
+            let mut cl = claim("hosting", &format!("h{i}"), 1, near(accounts(5))); cl.flags = vec!["x".into()];
+            let id = c.request_payment(cl);
+            if c.get_payment(id).unwrap().status == Status::Approval { held += 1; } else { assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("hold_quota_reached")); }
+        }
+        assert_eq!(held, HOLDS_PER_DAY as usize);
+        // the owner is not quota'd
+        testing_env!(ctx(accounts(0)).build());
+        let mut cl = claim("hosting", "owner-h", 1, near(accounts(5))); cl.flags = vec!["x".into()];
+        { let id = c.request_payment(cl); assert_eq!(c.get_payment(id).unwrap().status, Status::Approval); }
+        // requests overall
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let mut ok = 0;
+        for i in 0..(REQUESTS_PER_DAY + 20) {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("nobody", &format!("r{i}"), 1, near(accounts(5))))));
+            if r.is_ok() { ok += 1; }
+        }
+        assert!(ok <= BLOCKED_PER_DAY as usize, "refusals are capped first, got {ok}");
+    }
+
+    #[test]
+    fn audit_no_dao_proposal_without_near_for_the_bond() {
+        let mut c = setup(); // has a dao
+        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_near(1)).build());
+        let mut cl = claim("hosting", "poor", 1, near(accounts(5))); cl.flags = vec!["x".into()];
+        let id = c.request_payment(cl);
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Blocked);
+        assert_eq!(p.reason.as_deref(), Some("dao_bond_missing"));
+    }
+
+    #[test]
+    fn audit_operator_needs_a_role_and_ownership_has_limits() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_operator(accounts(5), Role::default())));
+        assert!(r.is_err());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.transfer_ownership(accounts(1))));
+        assert!(r.is_err(), "not to the agent");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.transfer_ownership(accounts(2))));
+        assert!(r.is_err(), "not to the executor");
+        c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: false });
+        c.transfer_ownership(accounts(3));
+        assert!(c.list_operators().is_empty(), "the new owner is no longer an operator");
+    }
+
+    #[test]
+    fn audit_mark_settled_waits_for_the_transfer() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_settlement_account(Some(accounts(5)));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.settle(id, "q1".into(), accounts(5), pay);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.mark_settled(id, "0xtx".into())));
+        assert!(r.is_err(), "the deposit transfer has not landed");
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
+        testing_env!(ctx(accounts(2)).build());
+        c.mark_settled(id, "0xtx".into());
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Settled);
+    }
+
+    #[test]
+    fn audit_long_periods_are_refused_and_orders_are_indexed() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_recurring_order("hosting".into(), "x".into(), U128(1_000_000_000), 300_000, None)));
+        assert!(r.is_err());
+        for i in 0..64 { c.add_order("hosting".into(), format!("PO-{i}"), "".into(), U128(1_000_000), None); }
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_order("hosting".into(), "PO-65".into(), "".into(), U128(1_000_000), None)));
+        assert!(r.is_err(), "64 open orders per vendor at most");
+        c.close_order(1);
+        c.add_order("hosting".into(), "PO-65".into(), "".into(), U128(1_000_000), None);
+        assert_eq!(c.list_orders(Some("hosting".into())).len(), 65);
+    }
+
+    #[test]
+    fn audit_order_bound_vendor_stays_bound_after_its_orders_close() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        let po = c.add_order("hosting".into(), "PO-1".into(), "".into(), U128(1_000_000_000), None);
+        c.close_order(po);
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "C2", 100_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("no_order"));
+        testing_env!(ctx(accounts(0)).build());
+        c.set_order_bound("hosting".into(), false);
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "C3", 100_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+    }
+
+    #[test]
+    fn audit_duplicates_by_normalized_number_and_by_file_hash() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let first = c.request_payment(claim("hosting", "AH-0923", 100_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(first).unwrap().status, Status::Paid);
+        for n in ["AH0923", "ah 0923", "AH-0923."] {
+            let mut cl = claim("hosting", n, 100_000_000, near(accounts(5))); cl.invoice_hash = format!("other-{n}");
+            { let id = c.request_payment(cl); assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("duplicate_invoice"), "{n}"); }
+        }
+        let mut same_file = claim("hosting", "AH-0999", 100_000_000, near(accounts(5))); same_file.invoice_hash = claim("hosting", "AH-0923", 0, near(accounts(5))).invoice_hash;
+        { let id = c.request_payment(same_file); assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("duplicate_invoice")); }
+        let mut blank = claim("hosting", "", 100_000_000, near(accounts(5))); blank.invoice_hash = String::new();
+        { let id = c.request_payment(blank); assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("no_invoice_identity")); }
+    }
+
+    #[test]
+    fn audit_chain_addresses_fold_case_only_when_hex() {
+        let sol = Payout::Chain { chain: "sol".into(), address: "9xQeWvG816oWg9W3rCFeZ5s9h8Y2bD4zTk1pQmNr7LvU".into() };
+        let sol2 = Payout::Chain { chain: "sol".into(), address: "9xqewvg816owg9w3rcfez5s9h8y2bd4ztk1pqmnr7lvu".into() };
+        assert!(!sol.same_as(&sol2));
+        let evm = Payout::Chain { chain: "base".into(), address: "0xABCdef".into() };
+        let evm2 = Payout::Chain { chain: " Base ".into(), address: " 0xabcDEF ".into() };
+        assert!(evm.same_as(&evm2));
+    }
+
+    #[test]
+    fn audit_events_cannot_be_forged_by_a_quote_in_a_string() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_vendor("x\",\"event\":\"withdraw\",\"data\":\"1".into(), "Evil".into(), near(accounts(5)), U128(0), None, None, None);
+        let line = near_sdk::test_utils::get_logs().last().unwrap().clone();
+        let json: near_sdk::serde_json::Value = near_sdk::serde_json::from_str(line.strip_prefix("EVENT_JSON:").unwrap()).unwrap();
+        assert_eq!(json["event"], "vendor_added");
+    }
+
+    #[test]
+    fn audit_list_payments_pages_by_id() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        for i in 0..4 { c.request_payment(claim("hosting", &format!("L{i}"), 100_000_000, near(accounts(5)))); }
+        let page = c.list_payments(Some(2), Some(1));
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, 3);
+        assert_eq!(c.list_payments(Some(4), None).len(), 0);
+    }
+
+    #[test]
+    fn audit_owner_can_reset_a_stuck_in_flight_counter() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        c.request_payment(claim("hosting", "0923", 480_000_000, near(accounts(5))));
+        testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.sync_balance()));
+        assert!(r.is_err());
+        c.reset_in_flight();
+        let _ = c.sync_balance();
+    }
 
     // ----- audit reproductions (21 October) -----
 

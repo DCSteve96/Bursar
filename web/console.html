@@ -307,6 +307,7 @@
     <div id="noTreasury" class="card" hidden><p style="margin:0 0 16px">No treasury selected. Create one in a minute, or add an existing one in Settings.</p><div class="actions" style="margin:0"><a class="btn btn-signal" href="#start">Create my treasury</a><a class="btn btn-ghost" href="#settings">Settings</a></div></div>
     <div id="ovBody">
       <div class="grid stats" id="stats"></div>
+      <p class="muted" id="flightNote" hidden><span id="flightText"></span> <button class="btn" type="button" id="resetFlight">Reset the counter</button><span class="err" id="flightErr" hidden></span></p>
       <p class="muted" id="syncNote" hidden><span id="syncText"></span> <button class="btn" type="button" id="syncBalance">Sync balance</button><span class="err" id="syncErr" hidden></span></p>
       <div class="grid cols-2" style="margin-top:24px">
         <div class="card">
@@ -609,6 +610,12 @@
         </div>
         <label style="margin-top:12px"><span>Orders <i class="help" tabindex="0" data-help="An order is what you agreed to buy from a vendor: a purchase order with a total, or a standing order per month. By default only vendors that have orders are held to them. Strict mode: every invoice must match an order, or it waits for a person.">?</i></span><select id="lStrict"><option value="false">Vendors with orders are held to them</option><option value="true">Strict: every invoice needs an order or a person</option></select></label>
         <div class="actions" style="margin-top:16px"><button id="lSave" type="button" class="btn-inverse">Save limits</button></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Cross-chain settlement <i class="help" tabindex="0" data-help="Vendors on other chains are paid through NEAR Intents: the executor gets a quote and sends the USDC to the deposit account Intents gives it. The contract only lets it send to this account or its sub-accounts. Empty, nothing cross-chain is settled.">?</i></div>
+        <label><span>Intents deposit account the executor may pay</span><input id="sAcct" autocomplete="off" placeholder="intents.near"></label>
+        <p class="muted" id="sAcctNow"></p>
+        <div class="actions" style="margin-top:16px"><button id="sAcctSave" type="button" class="btn-inverse">Save settlement account</button></div>
       </div>
     </div>
 
@@ -1322,8 +1329,11 @@ const REASON = {
   insufficient_treasury: "not enough USDC in the treasury", zero_amount: "zero amount", paused: "treasury paused",
   dao_proposal_failed: "the DAO refused to open the proposal; budget released",
   transfer_failed: "USDC transfer failed on the token contract; balance restored",
+  hold_quota_reached: "the agent already put its daily quota of invoices in front of a person; try again tomorrow or ask the owner",
+  dao_bond_missing: "the treasury account has no NEAR left for the DAO proposal bond; the owner tops it up",
+  no_invoice_identity: "no invoice number and no file hash: nothing to tell it apart from another invoice",
 };
-const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what your accountant set for this vendor" };
+const HOLD = { payout_unconfirmed: "an operator recorded this vendor's payout: the owner confirms it before anything is paid there", many_invoices: "this vendor already had its daily allowance of invoices paid without a person", over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what your accountant set for this vendor" };
 const holdText = (r) => (r || "over_threshold").split("+").map((x) => HOLD[x] ?? x).join(", ");
 function why(p) {
   const parts = [];
@@ -1355,6 +1365,10 @@ async function loadTreasury() {
       view(t, "list_orders", { vendor_id: null }).catch(() => []), view(t, "get_company").catch(() => null), view(t, "list_operators").catch(() => []),
     ]);
     state = { stats, limits, roles, vendors, payments, orders, company, operators };
+    // contracts from before the audit lack these views: then nothing is shown
+    state.vstate = Object.fromEntries(await Promise.all(vendors.map(async ([id]) => [id, await view(t, "vendor_state", { vendor_id: id }).catch(() => null)])));
+    state.settlement = await view(t, "get_settlement_account").catch(() => undefined);
+    state.inFlight = await view(t, "get_in_flight").catch(() => null);
     // what the token really holds: USDC sent with a plain transfer is in the account but not on the contract's books
     state.held = roles?.[4] ? await view(roles[4], "ft_balance_of", { account_id: t }).catch(() => null) : null;
     // the switcher shows the company's name once it is set in the contract
@@ -1392,11 +1406,15 @@ function renderOverview() {
   $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${p.id}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
   $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
   const n = held().length; $("#attnBadge").textContent = n; $("#attnBadge").hidden = n === 0;
+  const flight = state.inFlight ? BigInt(state.inFlight) : 0n;
+  $("#flightNote").hidden = flight === 0n; $("#flightErr").hidden = true; $("#resetFlight").disabled = !settings.ownerKey;
+  if (flight > 0n) $("#flightText").textContent = `${usdc(flight)} left the books a moment ago and the token has not confirmed the transfer yet. Normal for a few seconds. If it stays, a transfer callback never ran: check the token's balance, then reset the counter and press Sync.`;
   const extra = state.held !== null && state.held !== undefined ? BigInt(state.held) - BigInt(stats.balance) : 0n;
   $("#syncNote").hidden = extra <= 0n; $("#syncErr").hidden = true;
   if (extra > 0n) $("#syncText").textContent = `The USDC contract holds ${usdc(extra)} more than this treasury has on its books, USDC sent with a plain transfer. Press Sync to count it: the contract asks the token itself, nothing is typed in.`;
   $("#syncBalance").disabled = !(settings.ownerKey || settings.operatorKey);
 }
+$("#resetFlight").addEventListener("click", async () => { const b = $("#resetFlight"); b.disabled = true; $("#flightErr").hidden = true; try { await ownerCall("reset_in_flight", {}); await loadTreasury(); } catch (e) { $("#flightErr").textContent = e.message; $("#flightErr").hidden = false; } finally { b.disabled = false; } });
 $("#syncBalance").addEventListener("click", async () => {
   const b = $("#syncBalance"); b.disabled = true; $("#syncErr").hidden = true;
   try {
@@ -1423,13 +1441,13 @@ document.addEventListener("click", async (e) => {
       if (act === "voteReject") { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id }, gasTgas: 100 }); } catch {} }
       await loadTreasury(); return;
     }
-    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner" }[act];
+    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner", confirmPayout: "owner", orderBound: "owner" }[act];
     if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
-    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", setWithhold: "update_vendor", removeOp: "remove_operator" }[act];
+    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", setWithhold: "update_vendor", removeOp: "remove_operator", confirmPayout: "confirm_vendor_payout", orderBound: "set_order_bound" }[act];
     let tax = null, bps = null;
     if (act === "setTax") { tax = prompt("Identifier this vendor prints on its invoices (VAT number, EIN, CNPJ, or a supplier code you assign). Leave empty to stop checking it.", b.dataset.tax || ""); if (tax === null) return; }
     if (act === "setWithhold") { const w = prompt("Withholding tax to keep back on this vendor's invoices, in percent (for example 20). As set by your accountant. 0 for none.", String((Number(b.dataset.w) || 0) / 100)); if (w === null) return; bps = Math.round(Number(w.replace(",", ".") || "0") * 100); if (!Number.isFinite(bps) || bps < 0 || bps > 5000) throw new Error("a percentage between 0 and 50"); }
-    const args = act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
+    const args = act === "confirmPayout" ? { vendor_id: b.dataset.id } : act === "orderBound" ? { vendor_id: b.dataset.id, bound: false } : act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
     await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
     await loadTreasury();
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
@@ -1443,7 +1461,7 @@ $("#attnSync").addEventListener("click", async () => {
   } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; } finally { b.disabled = false; }
 });
 function renderVendors() {
-  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td>${v.country ? `${flagImg(v.country)}${esc(countryName(v.country))}` : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
+  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td>${v.country ? `${flagImg(v.country)}${esc(countryName(v.country))}` : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}${state.vstate?.[id]?.[0] ? ` <span class="pill Approval" title="an operator recorded this payout; the owner confirms it before anything is paid there">payout to confirm</span>${settings.ownerKey ? ` <button type="button" class="btn-ghost small act" data-act="confirmPayout" data-id="${esc(id)}">Confirm</button>` : ""}` : ""}${state.vstate?.[id]?.[1] ? ` <span class="pill Queued" title="its invoices must match an order, even now that every order is closed">order-bound</span>${settings.ownerKey ? ` <button type="button" class="btn-ghost small act" data-act="orderBound" data-id="${esc(id)}">Lift</button>` : ""}` : ""}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
   const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}">${esc(v.name)}</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
 }
@@ -1658,6 +1676,8 @@ function renderCharts() {
   decisionChart($("#chDecisions"), counts);
 }
 function renderSettings() {
+  $("#sAcctNow").textContent = state.settlement === undefined ? "This contract was deployed before settlement accounts existed: redeploy it to use one." : state.settlement ? `Now: ${state.settlement}` : "None set: queued cross-chain payments wait.";
+  if (state.settlement && !$("#sAcct").value) $("#sAcct").value = state.settlement;
   const { limits, roles, company, operators } = state;
   $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || ""; $("#cCountry").value = company?.country || ""; $("#cCountry")._showFlag?.(); $("#cTax").value = company?.tax_id || "";
   $("#lCap").value = Number(BigInt(limits.per_payment_cap) / 1000000n); $("#lDay").value = Number(BigInt(limits.daily_cap) / 1000000n); $("#lThr").value = Number(BigInt(limits.approval_threshold) / 1000000n); $("#lStrict").value = String(!!limits.require_orders);
@@ -1692,12 +1712,14 @@ $("#whRemit").addEventListener("click", async () => {
   $("#whErr").hidden = true;
   try {
     if (!settings.ownerKey) throw new Error("only the owner marks a remittance");
-    const w = prompt("Amount remitted to the state, in USDC", usdc(state.stats.withheld_due || "0").replace(" USDC", "").replace(/,/g, ""));
+    const w = prompt("Withheld tax to send to the owner's account for the state, in USDC", usdc(state.stats.withheld_due || "0").replace(" USDC", "").replace(/,/g, ""));
     if (w === null) return;
-    await ownerCall("mark_withholding_remitted", { amount: toUnits(w.replace(",", ".")) });
+    try { await ownerCall("remit_withholding", { amount: toUnits(w.replace(",", ".")) }); }
+    catch (e) { if (!/MethodNotFound|does not exist/i.test(e.message)) throw e; await ownerCall("mark_withholding_remitted", { amount: toUnits(w.replace(",", ".")) }); }
     await loadTreasury();
   } catch (e) { $("#whErr").textContent = e.message; $("#whErr").hidden = false; }
 });
+$("#sAcctSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { const v = $("#sAcct").value.trim(); await ownerCall("set_settlement_account", { account: v || null }); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
 $("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
 // ---------- governance: a Sputnik DAO for the company, from the console ----------

@@ -65,7 +65,9 @@ export async function confirmSettling(): Promise<void> {
         await call(config.executorAccount, "mark_settled", { id: p.id, dest_tx: String(tx) }, 30);
         console.log(`[executor] #${p.id} settled on destination: ${tx}`);
       } else if (s.status === "REFUNDED" || s.status === "FAILED") {
-        console.error(`[executor] #${p.id} ${s.status}: funds refunded to ${config.treasury}; owner should cancel or retry`);
+        // Intents sent the USDC back with a plain transfer: the payment goes back to the queue, the owner syncs the balance
+        await call(config.executorAccount, "mark_settlement_failed", { id: p.id }, 30);
+        console.error(`[executor] #${p.id} ${s.status}: funds refunded to ${config.treasury}, payment back in the queue; the owner presses Sync balance, then retries or cancels`);
       }
     } catch (e) {
       console.error(`[executor] #${p.id} status failed:`, (e as Error).message);

@@ -23,6 +23,9 @@ impl Contract {
     /// Open faucet: registers `to` if needed and mints `amount` (6 decimals).
     #[payable]
     pub fn mint(&mut self, to: AccountId, amount: U128) {
+        // a faucet, not a money printer: one call mints at most a million tUSDC and the supply stays far from u128::MAX
+        assert!(amount.0 <= 1_000_000_000_000, "at most 1,000,000 tUSDC per call");
+        assert!(self.token.total_supply.saturating_add(amount.0) <= 1_000_000_000_000_000_000, "supply cap reached");
         if !self.token.accounts.contains_key(&to) {
             self.token.internal_register_account(&to);
         }

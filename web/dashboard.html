@@ -77,12 +77,13 @@ const REASON = {
   insufficient_treasury: "not enough USDC in the treasury", zero_amount: "zero amount", paused: "treasury paused",
   dao_proposal_failed: "the DAO refused to open the proposal; budget released",
   transfer_failed: "USDC transfer failed on the token contract; balance restored",
+  hold_quota_reached: "the agent's daily quota of invoices for a person is spent", dao_bond_missing: "no NEAR on the treasury account for the DAO bond", no_invoice_identity: "no invoice number and no file hash",
 };
 function why(p) {
   const parts = [];
   if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
   if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
-  if (p.status === "Approval") { const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the reading carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the recorded one", buyer_mismatch: "the invoice is not addressed to the company's tax id", withholding_mismatch: "the withholding shown differs from what the accountant set" }; parts.push(`${(p.reason || "over_threshold").split("+").map((r) => HOLD[r] ?? r).join(", ")}: ${p.dao_proposal_id === null ? "waiting for a person" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`}`); }
+  if (p.status === "Approval") { const HOLD = { payout_unconfirmed: "payout recorded by an operator, waiting for the owner", many_invoices: "daily allowance of invoices paid without a person used up", over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the reading carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the recorded one", buyer_mismatch: "the invoice is not addressed to the company's tax id", withholding_mismatch: "the withholding shown differs from what the accountant set" }; parts.push(`${(p.reason || "over_threshold").split("+").map((r) => HOLD[r] ?? r).join(", ")}: ${p.dao_proposal_id === null ? "waiting for a person" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`}`); }
   if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
   if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
   if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
