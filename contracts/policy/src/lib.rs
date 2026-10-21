@@ -62,6 +62,10 @@ const VAULT_KEY: &[u8] = b"vault";
 /// USDC this contract has sent and whose transfer callback has not run yet. Raw storage, outside the state struct
 /// (see `set_vault`), so contracts deployed before `sync_balance` existed keep working after an upgrade.
 const IN_FLIGHT_KEY: &[u8] = b"inflight";
+/// Refused requests the agent made today (day key, count), raw storage: a stolen agent key must not be able to fill
+/// the contract's storage with blocked claims and drain the NEAR that pays for it.
+const BLOCKED_TODAY_KEY: &[u8] = b"blocked_today";
+const BLOCKED_PER_DAY: u32 = 200;
 const GAS_FT_VIEW: Gas = Gas::from_tgas(5);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_DAO_PROPOSAL: Gas = Gas::from_tgas(30);
@@ -549,6 +553,13 @@ impl Bursar {
         self.emit("roles_set", "");
     }
 
+    /// Back to the owner and the approvers deciding held payments; proposals already open stay with the DAO's answer.
+    pub fn clear_dao(&mut self) {
+        self.assert_owner();
+        self.dao = None;
+        self.emit("dao_cleared", "");
+    }
+
     pub fn set_paused(&mut self, paused: bool) {
         self.assert_owner();
         self.paused = paused;
@@ -594,6 +605,7 @@ impl Bursar {
             caller == self.agent || caller == self.owner || self.operators.contains_key(&caller),
             "only the agent, the owner or an operator"
         );
+        Self::check_claim_size(&claim);
         self.roll_day();
         let id = self.next_id;
         self.next_id += 1;
@@ -621,6 +633,9 @@ impl Bursar {
 
         match self.decide(&claim) {
             Err(reason) => {
+                if caller == self.agent {
+                    self.count_refusal();
+                }
                 p.reason = Some(reason.clone());
                 self.payments.insert(id, p);
                 self.emit("payment_blocked", &format!("{id}:{reason}"));
@@ -664,6 +679,10 @@ impl Bursar {
         }
         let p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Approval, "not waiting for approval");
+        // the world may have moved since the hold: a pause or a switched-off vendor refuses the approval too
+        require!(!self.paused, "paused");
+        let v = self.vendors.get(&p.vendor_id).unwrap_or_else(|| crate::fail("unknown vendor"));
+        require!(v.active, "vendor deactivated by the owner since the hold");
         self.emit("payment_approved", &id.to_string());
         self.execute(p);
     }
@@ -806,6 +825,7 @@ impl Bursar {
     /// minus the transfers this contract sent whose callback has not run yet.
     pub fn sync_balance(&mut self) -> Promise {
         self.assert_can(|_| true, "sync the balance");
+        require!(self.in_flight() == 0, "a transfer is in flight: ask again in a few seconds");
         ext_ft::ext(self.usdc.clone())
             .with_static_gas(GAS_FT_VIEW)
             .ft_balance_of(env::current_account_id())
@@ -816,6 +836,7 @@ impl Bursar {
     pub fn on_sync_balance(&mut self, #[callback_result] held: Result<U128, PromiseError>) -> U128 {
         let held = held.unwrap_or_else(|_| crate::fail("the token did not answer")).0;
         let in_flight = self.in_flight();
+        require!(in_flight == 0, "a transfer started meanwhile: ask again in a few seconds");
         let new = held.saturating_sub(in_flight);
         let old = self.balance;
         self.balance = new;
@@ -1161,6 +1182,40 @@ impl Bursar {
             Some(role) if allowed(role) => {}
             _ => crate::fail(&format!("only the owner or an operator allowed to {what}")),
         }
+    }
+
+    /// Every string in a claim has a sensible size: the contract stores the claim and pays its storage.
+    fn check_claim_size(c: &InvoiceClaim) {
+        let ok = c.vendor_id.len() <= 64
+            && c.invoice_number.len() <= 128
+            && c.due_date.len() <= 32
+            && c.invoice_hash.len() <= 128
+            && c.attestation_ref.len() <= 512
+            && c.flags.len() <= 16
+            && c.flags.iter().all(|f| f.len() <= 64)
+            && c.vendor_tax_id.len() <= 64
+            && c.buyer_tax_id.len() <= 64
+            && c.order_ref.as_ref().map_or(true, |r| r.len() <= 128)
+            && match &c.payout_seen {
+                Payout::Near { .. } => true,
+                Payout::Chain { chain, address } => chain.len() <= 32 && address.len() <= 256,
+            };
+        require!(ok, "claim field too long");
+    }
+
+    /// The agent's refused requests are recorded up to a daily quota; past it the request fails and nothing is stored.
+    fn count_refusal(&self) {
+        let day = Self::day_key();
+        let (d, n) = env::storage_read(BLOCKED_TODAY_KEY)
+            .and_then(|b| b.try_into().ok())
+            .map(|b: [u8; 12]| (u64::from_le_bytes(b[..8].try_into().unwrap()), u32::from_le_bytes(b[8..].try_into().unwrap())))
+            .unwrap_or((0, 0));
+        let n = if d == day { n } else { 0 };
+        require!(n < BLOCKED_PER_DAY, "daily quota of refused requests reached: the agent is sending bad claims, the owner should look at its key");
+        let mut b = [0u8; 12];
+        b[..8].copy_from_slice(&day.to_le_bytes());
+        b[8..].copy_from_slice(&(n + 1).to_le_bytes());
+        env::storage_write(BLOCKED_TODAY_KEY, &b);
     }
 
     fn in_flight(&self) -> u128 {
@@ -1694,6 +1749,92 @@ mod tests {
         assert!(r.is_err());
     }
 
+
+    // ----- audit reproductions (21 October) -----
+
+    #[test]
+    fn audit_approval_after_vendor_deactivated_must_not_pay() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_roles(None, None, None, None);
+        let mut c2 = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
+        c2.add_vendor("hosting".into(), "Acme".into(), Payout::Near { account: accounts(5) }, U128(0), None, None, None);
+        testing_env!(ctx(accounts(4)).build());
+        let _ = c2.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
+        testing_env!(ctx(accounts(1)).build());
+        let id = c2.request_payment(claim("hosting", "0923", 3_000_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c2.get_payment(id).unwrap().status, Status::Approval);
+        testing_env!(ctx(accounts(0)).build());
+        c2.update_vendor("hosting".into(), None, None, Some(false), None, None, None);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c2.approve_payment(id)));
+        assert!(r.is_err(), "approving a hold for a vendor the owner switched off must be refused");
+        assert_eq!(c2.get_payment(id).unwrap().status, Status::Approval);
+        let _ = c;
+    }
+
+    #[test]
+    fn audit_approval_while_paused_must_not_pay() {
+        let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
+        testing_env!(ctx(accounts(0)).build());
+        c.add_vendor("hosting".into(), "Acme".into(), Payout::Near { account: accounts(5) }, U128(0), None, None, None);
+        testing_env!(ctx(accounts(4)).build());
+        let _ = c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "0923", 3_000_000_000, Payout::Near { account: accounts(5) }));
+        testing_env!(ctx(accounts(0)).build());
+        c.set_paused(true);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err(), "nothing is paid while the treasury is paused");
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+    }
+
+    #[test]
+    fn audit_owner_can_remove_the_dao() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        assert_eq!(c.get_roles().3, Some(accounts(3)));
+        c.set_roles(None, None, None, None);
+        assert_eq!(c.get_roles().3, Some(accounts(3)), "None leaves the dao alone");
+        c.clear_dao();
+        assert_eq!(c.get_roles().3, None, "the owner can go back to approving payments itself");
+    }
+
+    #[test]
+    fn audit_sync_balance_refuses_while_a_transfer_is_in_flight() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(1)).build());
+        let _ = c.request_payment(claim("hosting", "0923", 480_000_000, Payout::Near { account: accounts(5) }));
+        // the transfer left the books; its callback has not run; the token may or may not have executed it yet
+        testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.sync_balance()));
+        assert!(r.is_err(), "a sync now could read the token either before or after the transfer: refuse");
+        // and the callback refuses too, in case the transfer started after the call
+        testing_env!(as_self().build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.on_sync_balance(Ok(U128(50_000_000_000)))));
+        assert!(r.is_err());
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 480_000_000);
+    }
+
+    #[test]
+    fn audit_agent_cannot_fill_the_storage_with_blocked_claims() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(1)).build());
+        let before = env::storage_usage();
+        let big = "x".repeat(50_000);
+        let mut cl = claim("nobody", &big, 1, Payout::Near { account: accounts(5) });
+        cl.invoice_hash = big.clone(); cl.attestation_ref = big.clone(); cl.flags = vec![big.clone(); 10];
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(cl)));
+        assert!(r.is_err(), "oversized claim strings are refused before anything is stored");
+        assert_eq!(env::storage_usage(), before);
+        // and a flood of refusals stops being recorded after a daily quota, so a stolen agent key cannot drain the NEAR
+        let mut blocked = 0;
+        for i in 0..400 {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("nobody", &format!("n{i}"), 1, Payout::Near { account: accounts(5) }))));
+            if r.is_ok() { blocked += 1; }
+        }
+        assert!(blocked <= 200, "at most a daily quota of refusals is written to storage, got {blocked}");
+    }
+
     #[test]
     fn sync_balance_counts_plain_transfers_and_not_money_in_flight() {
         let mut c = setup();
@@ -1702,12 +1843,9 @@ mod tests {
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("hosting", "0923", 480_000_000, Payout::Near { account: accounts(5) }));
         assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 480_000_000);
-        // the token still holds everything (the transfer has not executed) plus 1000 USDC someone sent with a plain ft_transfer
+        // while the transfer is in flight a sync is refused (see audit_sync_balance_refuses_while_a_transfer_is_in_flight);
+        // the transfer lands: nothing in flight any more, a sync now reads the token as it is, plus 1000 USDC someone sent with a plain ft_transfer
         testing_env!(as_self().build());
-        let synced = c.on_sync_balance(Ok(U128(50_000_000_000 + 1_000_000_000)));
-        assert_eq!(synced.0, 50_000_000_000 + 1_000_000_000 - 480_000_000, "in-flight USDC is not counted twice");
-        assert_eq!(c.get_stats().balance.0, synced.0);
-        // the transfer lands: nothing in flight any more, a sync now reads the token as it is
         assert!(c.on_ft_transfer(Some(id), U128(480_000_000), Ok(())));
         let synced = c.on_sync_balance(Ok(U128(50_000_000_000 + 1_000_000_000 - 480_000_000)));
         assert_eq!(synced.0, 50_000_000_000 + 1_000_000_000 - 480_000_000);

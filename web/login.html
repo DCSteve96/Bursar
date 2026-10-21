@@ -108,6 +108,13 @@ async function view(network, contract, method, args = {}) {
   const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.data ?? j.error.message); if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
 }
+// A registry entry can point at any account; only a contract whose code hash is a Bursar build (contracts/builds.json) is listed.
+let KNOWN_BUILDS = null;
+async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
+async function codeHash(network, account) {
+  const r = await fetch(RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "view_account", finality: "final", account_id: account } }) });
+  const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
+}
 const q = new URLSearchParams(location.search);
 let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
 // NEAR Connect: one picker for every NEAR wallet (Meteor, HOT, Intear, Nightly, Near Mobile, OKX, WalletConnect). Each wallet's
@@ -180,10 +187,11 @@ async function afterIdentify(account) {
   try {
     if (!REGISTRY[network]) throw new Error(`no registry on ${network} yet`);
     const hints = await view(network, REGISTRY[network], "of", { owner: account });
-    const mine = [];
+    const mine = []; const builds = await knownBuilds(); let strangers = 0;
     await Promise.all(hints.map(async (t) => {
       try {
-        const roles = await view(network, t, "get_roles");
+        const [hash, roles] = await Promise.all([codeHash(network, t), view(network, t, "get_roles")]);
+        if (!builds[hash]) { strangers++; console.warn(`${t} is registered under this account but its code is not a Bursar build: ignored`); return; }
         if (roles[0] !== account) return;
         let company = null; try { company = await view(network, t, "get_company"); } catch {}
         mine.push({ treasury: t, label: company?.name || t });
