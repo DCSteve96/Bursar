@@ -120,6 +120,9 @@
   .companies .r { font-size: 13px; color: var(--mute-light); margin-left: auto; }
   details.adv > summary { cursor: pointer; font: 600 12px/1.17 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); list-style: none; }
   details.adv > summary::before { content: "+ "; } details.adv[open] > summary::before { content: "- "; }
+  .cty { display: flex; align-items: center; gap: 10px; } .cty select { flex: 1; min-width: 0; }
+  .flag { width: 24px; height: 18px; border-radius: 2px; object-fit: cover; flex: none; box-shadow: 0 0 0 1px var(--line-light); vertical-align: middle; }
+  td .flag { width: 20px; height: 15px; margin-right: 6px; }
   .who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--mint); border-radius: 4px; color: var(--fg-light); }
   .who .av { width: 36px; height: 36px; border-radius: 4px; background: var(--void); color: var(--signal); display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
   .who .n { font-weight: 600; font-size: 14px; word-break: break-all; }
@@ -335,7 +338,7 @@
         <label><span>Vendor id (slug) <i class="help" tabindex="0" data-help="A short handle in lowercase letters and digits, for example acmehosting. The AI reads the vendor name on the invoice and the contract matches it to this id. It cannot be changed later.">?</i></span><input id="vId" placeholder="acmehosting" autocomplete="off"></label>
         <label><span>Name <i class="help" tabindex="0" data-help="The vendor's name as printed on its invoices.">?</i></span><input id="vName" placeholder="Acme Hosting" autocomplete="off"></label>
         <label><span>Identifier printed on invoices <i class="help" tabindex="0" data-help="Optional. The VAT number, EIN, CNPJ, GSTIN, ABN or any tax id this vendor prints on its invoices. A private person or freelancer without one: give them a supplier code (for example SUP-0042) and ask them to print it. When set, an invoice that shows a different identifier waits for a person: the name can be imitated, the id cannot. Spaces and punctuation do not matter.">?</i></span><input id="vTax" placeholder="PT509876543 or SUP-0042" autocomplete="off"></label>
-        <label><span>Country <i class="help" tabindex="0" data-help="Where the vendor is based, two-letter code. Shown next to the vendor so whoever keeps the books knows which rules apply. Informational.">?</i></span><input id="vCountry" placeholder="IT" maxlength="2" autocomplete="off"></label>
+        <label><span>Country <i class="help" tabindex="0" data-help="Where the vendor is based. Shown next to the vendor so whoever keeps the books knows which rules apply. Informational.">?</i></span><span class="cty"><img class="flag" id="vFlag" alt="" hidden><select id="vCountry"></select></span></label>
         <label><span>Withholding tax, % <i class="help" tabindex="0" data-help="Set by your accountant, not by Bursar. The share of each invoice total the treasury keeps back for the state (ritenuta d'acconto in Italy, TDS in India, retencion in Spain or Latin America). The vendor gets the rest; the kept share shows in Analytics as due until you remit it. 0 for companies and most foreign vendors. An invoice that shows a different withholding waits for a person.">?</i></span><input id="vWithhold" placeholder="0" inputmode="decimal" autocomplete="off"></label>
         <label><span>Monthly budget, USDC (0 = none) <i class="help" tabindex="0" data-help="The most this vendor is paid in one calendar month. Invoices past it are refused. 0 means no monthly limit.">?</i></span><input id="vBudget" placeholder="3000" autocomplete="off"></label>
         <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
@@ -476,7 +479,7 @@
           <label><span>Name</span><input id="cName" placeholder="Northwind Studio Srl" autocomplete="off"></label>
           <label><span>Description</span><input id="cDesc" placeholder="Design studio, Milano" autocomplete="off"></label>
           <div class="grid cols-2">
-            <label><span>Country <i class="help" tabindex="0" data-help="Where the company is based, as a two-letter code. Informational.">?</i></span><input id="cCountry" placeholder="IT" maxlength="2" autocomplete="off"></label>
+            <label><span>Country <i class="help" tabindex="0" data-help="Where the company is based. Informational.">?</i></span><span class="cty"><img class="flag" id="cFlag" alt="" hidden><select id="cCountry"></select></span></label>
             <label><span>Your tax id <i class="help" tabindex="0" data-help="Optional. Your VAT number, EIN, CNPJ or equivalent. When set, every invoice must be addressed to it: one addressed to another company waits for a person instead of being paid. Vendors print it next to your name under Bill to.">?</i></span><input id="cTax" placeholder="IT01234567890" autocomplete="off"></label>
           </div>
         </div>
@@ -1189,9 +1192,19 @@ $("#attnSync").addEventListener("click", async () => {
   } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; } finally { b.disabled = false; }
 });
 function renderVendors() {
-  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td class="mono">${v.country ? esc(v.country) : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
+  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td>${v.country ? `${flagImg(v.country)}${esc(countryName(v.country))}` : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
   const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
+}
+// Countries for the vendor and company fields: ISO code and name; the flag is an image, fetched by code.
+const COUNTRIES = [["AR","Argentina"],["AU","Australia"],["AT","Austria"],["BE","Belgium"],["BR","Brazil"],["BG","Bulgaria"],["CA","Canada"],["CL","Chile"],["CN","China"],["CO","Colombia"],["HR","Croatia"],["CY","Cyprus"],["CZ","Czechia"],["DK","Denmark"],["EE","Estonia"],["FI","Finland"],["FR","France"],["DE","Germany"],["GR","Greece"],["HK","Hong Kong"],["HU","Hungary"],["IN","India"],["ID","Indonesia"],["IE","Ireland"],["IL","Israel"],["IT","Italy"],["JP","Japan"],["KE","Kenya"],["LV","Latvia"],["LT","Lithuania"],["LU","Luxembourg"],["MY","Malaysia"],["MT","Malta"],["MX","Mexico"],["NL","Netherlands"],["NZ","New Zealand"],["NG","Nigeria"],["NO","Norway"],["PE","Peru"],["PH","Philippines"],["PL","Poland"],["PT","Portugal"],["RO","Romania"],["SA","Saudi Arabia"],["SG","Singapore"],["SK","Slovakia"],["SI","Slovenia"],["ZA","South Africa"],["KR","South Korea"],["ES","Spain"],["SE","Sweden"],["CH","Switzerland"],["TW","Taiwan"],["TH","Thailand"],["TR","Turkey"],["UA","Ukraine"],["AE","United Arab Emirates"],["GB","United Kingdom"],["US","United States"],["UY","Uruguay"],["VN","Vietnam"]];
+const countryName = (code) => COUNTRIES.find(([c]) => c === code)?.[1] || code;
+const flagImg = (code) => /^[A-Z]{2}$/.test(code) ? `<img class="flag" src="https://flagcdn.com/w40/${code.toLowerCase()}.png" alt="${esc(code)}">` : "";
+for (const [sel, flag] of [["#vCountry", "#vFlag"], ["#cCountry", "#cFlag"]]) {
+  const el = $(sel), img = $(flag);
+  el.innerHTML = `<option value="">Not set</option>` + COUNTRIES.map(([c, n]) => `<option value="${c}">${esc(n)}</option>`).join("");
+  const show = () => { const c = el.value; img.hidden = !c; if (c) img.src = `https://flagcdn.com/w40/${c.toLowerCase()}.png`; };
+  el.addEventListener("change", show); el._showFlag = show;
 }
 $("#vAdd").addEventListener("click", async () => {
   $("#vErr").hidden = true;
@@ -1202,6 +1215,7 @@ $("#vAdd").addEventListener("click", async () => {
     const payout = chain === "near" ? { Near: { account: addr.toLowerCase() } } : { Chain: { chain, address: addr } };
     await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0"), tax_id: $("#vTax").value.trim() || null, country: $("#vCountry").value.trim().toUpperCase() || null, withholding_bps: Math.round(Number($("#vWithhold").value.replace(",", ".") || "0") * 100) }, gasTgas: 30 });
     for (const f of ["vId", "vName", "vBudget", "vPayout", "vTax", "vCountry", "vWithhold"]) $("#" + f).value = "";
+    $("#vCountry")._showFlag?.();
     await loadTreasury();
   } catch (e) { $("#vErr").textContent = e.message; $("#vErr").hidden = false; }
 });
@@ -1246,7 +1260,7 @@ function renderAnalytics() {
 }
 function renderSettings() {
   const { limits, roles, company, operators } = state;
-  $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || ""; $("#cCountry").value = company?.country || ""; $("#cTax").value = company?.tax_id || "";
+  $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || ""; $("#cCountry").value = company?.country || ""; $("#cCountry")._showFlag?.(); $("#cTax").value = company?.tax_id || "";
   $("#lCap").value = Number(BigInt(limits.per_payment_cap) / 1000000n); $("#lDay").value = Number(BigInt(limits.daily_cap) / 1000000n); $("#lThr").value = Number(BigInt(limits.approval_threshold) / 1000000n); $("#lStrict").value = String(!!limits.require_orders);
   $("#rolesLine").textContent = `owner ${roles[0]}, agent ${roles[1]}, executor ${roles[2]}, DAO ${roles[3] ?? "none"}, token ${roles[4]}`;
   const help = (t) => `<i class="help" tabindex="0" data-help="${esc(t)}">?</i>`;
