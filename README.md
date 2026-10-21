@@ -215,7 +215,7 @@ invoices/             make_invoices.py and six fictional sample invoices
 ## Honest limits
 
 - Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through us. Paying vendors in a stablecoin is regulated differently from country to country (unrestricted, to be reported, or not allowed for businesses): checking that is the company's responsibility, not something Bursar can do.
-- Structured e-invoices (SDI and FatturaPA in Italy, Peppol, Factur-X, Verifactu, KSeF) are not parsed yet: where they exist, the reading step can become a deterministic parser and the contract decides the same way. The demo reads PDFs.
+- Structured e-invoices (SDI and FatturaPA in Italy, Peppol in Europe, Singapore and Australia, Factur-X, Verifactu, KSeF, CFDI in Mexico, NF-e in Brazil, India's GST e-invoice, Saudi Fatoora) are not parsed yet; the United States has no mandate and runs on PDFs: where they exist, the reading step can become a deterministic parser and the contract decides the same way. The demo reads PDFs.
 - The offline parser (`--offline`) only understands the sample invoices. Real invoices need NEAR AI Cloud.
 - Intents cross-chain payouts are mainnet only; the testnet demo stops at `Queued` for the Base vendor.
 - `bursar verify` checks the signature, the nonce, the quote's `report_data` binding and the quote against Intel collateral. It does not yet replay the RTMR3 event log against the quote (which images and compose file ran in the enclave) and does not check GPU evidence; the receipt keeps both, so it can be added without re-running anything.
