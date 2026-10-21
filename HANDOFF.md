@@ -106,7 +106,7 @@ Stefano ha chiesto un'estetica "intuitiva ed esplosiva" studiando NEAR. Riferime
 - Tema unico scuro con bande chiare, scelto apposta: niente toggle light/dark. Animazioni ridotte con `prefers-reduced-motion` (particelle ferme, niente timbro animato).
 - Retry nel browser: il gateway NEAR AI risponde 502 a tratti sulle richieste con immagine (nel pomeriggio del 20 ottobre circa una su due, anche dalla CLI che ritenta 3 volte), e una risposta d'errore arriva senza header CORS, quindi il browser la vede come "Failed to fetch". `app.html` ritenta attestazione (3), completion (6, backoff 2-12 s) e firma (3). Se la serie di 502 dura più dei tentativi, la pagina mostra l'errore e si riprova.
 - Screenshot desktop e telefono di landing e dashboard: nessun overflow orizzontale, nessun errore in console.
-- La repo pubblica `DCSteve96/treasury-console` (GitHub Pages da `main`, root) contiene una copia di `web/`: `https://dcsteve96.github.io/treasury-console/`. Va riallineata a mano quando `web/` cambia (copia di `web/` e push). Da cancellare dopo i test o quando Bursar diventa pubblica.
+- La repo pubblica `DCSteve96/treasury-console` (GitHub Pages da `main`, root) contiene una copia di `web/`: `https://bursar.network/` (dominio su Cloudflare DNS, nameserver becky/johnny, registrato su Namecheap con Private Email; il vecchio `https://dcsteve96.github.io/treasury-console/` rimanda lì). Va riallineata a mano quando `web/` cambia (copia di `web/` e push). Da cancellare dopo i test o quando Bursar diventa pubblica.
 
 ### 2.8 Logo e console senza chiavi (20 ottobre, stessa sessione)
 
