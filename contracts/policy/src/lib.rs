@@ -426,7 +426,7 @@ impl Bursar {
     /// Changing a payout is an owner action, never something an invoice can do.
     pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>, tax_id: Option<String>, country: Option<String>, withholding_bps: Option<u32>) {
         self.assert_can(|r| r.manage_vendors, "manage vendors");
-        let mut v = self.vendors.get(&vendor_id).cloned().expect("unknown vendor");
+        let mut v = self.vendors.get(&vendor_id).cloned().unwrap_or_else(|| crate::fail("unknown vendor"));
         if let Some(c) = country {
             v.country = if c.trim().is_empty() { None } else { Some(c.trim().to_ascii_uppercase()) };
         }
@@ -521,7 +521,7 @@ impl Bursar {
 
     pub fn close_order(&mut self, id: u64) {
         self.assert_can(|r| r.manage_orders, "manage orders");
-        let mut o = self.orders.get(&id).cloned().expect("unknown order");
+        let mut o = self.orders.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown order"));
         o.active = false;
         self.orders.insert(id, o);
         self.emit("order_closed", &id.to_string());
@@ -569,7 +569,7 @@ impl Bursar {
 
     pub fn cancel_payment(&mut self, id: u64) {
         self.assert_can(|r| r.approve, "approve");
-        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(matches!(p.status, Status::Queued | Status::Approval), "cannot cancel in this state");
         self.release_reservation(&p);
         p.status = Status::Cancelled;
@@ -657,7 +657,7 @@ impl Bursar {
             Some(dao) => require!(env::predecessor_account_id() == *dao, "only the dao"),
             None => self.assert_can(|r| r.approve, "approve"),
         }
-        let p = self.payments.get(&id).cloned().expect("unknown payment");
+        let p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Approval, "not waiting for approval");
         self.emit("payment_approved", &id.to_string());
         self.execute(p);
@@ -668,7 +668,7 @@ impl Bursar {
     /// its budget reservation released, so the owner can fix the DAO and the agent can resubmit.
     #[private]
     pub fn on_dao_proposal(&mut self, id: u64, #[callback_result] result: Result<u64, PromiseError>) {
-        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         if p.status != Status::Approval {
             return;
         }
@@ -694,10 +694,10 @@ impl Bursar {
     /// to read the proposal status from the DAO; if the DAO said no, the payment is cancelled and its
     /// reservation released. Only the DAO's own answer can trigger that, never the caller.
     pub fn sync_dao_proposal(&mut self, id: u64) -> Promise {
-        let dao = self.dao.clone().expect("no dao");
-        let p = self.payments.get(&id).expect("unknown payment");
+        let dao = self.dao.clone().unwrap_or_else(|| crate::fail("no dao"));
+        let p = self.payments.get(&id).unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Approval, "not waiting for approval");
-        let proposal_id = p.dao_proposal_id.expect("proposal id not recorded yet");
+        let proposal_id = p.dao_proposal_id.unwrap_or_else(|| crate::fail("proposal id not recorded yet"));
         ext_dao::ext(dao)
             .with_static_gas(GAS_DAO_VIEW)
             .get_proposal(proposal_id)
@@ -706,8 +706,8 @@ impl Bursar {
 
     #[private]
     pub fn on_dao_status(&mut self, id: u64, #[callback_result] result: Result<ProposalStatusView, PromiseError>) -> String {
-        let view = result.expect("dao did not answer");
-        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        let view = result.unwrap_or_else(|_| crate::fail("dao did not answer"));
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         if p.status != Status::Approval {
             return view.status;
         }
@@ -762,9 +762,9 @@ impl Bursar {
     /// Funds move only if that recipient is exactly the vendor's recorded payout.
     pub fn settle(&mut self, id: u64, quote_id: String, deposit_address: AccountId, recipient: Payout) -> Promise {
         require!(env::predecessor_account_id() == self.executor, "only the executor");
-        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Queued, "not queued");
-        let v = self.vendors.get(&p.vendor_id).expect("unknown vendor");
+        let v = self.vendors.get(&p.vendor_id).unwrap_or_else(|| crate::fail("unknown vendor"));
         require!(v.payout.same_as(&recipient), "recipient does not match vendor payout");
         require!(matches!(v.payout, Payout::Chain { .. }), "near vendors are paid directly");
         let net = p.amount - p.withheld;
@@ -783,7 +783,7 @@ impl Bursar {
 
     pub fn mark_settled(&mut self, id: u64, dest_tx: String) {
         require!(env::predecessor_account_id() == self.executor, "only the executor");
-        let mut p = self.payments.get(&id).cloned().expect("unknown payment");
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Settling, "not settling");
         p.status = Status::Settled;
         p.dest_tx = Some(dest_tx);
@@ -961,7 +961,7 @@ impl Bursar {
     }
 
     fn execute(&mut self, mut p: Payment) {
-        let v = self.vendors.get(&p.vendor_id).cloned().expect("unknown vendor");
+        let v = self.vendors.get(&p.vendor_id).cloned().unwrap_or_else(|| crate::fail("unknown vendor"));
         p.updated_at = env::block_timestamp();
         match v.payout {
             Payout::Near { account } => {
@@ -1130,7 +1130,7 @@ impl Bursar {
         }
         match self.operators.get(&caller) {
             Some(role) if allowed(role) => {}
-            _ => env::panic_str(&format!("only the owner or an operator allowed to {what}")),
+            _ => crate::fail(&format!("only the owner or an operator allowed to {what}")),
         }
     }
 
