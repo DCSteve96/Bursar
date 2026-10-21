@@ -15,7 +15,7 @@ const json = (status, body, extra = {}) => new Response(JSON.stringify(body), { 
 
 function cors(env, origin) {
   const allowed = (env.ALLOWED_ORIGINS || "*").split(",").map((s) => s.trim());
-  const ok = allowed.includes("*") || (origin && allowed.includes(origin));
+  const ok = allowed.includes("*") || (origin && allowed.some((a) => a === origin || (a.startsWith("*.") && origin.endsWith(a.slice(1)) && origin.startsWith("https://"))));
   return {
     "access-control-allow-origin": ok ? (origin || "*") : "null",
     "access-control-allow-methods": "GET, POST, OPTIONS",

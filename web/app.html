@@ -146,7 +146,7 @@
 <body>
 <div class="shell">
 <aside class="side">
-  <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24"><span>Bursar</span></a>
+  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24"><span>Bursar</span></a>
   <div class="company">
     <div class="eyebrow muted">Company</div>
     <button type="button" class="sw" id="switcher" aria-haspopup="listbox" aria-expanded="false"><span class="t"><span class="n" id="swName">No company</span><span class="m" id="swId">sign in or create one</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
@@ -166,7 +166,7 @@
   <div class="me">
     <div class="avatar" id="meAvatar">?</div>
     <div class="min"><div class="name" id="meName">Not signed in</div><div class="muted mono" id="meRole">read-only</div></div>
-    <a href="login.html" class="out" title="Switch account">⇄</a>
+    <a href="login" class="out" title="Switch account">⇄</a>
   </div>
 </aside>
 <main class="work">
@@ -265,7 +265,7 @@
         <button type="button" class="btn-ghost sample" data-file="04-acme-hosting-0924-fraud">Acme with a new wallet</button>
         <button type="button" class="btn-ghost sample" data-file="06-acme-hosting-1002">Acme, an invoice nobody ordered</button>
       </div>
-      <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">The PDFs are in <a href="samples/">samples/</a>. A recorded reading already decided on the README treasury can be sent to yours; sent twice to the same treasury it returns <span class="mono">Blocked duplicate_invoice</span>: the contract remembers.</p>
+      <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">The PDFs are in <a href="https://github.com/DCSteve96/treasury-console/tree/main/samples" target="_blank" rel="noopener">samples/</a>. A recorded reading already decided on the README treasury can be sent to yours; sent twice to the same treasury it returns <span class="mono">Blocked duplicate_invoice</span>: the contract remembers.</p>
     </div>
     <div id="readErr" class="err" hidden></div>
     <div class="two" id="readOut" hidden style="margin-top:32px">
@@ -427,7 +427,7 @@
       <div class="actions" style="margin-top:16px;align-items:center">
         <a class="btn btn-signal" href="#start">Create another treasury</a>
         <button id="addExisting" type="button" class="btn-ghost">Add an existing treasury</button>
-        <a class="btn btn-ghost" href="login.html">Sign in as someone else</a>
+        <a class="btn btn-ghost" href="login">Sign in as someone else</a>
       </div>
     </div>
 
@@ -1165,7 +1165,7 @@ function renderOverview() {
   $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (BigInt(stats.withheld_due || "0") > 0n ? stat("withheld for the state", usdc(stats.withheld_due), "warn") : "") + (stats.paused ? stat("paused", "yes", "bad") : "");
   $("#ovAttention").innerHTML = held().slice(-5).reverse().map((p) => `<li><span class="st wait">#${p.id}</span><span><b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}: ${esc(holdText(p.reason))}</span></li>`).join("") || `<li><span class="st ok">OK</span><span>nothing waits for you</span></li>`;
   $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${p.id}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
-  $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard.html?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
+  $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
   const n = held().length; $("#attnBadge").textContent = n; $("#attnBadge").hidden = n === 0;
 }
 function renderAttention() {

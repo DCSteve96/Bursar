@@ -50,8 +50,8 @@
 </head>
 <body>
 <div class="top">
-  <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <a class="plain" href="index.html">Back to the site</a>
+  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
+  <a class="plain" href="./">Back to the site</a>
 </div>
 <div class="center"><div class="box">
   <img class="mark" src="brand/mark.svg" alt="">
@@ -72,7 +72,7 @@
     <div class="way">
       <h2>Open an invite link</h2>
       <p>A colleague invited you to approve invoices or manage vendors. Open the link, or paste it here. It signs you in with exactly the role they chose.</p>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="iLink" placeholder="https://.../app.html#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="iLink" placeholder="https://bursar.network/app#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
       <div id="iErr" class="err" hidden></div>
     </div>
   </div>
@@ -86,7 +86,7 @@
     <p class="way" style="margin:0"><a href="#" id="another" style="font-size:13px">Use another account</a></p>
   </div>
 
-  <p class="fine">Just looking? <a href="app.html#settings" id="demoLink">Open the README demo, read-only</a>.<br>Have a keys file from an earlier treasury? <label for="kFile">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">. No wallet at all? <a href="app.html#start">Try it with throwaway keys</a>.</p>
+  <p class="fine">Just looking? <a href="app#settings" id="demoLink">Open the README demo, read-only</a>.<br>Have a keys file from an earlier treasury? <label for="kFile">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">. No wallet at all? <a href="app#start">Try it with throwaway keys</a>.</p>
   <div id="kErr" class="err" hidden style="text-align:center"></div>
 </div></div>
 
@@ -138,7 +138,7 @@ $("#wGo").addEventListener("click", async () => {
   }
   finally { $("#wGo").disabled = false; }
 });
-$("#another").addEventListener("click", async (e) => { e.preventDefault(); try { await connect().disconnect(); } catch {} location.href = `login.html?network=${network}`; });
+$("#another").addEventListener("click", async (e) => { e.preventDefault(); try { await connect().disconnect(); } catch {} location.href = `login?network=${network}`; });
 
 /** Step 2: the wallet adds a key limited to one treasury to this browser. The key is generated here and never leaves it. */
 async function openTreasury(treasury, label, owner) {
@@ -155,7 +155,7 @@ async function openTreasury(treasury, label, owner) {
     for (const [f, v] of Object.entries(profile)) localStorage.setItem("bursar." + f, v);
     const i = profiles.findIndex((p) => p.treasury === treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
-    location.href = "app.html#overview";
+    location.href = "app#overview";
   } catch (e) { $("#bErr").textContent = `the wallet did not add the key: ${e.message || e}`; $("#bErr").hidden = false; $("#keyWait").hidden = true; for (const b of document.querySelectorAll("#list button")) b.disabled = false; }
 }
 
@@ -188,7 +188,7 @@ async function afterIdentify(account) {
       $("#none").hidden = false;
       $("#createGo").addEventListener("click", () => {
         try { localStorage.setItem("bursar.walletOwner", JSON.stringify({ network, account })); } catch {}
-        location.href = "app.html#start";
+        location.href = "app#start";
       });
     }
   } catch (e) { $("#lookup").hidden = true; $("#bErr").textContent = e.message; $("#bErr").hidden = false; }
@@ -196,7 +196,7 @@ async function afterIdentify(account) {
 // A wallet connected earlier in this browser: skip straight to its treasuries.
 connect().getConnectedWallet().then(({ accounts }) => { if (accounts?.length) afterIdentify(accounts[0].accountId); }).catch(() => {});
 
-$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "app.html" + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
+$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "app" + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
 $("#kFile").addEventListener("change", async (e) => {
   $("#kErr").hidden = true;
   try {
@@ -207,7 +207,7 @@ $("#kFile").addEventListener("change", async (e) => {
     let profiles = []; try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
     const i = profiles.findIndex((p) => p.treasury === profile.treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
-    location.href = "app.html#overview";
+    location.href = "app#overview";
   } catch (err) { $("#kErr").textContent = err.message; $("#kErr").hidden = false; }
 });
 </script>

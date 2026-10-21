@@ -29,8 +29,8 @@
 </head>
 <body>
 <header class="bar"><div class="in">
-  <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <nav><a href="explorer.html" aria-current="page">Explorer</a><a href="docs.html">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login.html" class="btn btn-ghost">Log in</a></nav>
+  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
+  <nav><a href="explorer" aria-current="page">Explorer</a><a href="docs">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login" class="btn btn-ghost">Log in</a></nav>
 </div></header>
 
 <section class="band" style="border-top:0">
@@ -131,7 +131,7 @@ async function load() {
     $("#deck").innerHTML = last.map((p) => `<div class="dec"><div class="eyebrow muted">${esc(ago(p.updated_at))}</div><div class="stamp ${esc(p.status)}" style="margin-top:12px">${esc(p.status)}</div><div class="mono" style="margin-top:8px">${usdc(p.amount)}${p.dao_proposal_id !== null && p.dao_proposal_id !== undefined ? ` · dao#${p.dao_proposal_id}` : ""}</div><div class="what">${esc(whatOf(p))}</div><div class="where">${esc(p.treasury)} #${p.id}</div></div>`).join("") || `<div class="dec muted">no decisions yet</div>`;
     $("#companies tbody").innerHTML = companies.sort((a, b) => b.since - a.since).map((c) => {
       const lastP = c.payments[c.payments.length - 1];
-      return `<tr><td class="mono id"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="s ${esc(lastP.status)}">${esc(lastP.status)}</span> <span class="mono">${usdc(lastP.amount)}</span>` : `<span class="muted">none yet</span>`}</td><td><a href="dashboard.html?network=${network}&treasury=${encodeURIComponent(c.treasury)}">dashboard</a></td></tr>`;
+      return `<tr><td class="mono id"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="s ${esc(lastP.status)}">${esc(lastP.status)}</span> <span class="mono">${usdc(lastP.amount)}</span>` : `<span class="muted">none yet</span>`}</td><td><a href="dashboard?network=${network}&treasury=${encodeURIComponent(c.treasury)}">dashboard</a></td></tr>`;
     }).join("") || `<tr><td colspan="6" class="muted">no companies registered yet</td></tr>`;
     $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
   } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; $("#deck").innerHTML = `<div class="dec muted">${esc(e.message)}</div>`; $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }

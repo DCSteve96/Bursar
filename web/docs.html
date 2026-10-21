@@ -40,8 +40,8 @@
 </head>
 <body>
 <header class="bar"><div class="in">
-  <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <nav><a href="explorer.html">Explorer</a><a href="docs.html" aria-current="page">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login.html" class="btn btn-ghost">Log in</a></nav>
+  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
+  <nav><a href="explorer">Explorer</a><a href="docs" aria-current="page">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login" class="btn btn-ghost">Log in</a></nav>
 </div></header>
 
 <div class="docs">
@@ -156,7 +156,7 @@
 <section id="signin">
   <div class="eyebrow">[ 07 ]</div>
   <h2>Signing in</h2>
-  <p>No password, no server. Three doors on the <a href="login.html">sign-in page</a>:</p>
+  <p>No password, no server. Three doors on the <a href="login">sign-in page</a>:</p>
   <ul>
     <li><strong>NEAR wallet.</strong> The wallet tells the console who you are. If your account owns a treasury (the registry lists it, the contract confirms it), you pick it and the wallet adds a key limited to that contract to your browser: it signs vendors, orders, limits and approvals, never a transfer. If your account owns none, the console creates one at this first sign-in: a payer account from the testnet faucet, the policy contract deployed with your wallet as owner, test USDC, three demo vendors and their orders, an agent with one key. Bursar pays for the accounts and the contract storage; you pay nothing.</li>
     <li><strong>Invite link.</strong> A colleague's link signs you in with exactly the role they chose.</li>
@@ -184,7 +184,7 @@
 <section id="explorer">
   <div class="eyebrow">[ 09 ]</div>
   <h2>Explorer and registry</h2>
-  <p>The <a href="explorer.html">explorer</a> shows the whole network: how many companies, the USDC their contracts hold, what was paid out today, this month and all time, how many decisions, blocked, waiting for a person, and the last decisions across every company. Nothing private: amounts and decisions are on-chain events. Vendor names and invoice numbers appear only on each company's own dashboard.</p>
+  <p>The <a href="explorer">explorer</a> shows the whole network: how many companies, the USDC their contracts hold, what was paid out today, this month and all time, how many decisions, blocked, waiting for a person, and the last decisions across every company. Nothing private: amounts and decisions are on-chain events. Vendor names and invoice numbers appear only on each company's own dashboard.</p>
   <p>It reads a small public contract, the <strong>registry</strong>, where every treasury lists itself when it is created (the console does it; <code>bursar setup</code> too). Entries are hints, not proof: the explorer and the sign-in page read <code>get_roles</code> on each treasury and drop entries whose owner does not match.</p>
 </section>
 
