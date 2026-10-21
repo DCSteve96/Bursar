@@ -145,7 +145,22 @@
   details.adv > summary { cursor: pointer; font: 600 12px/1.17 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); list-style: none; }
   details.adv > summary::before { content: "+ "; } details.adv[open] > summary::before { content: "- "; }
   /* country picker: a button with flag and name, a list with a flag on every row, type to filter */
-  .cty { position: relative; } .cty select { display: none; }
+  .cty, .sel { position: relative; display: block; } .cty select { display: none; }
+  /* the native select stays in the tree for forms, tests and screen readers, but it is not what people see */
+  .sel select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; margin: 0; }
+  .sel .pick { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); border-radius: 4px; font: 400 16px/1.4 var(--display); cursor: pointer; }
+  .sel .pick:hover, .sel .pick[aria-expanded="true"] { border-color: var(--signal); } .sel .pick:disabled { opacity: 0.55; cursor: default; }
+  .sel .pick .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .sel .pick .n.muted { color: var(--mute-light); }
+  .sel .pick svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; flex: none; color: var(--mute-light); }
+  .sel .menu { position: absolute; left: 0; right: auto; min-width: 100%; max-width: min(420px, calc(100vw - 32px)); top: calc(100% + 6px); z-index: 25; background: var(--paper); border: 1px solid var(--line-light); border-radius: 4px; padding: 6px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); }
+  .sel .list button > span:first-child { white-space: nowrap; }
+  .sel .list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+  .sel .list button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: transparent; color: var(--fg-light); border-radius: 4px; font: 400 14px/1.3 var(--display); cursor: pointer; }
+  .sel .list button:hover { background: var(--mint); } .sel .list button.on { font-weight: 600; } .sel .list button:disabled { color: var(--mute-light); cursor: default; }
+  .sel .list button .c { margin-left: auto; font: 500 11px var(--mono); color: var(--mute-light); white-space: nowrap; }
+  .sel.small .pick { padding: 6px 10px; font-size: 14px; }
+  .side .sel .pick { background: var(--ink); color: var(--fg-dark); border-color: var(--line-dark); } .side .sel .menu { background: var(--ink); border-color: var(--line-dark); } .side .sel .list button { color: var(--fg-dark); } .side .sel .list button:hover { background: rgba(255, 255, 255, 0.08); }
+  @media (max-width: 900px) { .sel .menu { position: fixed; left: 12px; right: 12px; max-width: none; top: auto; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 7; box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25); } .sel .list { max-height: 40vh; } }
   .cty .pick { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); border-radius: 4px; font: 400 16px/1.4 var(--display); cursor: pointer; }
   .cty .pick:hover, .cty .pick[aria-expanded="true"] { border-color: var(--signal); }
   .cty .pick .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .cty .pick .n.muted { color: var(--mute-light); }
@@ -557,7 +572,7 @@
       <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Telegram inbox <i class="help" tabindex="0" data-help="A Telegram chat connected to this treasury. Every PDF posted in it shows up in Inbox, where a person reads it and the contract decides. Invite the vendor to a group with the bot, or forward their emails' attachments yourself. The bot never pays anything.">?</i></div>
       <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:72ch">Press Connect, open the link on your phone, press Start in the chat. From then on, PDFs sent to that chat land in Inbox and the bot tells the chat how each one was decided. Connect as many chats as you like: one per vendor, or one for the whole company.</p>
       <div class="grid cols-3" style="align-items:end">
-        <label><span>Who is this chat for <i class="help" tabindex="0" data-help="Pick the vendor this chat belongs to: its invoices are expected from there, and an invoice from that chat that names another vendor is held for a person. The whole company: a chat for your own team, any vendor's invoice can arrive.">?</i></span><select id="tgFor"><option value="">The whole company</option></select></label>
+        <label><span>Who is this chat for <i class="help" tabindex="0" data-help="This is a list of your vendors. Pick the one this chat belongs to: its invoices are expected from there, and an invoice from that chat that names another vendor is held for a person. No vendor: a chat of your own team, where any vendor's invoice can arrive.">?</i></span><select id="tgFor"><option value="">No vendor (our own chat, any invoice)</option></select></label>
         <label><span>&nbsp;</span><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button></label>
         <span class="muted" style="font-size:14px;padding-bottom:12px" id="tgStatus"></span>
       </div>
@@ -1336,7 +1351,7 @@ $("#attnSync").addEventListener("click", async () => {
 });
 function renderVendors() {
   $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td>${v.country ? `${flagImg(v.country)}${esc(countryName(v.country))}` : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
-  const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
+  const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}">${esc(v.name)}</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
 }
 // Countries for the vendor and company fields: ISO code and name; the flag is an image, fetched by code.
@@ -1344,6 +1359,27 @@ const COUNTRIES = [["AR","Argentina"],["AU","Australia"],["AT","Austria"],["BE",
 const countryName = (code) => COUNTRIES.find(([c]) => c === code)?.[1] || code;
 const flagPos = (code) => { const i = COUNTRIES.findIndex(([c]) => c === code); return i < 0 ? "" : `style="background-position:0 -${i * 16}px"`; };
 const flagImg = (code) => flagPos(code) ? `<span class="cflag" ${flagPos(code)} role="img" aria-label="${esc(code)}"></span>` : "";
+/** Every list in the console looks the same: a hidden native select drives a button and a menu in the console's style.
+ *  Options may carry data-sub (shown small, on the right, for ids). Changing the select's options or value from code
+ *  is enough: a MutationObserver rebuilds the menu and a change event refreshes the label. */
+function enhanceSelect(el) {
+  if (!el || el.id === "profile" || el.closest(".cty") || el.closest(".sel")) return; // the company switcher has its own menu
+  const wrap = document.createElement("span"); wrap.className = "sel" + (el.classList.contains("small") ? " small" : ""); el.replaceWith(wrap); wrap.appendChild(el);
+  wrap.insertAdjacentHTML("beforeend", `<button type="button" class="pick" aria-haspopup="listbox" aria-expanded="false"><span class="n"></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button><div class="menu" hidden><div class="list" role="listbox"></div></div>`);
+  const pick = wrap.querySelector(".pick"), name = pick.querySelector(".n"), menu = wrap.querySelector(".menu"), list = menu.querySelector(".list");
+  const show = () => { const o = el.options[el.selectedIndex]; name.textContent = o ? o.textContent : ""; name.classList.toggle("muted", !o || o.value === ""); pick.disabled = el.disabled; };
+  const render = () => { list.innerHTML = Array.from(el.options).map((o) => `<button type="button" role="option" data-i="${o.index}" class="${o.selected ? "on" : ""}"${o.disabled ? " disabled" : ""}><span>${esc(o.textContent)}</span>${o.dataset.sub ? `<span class="c">${esc(o.dataset.sub)}</span>` : ""}</button>`).join(""); };
+  const open = () => { render(); menu.hidden = false; pick.setAttribute("aria-expanded", "true"); };
+  const close = () => { menu.hidden = true; pick.setAttribute("aria-expanded", "false"); };
+  pick.addEventListener("click", (e) => { e.stopPropagation(); if (pick.disabled) return; menu.hidden ? open() : close(); });
+  list.addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (!b || b.disabled) return; el.selectedIndex = Number(b.dataset.i); el.dispatchEvent(new Event("change", { bubbles: true })); close(); });
+  pick.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const n = el.selectedIndex + (e.key === "ArrowDown" ? 1 : -1); if (n >= 0 && n < el.options.length) { el.selectedIndex = n; el.dispatchEvent(new Event("change", { bubbles: true })); } } });
+  document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) close(); });
+  el.addEventListener("change", show);
+  new MutationObserver(show).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "selected"] });
+  show();
+}
+const enhanceSelectsIn = (root) => { for (const el of root.querySelectorAll("select")) enhanceSelect(el); };
 /** A country picker over a hidden select: button with flag and name, list with a flag per row, type to filter. */
 function countryPicker(wrapId) {
   const wrap = $(wrapId), el = wrap.querySelector("select");
@@ -1706,13 +1742,14 @@ $("#inboxRefresh").addEventListener("click", loadInbox);
 /** The vendor picker for a new chat: filled from the contract's vendors, keeps the current choice. */
 function fillTgFor() {
   const sel = $("#tgFor"), cur = sel.value;
-  sel.innerHTML = `<option value="">The whole company</option>` + state.vendors.filter(([, v]) => v.active !== false).map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
+  sel.innerHTML = `<option value="">No vendor (our own chat, any invoice)</option>` + state.vendors.filter(([, v]) => v.active !== false).map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}">${esc(v.name)}</option>`).join("");
   sel.value = state.vendors.some(([id]) => id === cur) ? cur : "";
 }
 function renderChats(list) {
   const wrap = $("#tgChatsWrap"); wrap.hidden = !list.length; if (!list.length) return;
   const vmap = Object.fromEntries(state.vendors);
-  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td><select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">The whole company</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select></td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
+  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td><select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">No vendor: our own chat</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select></td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
+  enhanceSelectsIn($("#tgChats"));
 }
 $("#tgChats").addEventListener("change", async (e) => {
   const sel = e.target.closest("select.chatFor"); if (!sel) return;
@@ -2003,6 +2040,7 @@ $("#wFinish").addEventListener("click", () => {
   saveSettings(); wiz.close(); location.hash = "#overview";
 });
 countryPicker("#wCty");
+enhanceSelectsIn(document);
 reflectWalletOwner();
 function reflectOnboarding() {
   let ob = null; try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
