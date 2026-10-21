@@ -1801,6 +1801,9 @@ async function createTreasury() {
     // An attempt that stopped halfway (a slow network, a closed tab) resumes from the missing step: the keys are kept here.
     let ob = null;
     try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
+    // A half-done attempt for another owner (an earlier wallet in this browser) must not be resumed for this one.
+    const wo = walletOwner();
+    if (ob && wo && ob.owner !== wo.account) { ob = null; try { localStorage.removeItem("bursar.onboarding"); } catch {} }
     if (!ob) {
       ob = { root: `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`, rootKey: newKey(), treasuryKey: newKey(), agentKey: newKey(), owner: walletOwner()?.account || "" };
       try { localStorage.setItem("bursar.onboarding", JSON.stringify(ob)); } catch {}
@@ -1892,7 +1895,7 @@ async function createTreasury() {
 }
 $("#create").addEventListener("click", createTreasury);
 reflectWalletOwner();
-try { if (localStorage.getItem("bursar.onboarding")) $("#create").textContent = "Resume creating my treasury"; } catch {}
+try { const ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); const wo = walletOwner(); if (ob && (!wo || ob.owner === wo.account)) $("#create").textContent = `Resume creating my treasury${ob.owner ? ` for ${ob.owner}` : ""}`; } catch {}
 let lastDecision = null;
 $("#approve").addEventListener("click", async () => {
   if (!lastDecision) return;
