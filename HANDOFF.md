@@ -318,3 +318,9 @@ Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI
 - `web/app.html` rinominata `web/console.html`; `app.html` resta come rimando che conserva query e hash (gli inviti vecchi `app#invite=...` continuano a funzionare).
 - Relay: `ALLOWED_ORIGINS` accetta anche voci `*.suffisso` (anteprime Cloudflare Pages); la variabile nel pannello contiene bursar.network, www e github.io.
 - Cloudflare Pages valutato e rimandato: GitHub Pages basta; passaggio possibile in dieci minuti (output directory `web`, branch `main`).
+
+## 2.25 Analytics: grafici, pagamenti per vendor, report Excel (21 ottobre)
+
+- `console.html`, vista Analytics: tre grafici in SVG disegnati a mano (nessuna libreria): spesa per mese negli ultimi 12 (parte chiara = ritenuta trattenuta), spesa per vendor (prime 8), barra delle decisioni. Sotto, "All payments, by vendor": un `details` per vendor con totali (pagamenti, lordo, ritenuta, netto) e la tabella dei suoi pagamenti (id, data UTC, fattura, lordo, trattenuto, netto, stato e motivo, ordine).
+- Report: `reportRows()` costruisce le righe da `state.payments` e `state.vendors`; "Download the Excel report" carica SheetJS 0.18.5 da cdnjs al primo uso e scrive `bursar-<treasury>-<data>.xlsx` con cinque fogli (Summary, Payments, By vendor, By month, Withholding); "CSV of all payments" è il foglio Payments senza librerie. Importi come numeri (USDC a due decimali). Tutto nel browser, niente upload.
+- Test: `scratchpad/antest.cjs` (demo README, screenshot a 1280 e 390, download di CSV e XLSX, nessun errore JS). README passo 9b, docs.html riga Analytics.

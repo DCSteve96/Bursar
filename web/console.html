@@ -67,6 +67,18 @@
   .view .heading { font-size: clamp(24px, 3vw, 34px); }
   .view .card { background: var(--paper); border-color: var(--line-light); }
   .view .stat { background: var(--paper); border-color: var(--line-light); }
+  /* analytics: charts drawn as inline SVG, no library */
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 24px; }
+  .chart { background: var(--paper); border-color: var(--line-light); padding: 20px; } .chart svg { width: 100%; height: auto; display: block; margin-top: 12px; overflow: visible; }
+  .chart .lbl { font: 500 10px var(--mono); fill: var(--mute-light); } .chart .val { font: 600 10px var(--mono); fill: var(--fg-light); } .chart .nm { font: 500 12px var(--display); fill: var(--fg-light); }
+  .chart .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font: 500 12px var(--mono); color: var(--mute-light); } .chart .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .chart .empty { color: var(--mute-light); font-size: 14px; margin-top: 12px; }
+  details.vgroup { border: 1px solid var(--line-light); border-radius: 4px; background: var(--paper); margin-bottom: 12px; }
+  details.vgroup > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 16px minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)); gap: 12px; align-items: center; padding: 14px 18px; } details.vgroup > summary::-webkit-details-marker { display: none; }
+  details.vgroup > summary .k { font: 600 11px/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); display: block; } details.vgroup > summary .n { font-size: 15px; font-variant-numeric: tabular-nums; }
+  details.vgroup > summary::before { content: "+"; font: 600 16px var(--mono); color: var(--mute-light); } details.vgroup[open] > summary::before { content: "-"; }
+  details.vgroup .wrap { border: 0; border-top: 1px solid var(--line-light); border-radius: 0; } details.vgroup td.mono { white-space: nowrap; }
+  @media (max-width: 760px) { details.vgroup > summary { grid-template-columns: 16px 1fr 1fr; gap: 10px; } details.vgroup > summary .hide-sm { display: none; } details.vgroup > summary > span:nth-child(3) { grid-column: 2; } }
   .view .stat .v { font-size: 22px; }
   .view .grid.stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .view .stat.warn .v { color: var(--wait-light); } .view .stat.bad .v { color: var(--blocked-light); }
@@ -400,17 +412,31 @@
 <section class="band light view" id="analytics" hidden>
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ ANALYTICS ]</div><h2 class="heading">Where the money goes, from the chain, nothing else.</h2></div>
+    <div class="actions" style="margin:0 0 24px;align-items:center;flex-wrap:wrap;gap:10px 16px">
+      <button id="xlsBtn" type="button" class="btn-inverse">Download the Excel report</button>
+      <button id="csvBtn" type="button" class="btn-ghost">CSV of all payments</button>
+      <span class="muted" style="font-size:13px;max-width:62ch;display:inline-flex;align-items:center">For the accountant: every payment the contract recorded, by vendor and by month, with the withholding kept for the state. Built in this browser from the chain; nothing leaves it. <i class="help" tabindex="0" data-help="The Excel file has five sheets: Summary, Payments (one row per decision, gross, withholding rate, withheld, net paid, status, reason, invoice hash, enclave completion id), By vendor, By month, Withholding (what was kept back per vendor and month, to remit). Amounts are numbers, so they can be summed. The CSV is the Payments sheet alone.">?</i></span>
+      <span id="xlsErr" class="err" hidden></span>
+    </div>
     <div class="grid stats" id="anStats"></div>
     <div class="card" style="margin-top:24px" id="whCard" hidden>
-      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Withholding tax, to remit <i class="help" tabindex="0" data-help="Amounts the treasury kept back from vendors with a withholding rate set by your accountant. They are still in the treasury, earmarked for the state. Pay them with the usual tax procedure (in Italy the F24 by the 16th of the next month), withdraw the USDC, then press Mark as remitted so the counter goes down.">?</i></div>
+      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Withholding tax, to remit <i class="help" tabindex="0" data-help="Amounts the treasury kept back from vendors with a withholding rate set by your accountant. They are still in the treasury, owed to the state. When the company remits them, the owner presses Mark as remitted so the contract stops counting them as due.">?</i></div>
       <div class="kv" id="whKv"></div>
-      <div class="actions" style="margin-top:12px;align-items:center"><button id="whRemit" type="button" class="btn-inverse">Mark as remitted</button><span class="muted" style="font-size:13px">Owner only. Bursar does not pay the state; you do, and tell the contract.</span></div>
+      <div class="actions" style="margin-top:12px;align-items:center"><button id="whRemit" type="button" class="btn-inverse">Mark as remitted</button><span class="muted" style="font-size:13px">Owner only. Bursar does not pay the state; you do, and tell the contract here.</span></div>
       <div id="whErr" class="err" hidden></div>
+    </div>
+    <div class="charts">
+      <div class="card chart"><div class="eyebrow muted">Spend by month, last 12 <i class="help" tabindex="0" data-help="Gross amount of paid invoices per month: the lighter top of a bar is the withholding kept for the state, the rest went to vendors.">?</i></div><div id="chMonths"></div></div>
+      <div class="card chart"><div class="eyebrow muted">Spend by vendor, all time</div><div id="chVendors"></div></div>
+      <div class="card chart"><div class="eyebrow muted">Decisions <i class="help" tabindex="0" data-help="Every request the contract answered: paid, held for a person, refused, cancelled. Counts, not amounts.">?</i></div><div id="chDecisions"></div></div>
     </div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Spend by vendor</h3>
     <div class="wrap"><table id="anVendors"><thead><tr><th>vendor</th><th>this month</th><th>budget</th><th>all time</th><th>withheld</th><th>paid</th><th>held or refused</th><th>share</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Spend by month</h3>
     <div class="wrap"><table id="anMonths"><thead><tr><th>month</th><th>paid or settling</th><th>withheld</th><th>payments</th><th>refused</th><th>held</th></tr></thead><tbody></tbody></table></div>
+    <h3 class="heading-sm" style="margin:40px 0 4px">All payments, by vendor</h3>
+    <p class="muted" style="margin:0 0 16px;font-size:14px;max-width:70ch">Every decision the contract recorded, grouped by vendor, newest first. Gross is what the invoice asked, withheld is what stayed in the treasury for the state, net is what the vendor received.</p>
+    <div id="anByVendor"></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Decisions</h3>
     <div class="grid stats" id="anDecisions"></div>
   </div>
@@ -1287,8 +1313,116 @@ function renderAnalytics() {
   $("#anVendors tbody").innerHTML = vendors.map(([id, v]) => { const ps = payments.filter((p) => p.vendor_id === id); const tot = spent(ps.filter(isSpend)); const m = spent(ps.filter((p) => isSpend(p) && monthOf(p.created_at) === month)); const b = BigInt(v.monthly_budget); const share = all > 0n ? Number(tot * 100n / all) : 0; return `<tr><td><b>${esc(v.name)}</b><div class="mono muted">${esc(id)}</div></td><td>${usdc(m)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, Number(m * 100n / b))}%"></i></div>` : ""}</td><td>${b > 0n ? usdc(b) : "<span class=muted>none</span>"}</td><td>${usdc(tot)}</td><td>${(() => { const w = withheld(ps.filter(isSpend)); return w > 0n ? usdc(w) : `<span class="muted">-</span>`; })()}</td><td>${ps.filter(isSpend).length}</td><td>${ps.filter((p) => !isSpend(p)).length}</td><td style="min-width:140px">${share}%<div class="bar-meter"><i style="width:${share}%"></i></div></td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">no vendors</td></tr>`;
   const months = {}; for (const p of payments) { const k = monthOf(p.created_at); months[k] ??= { spend: 0n, n: 0, refused: 0, held: 0, withheld: 0n }; if (isSpend(p)) { months[k].spend += BigInt(p.amount); months[k].n++; months[k].withheld += BigInt(p.withheld || "0"); } if (p.status === "Blocked") months[k].refused++; if (p.status === "Approval") months[k].held++; }
   $("#anMonths tbody").innerHTML = Object.keys(months).sort().reverse().map((k) => `<tr><td class="mono">${k}</td><td>${usdc(months[k].spend)}</td><td>${months[k].withheld > 0n ? usdc(months[k].withheld) : `<span class="muted">-</span>`}</td><td>${months[k].n}</td><td>${months[k].refused}</td><td>${months[k].held}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no payments yet</td></tr>`;
+  renderCharts(); renderByVendor();
   const counts = {}; for (const p of payments) counts[p.status] = (counts[p.status] || 0) + 1;
   $("#anDecisions").innerHTML = ["Paid", "Queued", "Approval", "Blocked", "Settled", "Cancelled"].filter((k) => counts[k]).map((k) => `<div class="stat"><div class="k">${k}</div><div class="v ${k}">${counts[k]}</div></div>`).join("") || `<div class="stat"><div class="k">decisions</div><div class="v">0</div></div>`;
+}
+
+// ---------- analytics: charts (inline SVG) and the accountant's report ----------
+const dateOf = (ns) => new Date(Number(BigInt(ns) / 1000000n)).toISOString().slice(0, 10);
+const toNum = (u) => Number(BigInt(u || "0")) / 10 ** DEC;
+const fmtK = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e5 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k` : n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+const PAID_COLORS = { Paid: "var(--paid-light)", Settled: "var(--paid-light)", Settling: "#17d9d4", Queued: "#17d9d4", Approval: "var(--wait-light)", Blocked: "var(--blocked-light)", Cancelled: "var(--off)" };
+/** Vertical bars, one per month, net to vendors (dark) with the withheld part stacked on top (light). */
+function monthChart(el, rows) {
+  if (!rows.some((r) => r.gross > 0)) { el.innerHTML = `<div class="empty">no paid invoice yet</div>`; return; }
+  const W = 400, H = 200, top = 22, bottom = 34, left = 6, right = 6, n = rows.length, gap = 6;
+  const bw = (W - left - right - gap * (n - 1)) / n, max = Math.max(...rows.map((r) => r.gross)) || 1, y = (v) => top + (H - top - bottom) * (1 - v / max);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="spend by month">`;
+  for (const t of [0.5, 1]) svg += `<line x1="${left}" x2="${W - right}" y1="${y(max * t)}" y2="${y(max * t)}" stroke="var(--line-light)" stroke-dasharray="2 4"/>${t < 1 ? `<text class="lbl" x="${left}" y="${y(max * t) - 4}">${fmtK(max * t)}</text>` : ""}`;
+  rows.forEach((r, i) => {
+    const x = left + i * (bw + gap), net = r.gross - r.withheld;
+    if (r.gross > 0) {
+      svg += `<rect x="${x}" y="${y(net)}" width="${bw}" height="${Math.max(0, y(0) - y(net))}" rx="2" fill="var(--paid-light)"><title>${esc(r.key)}: ${net.toLocaleString("en-US")} USDC to vendors</title></rect>`;
+      if (r.withheld > 0) svg += `<rect x="${x}" y="${y(r.gross)}" width="${bw}" height="${Math.max(0, y(net) - y(r.gross))}" rx="2" fill="var(--wait-light)" opacity="0.85"><title>${esc(r.key)}: ${r.withheld.toLocaleString("en-US")} USDC withheld</title></rect>`;
+      svg += `<text class="val" x="${x + bw / 2}" y="${y(r.gross) - 5}" text-anchor="middle">${fmtK(r.gross)}</text>`;
+    } else svg += `<rect x="${x}" y="${y(0) - 2}" width="${bw}" height="2" fill="var(--line-light)"/>`;
+    svg += `<text class="lbl" x="${x + bw / 2}" y="${H - bottom + 16}" text-anchor="middle">${esc(r.key.slice(5))}</text>`;
+    if (i === 0 || r.key.slice(5) === "01") svg += `<text class="lbl" x="${x + bw / 2}" y="${H - bottom + 30}" text-anchor="middle">${esc(r.key.slice(0, 4))}</text>`;
+  });
+  el.innerHTML = svg + `</svg><div class="legend"><span><i style="background:var(--paid-light)"></i>to vendors</span><span><i style="background:var(--wait-light)"></i>withheld for the state</span></div>`;
+}
+/** Horizontal bars, one per vendor, sorted by amount. */
+function vendorChart(el, rows) {
+  rows = rows.filter((r) => r.gross > 0).sort((a, b) => b.gross - a.gross).slice(0, 8);
+  if (!rows.length) { el.innerHTML = `<div class="empty">no paid invoice yet</div>`; return; }
+  const W = 400, rh = 30, H = rows.length * rh, lw = 120, max = rows[0].gross || 1;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="spend by vendor">`;
+  rows.forEach((r, i) => {
+    const w = Math.max(2, (W - lw - 50) * r.gross / max), yy = i * rh;
+    svg += `<text class="nm" x="0" y="${yy + 21}">${esc(r.name.length > 16 ? r.name.slice(0, 15) + "..." : r.name)}</text><rect x="${lw}" y="${yy + 7}" width="${w}" height="16" rx="2" fill="var(--paid-light)"><title>${esc(r.name)}: ${r.gross.toLocaleString("en-US")} USDC</title></rect><text class="val" x="${lw + w + 8}" y="${yy + 21}">${fmtK(r.gross)}</text>`;
+  });
+  el.innerHTML = svg + `</svg>`;
+}
+/** One stacked bar with the share of each decision, and a legend with counts. */
+function decisionChart(el, counts) {
+  const order = ["Paid", "Settled", "Settling", "Queued", "Approval", "Blocked", "Cancelled"].filter((k) => counts[k]);
+  const total = order.reduce((a, k) => a + counts[k], 0);
+  if (!total) { el.innerHTML = `<div class="empty">no decision yet</div>`; return; }
+  const W = 400, H = 22; let x = 0, svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="decisions">`;
+  for (const k of order) { const w = W * counts[k] / total; svg += `<rect x="${x}" y="0" width="${Math.max(0, w - 2)}" height="${H}" rx="2" fill="${PAID_COLORS[k]}"><title>${k}: ${counts[k]}</title></rect>`; x += w; }
+  el.innerHTML = svg + `</svg><div class="legend">${order.map((k) => `<span><i style="background:${PAID_COLORS[k]}"></i>${k} ${counts[k]} (${Math.round(counts[k] * 100 / total)}%)</span>`).join("")}</div>`;
+}
+/** The report rows, shared by the screen, the Excel file and the CSV. */
+function reportRows() {
+  const { payments, vendors, stats, company } = state;
+  const vmap = Object.fromEntries(vendors);
+  const isSpend = (p) => ["Paid", "Settling", "Settled", "Queued"].includes(p.status);
+  const rows = payments.slice().sort((a, b) => b.id - a.id).map((p) => {
+    const v = vmap[p.vendor_id], gross = toNum(p.amount), withheld = isSpend(p) ? toNum(p.withheld) : 0;
+    return { id: p.id, date: dateOf(p.created_at), month: monthOf(p.created_at), vendor_id: p.vendor_id, vendor: v?.name || "(not a vendor)", tax_id: v?.tax_id || "", country: v?.country || "", invoice: p.invoice_number, gross, rate: v ? (v.withholding_bps || 0) / 100 : 0, withheld, net: isSpend(p) ? gross - withheld : 0, status: p.status, reason: p.reason || "", flags: (p.flags || []).join(" "), order: p.order_id ?? "", hash: p.invoice_hash, completion: p.attestation_ref, dest_tx: p.dest_tx || "", spend: isSpend(p) };
+  });
+  const byVendor = vendors.map(([id, v]) => { const ps = rows.filter((r) => r.vendor_id === id), sp = ps.filter((r) => r.spend); return { vendor_id: id, name: v.name, tax_id: v.tax_id || "", country: v.country || "", rate: (v.withholding_bps || 0) / 100, payout: payoutText(v.payout), budget: toNum(v.monthly_budget), payments: ps.length, paid: sp.length, gross: sp.reduce((a, r) => a + r.gross, 0), withheld: sp.reduce((a, r) => a + r.withheld, 0), net: sp.reduce((a, r) => a + r.net, 0), refused: ps.filter((r) => r.status === "Blocked").length, held: ps.filter((r) => r.status === "Approval").length, rows: ps }; });
+  const unknown = rows.filter((r) => !vmap[r.vendor_id]);
+  if (unknown.length) byVendor.push({ vendor_id: "", name: "(not a vendor)", tax_id: "", country: "", rate: 0, payout: "", budget: 0, payments: unknown.length, paid: 0, gross: 0, withheld: 0, net: 0, refused: unknown.filter((r) => r.status === "Blocked").length, held: 0, rows: unknown });
+  const months = {}; for (const r of rows) { const m = months[r.month] ??= { key: r.month, gross: 0, withheld: 0, net: 0, payments: 0, refused: 0, held: 0 }; if (r.spend) { m.gross += r.gross; m.withheld += r.withheld; m.net += r.net; m.payments++; } if (r.status === "Blocked") m.refused++; if (r.status === "Approval") m.held++; }
+  const wh = {}; for (const r of rows) if (r.withheld > 0) { const k = `${r.month}|${r.vendor_id}`; const w = wh[k] ??= { month: r.month, vendor_id: r.vendor_id, vendor: r.vendor, tax_id: r.tax_id, rate: r.rate, gross: 0, withheld: 0, n: 0 }; w.gross += r.gross; w.withheld += r.withheld; w.n++; }
+  return { rows, byVendor, months: Object.values(months).sort((a, b) => a.key < b.key ? 1 : -1), withholding: Object.values(wh).sort((a, b) => a.month < b.month ? 1 : a.month > b.month ? -1 : a.vendor.localeCompare(b.vendor)), stats, company, isSpend };
+}
+const PAY_COLS = [["id", "id"], ["date (UTC)", "date"], ["month", "month"], ["vendor id", "vendor_id"], ["vendor", "vendor"], ["vendor tax id", "tax_id"], ["country", "country"], ["invoice", "invoice"], ["gross USDC", "gross"], ["withholding %", "rate"], ["withheld USDC", "withheld"], ["net paid USDC", "net"], ["status", "status"], ["reason", "reason"], ["flags", "flags"], ["order", "order"], ["invoice sha256", "hash"], ["enclave completion", "completion"], ["destination tx", "dest_tx"]];
+function saveBlob(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10000); }
+const reportName = (ext) => `bursar-${(settings.treasury || "treasury").replace(/\.(testnet|near)$/, "")}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+function downloadCsv() {
+  const { rows } = reportRows();
+  const cell = (v) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csv = [PAY_COLS.map(([h]) => h).join(","), ...rows.map((r) => PAY_COLS.map(([, k]) => cell(r[k])).join(","))].join("\r\n");
+  saveBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), reportName("csv"));
+}
+let xlsxLib = null;
+async function downloadXlsx() {
+  if (!xlsxLib) { await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.onload = res; sc.onerror = () => rej(new Error("could not load the spreadsheet library from cdnjs; the CSV works without it")); document.head.appendChild(sc); }); xlsxLib = window.XLSX; }
+  const X = xlsxLib, { rows, byVendor, months, withholding, stats, company } = reportRows();
+  const wb = X.utils.book_new();
+  const sheet = (name, aoa, widths) => { const ws = X.utils.aoa_to_sheet(aoa); ws["!cols"] = widths.map((w) => ({ wch: w })); X.utils.book_append_sheet(wb, ws, name); };
+  const sum = (k) => rows.filter((r) => r.spend).reduce((a, r) => a + r[k], 0), month = monthOf(String(Date.now() * 1000000));
+  sheet("Summary", [["Bursar treasury report"], [], ["company", company?.name || ""], ["company tax id", company?.tax_id || ""], ["country", company?.country || ""], ["treasury contract", settings.treasury], ["network", settings.network], ["generated (UTC)", new Date().toISOString().replace("T", " ").slice(0, 19)], [], ["balance USDC", toNum(stats.balance)], ["gross paid all time USDC", sum("gross")], ["withheld all time USDC", sum("withheld")], ["net paid to vendors USDC", sum("net")], ["withholding to remit now USDC", toNum(stats.withheld_due)], ["gross paid this month USDC", rows.filter((r) => r.spend && r.month === month).reduce((a, r) => a + r.gross, 0)], ["payments recorded", rows.length], ["vendors", state.vendors.length], [], ["Amounts are USDC with two decimals. Gross is what the invoice asked; withheld is the share kept in the treasury for the state at the rate set per vendor; net is what the vendor received. Every row comes from the contract on chain."]], [34, 28]);
+  sheet("Payments", [PAY_COLS.map(([h]) => h), ...rows.map((r) => PAY_COLS.map(([, k]) => r[k]))], [6, 12, 9, 16, 22, 16, 8, 14, 12, 12, 13, 13, 10, 22, 22, 7, 24, 24, 24]);
+  sheet("By vendor", [["vendor id", "vendor", "tax id", "country", "withholding %", "payout on record", "monthly budget USDC", "payments", "paid", "gross USDC", "withheld USDC", "net paid USDC", "refused", "held"], ...byVendor.map((v) => [v.vendor_id, v.name, v.tax_id, v.country, v.rate, v.payout, v.budget, v.payments, v.paid, v.gross, v.withheld, v.net, v.refused, v.held])], [16, 22, 16, 8, 13, 34, 18, 9, 6, 12, 13, 13, 8, 6]);
+  sheet("By month", [["month", "gross USDC", "withheld USDC", "net paid USDC", "payments", "refused", "held"], ...months.map((m) => [m.key, m.gross, m.withheld, m.net, m.payments, m.refused, m.held])], [9, 12, 13, 13, 9, 8, 6]);
+  sheet("Withholding", [["month", "vendor id", "vendor", "vendor tax id", "rate %", "gross USDC", "withheld USDC", "invoices"], ...withholding.map((w) => [w.month, w.vendor_id, w.vendor, w.tax_id, w.rate, w.gross, w.withheld, w.n]), [], ["to remit now (contract)", "", "", "", "", "", toNum(stats.withheld_due)]], [9, 16, 22, 16, 7, 12, 13, 8]);
+  X.writeFile(wb, reportName("xlsx"));
+}
+$("#csvBtn").addEventListener("click", () => { try { downloadCsv(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } });
+$("#xlsBtn").addEventListener("click", async () => { $("#xlsErr").hidden = true; $("#xlsBtn").disabled = true; try { await downloadXlsx(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } finally { $("#xlsBtn").disabled = false; } });
+function renderByVendor() {
+  const { byVendor } = reportRows();
+  const groups = byVendor.filter((v) => v.rows.length).sort((a, b) => b.gross - a.gross);
+  $("#anByVendor").innerHTML = groups.map((v, i) => `<details class="vgroup"${i < 3 ? " open" : ""}><summary>
+    <span><span class="k">vendor</span><span class="n"><b>${flagImg(v.country)}${esc(v.name)}</b>${v.tax_id ? ` <span class="mono muted">${esc(v.tax_id)}</span>` : ""}</span></span>
+    <span><span class="k">payments</span><span class="n">${v.rows.length}${v.refused || v.held ? ` <span class="muted">(${[v.held ? `${v.held} held` : "", v.refused ? `${v.refused} refused` : ""].filter(Boolean).join(", ")})</span>` : ""}</span></span>
+    <span><span class="k">gross paid</span><span class="n mono">${v.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
+    <span class="hide-sm"><span class="k">withheld${v.rate ? ` ${v.rate}%` : ""}</span><span class="n mono">${v.withheld ? v.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "-"}</span></span>
+    <span class="hide-sm"><span class="k">net to vendor</span><span class="n mono">${v.net.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span></summary>
+    <div class="wrap"><table><thead><tr><th>#</th><th>date</th><th>invoice</th><th>gross</th><th>withheld</th><th>net</th><th>status</th><th>order</th></tr></thead><tbody>${v.rows.map((r) => `<tr><td class="mono">${r.id}</td><td class="mono">${r.date}</td><td class="mono">${esc(r.invoice)}</td><td class="mono">${r.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td><td class="mono">${r.withheld ? r.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td class="mono">${r.spend ? r.net.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td><span class="pill ${esc(r.status)}">${esc(r.status)}</span>${r.reason ? `<span class="mono muted"> ${esc(r.reason)}</span>` : ""}</td><td class="mono">${r.order === "" ? `<span class="muted">-</span>` : r.order}</td></tr>`).join("")}</tbody></table></div></details>`).join("") || `<p class="muted">no payments yet</p>`;
+}
+function renderCharts() {
+  const { byVendor, months, rows } = reportRows();
+  const now = new Date(), keys = []; for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)); keys.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`); }
+  const mm = Object.fromEntries(months.map((m) => [m.key, m]));
+  monthChart($("#chMonths"), keys.map((k) => ({ key: k, gross: mm[k]?.gross || 0, withheld: mm[k]?.withheld || 0 })));
+  vendorChart($("#chVendors"), byVendor);
+  const counts = {}; for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
+  decisionChart($("#chDecisions"), counts);
 }
 function renderSettings() {
   const { limits, roles, company, operators } = state;
