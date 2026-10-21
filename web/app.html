@@ -17,7 +17,20 @@
   .side { background: var(--void); color: var(--fg-dark); display: flex; flex-direction: column; gap: 20px; padding: 20px 14px; position: sticky; top: 0; height: 100vh; box-sizing: border-box; }
   .side .wordmark { padding: 0 8px; }
   .side .company { padding: 0 8px; display: flex; flex-direction: column; gap: 6px; }
-  .side .company select { font: 500 14px/1.4 var(--display); padding: 8px 32px 8px 10px; border: 1px solid var(--line-dark); background: var(--ink); color: var(--fg-dark); border-radius: 4px; width: 100%; min-width: 0; text-overflow: ellipsis; }
+  .side .company select { display: none; }
+  /* the company switcher: a button with the name and the contract, and a panel listing every company in this browser */
+  .side .company { position: relative; }
+  .sw { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line-dark); background: var(--ink); color: var(--fg-dark); border-radius: 4px; font: 500 14px/1.3 var(--display); cursor: pointer; }
+  .sw:hover, .sw[aria-expanded="true"] { border-color: var(--mute-dark); }
+  .sw .t, .swmenu button .t { min-width: 0; flex: 1; display: flex; flex-direction: column; } .sw .n, .sw .m, .swmenu .n, .swmenu .m { display: block; }
+  .sw .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .sw .m { font: 500 11px/1.4 var(--mono); color: var(--mute-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sw svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; flex: none; color: var(--mute-dark); }
+  .swmenu { position: absolute; left: 8px; right: 8px; top: calc(100% + 6px); z-index: 20; background: var(--ink); border: 1px solid var(--line-dark); border-radius: 4px; padding: 6px; display: flex; flex-direction: column; gap: 2px; min-width: 240px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+  .swmenu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: transparent; color: var(--fg-dark); border-radius: 4px; font: 500 14px/1.3 var(--display); cursor: pointer; }
+  .swmenu button:hover { background: var(--void); }
+  .swmenu button .t { min-width: 0; flex: 1; } .swmenu button .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .swmenu button .m { font: 500 11px/1.4 var(--mono); color: var(--mute-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .swmenu button .on { color: var(--signal); font: 600 12px var(--mono); flex: none; }
+  .swmenu .new { border-top: 1px solid var(--line-dark); margin-top: 4px; padding-top: 10px; color: var(--signal); }
   .tabs { display: flex; flex-direction: column; gap: 2px; }
   .tabs a { color: var(--mute-dark); text-decoration: none; padding: 9px 10px; border-radius: 4px; font-size: 14px; white-space: nowrap; display: flex; align-items: center; gap: 10px; }
   .tabs a svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; flex: none; }
@@ -34,7 +47,8 @@
   @media (max-width: 900px) {
     .shell { grid-template-columns: minmax(0, 1fr); }
     .side { position: sticky; height: auto; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; z-index: 5; }
-    .side .company { flex: 1 1 auto; min-width: 0; padding: 0; } .side .company .eyebrow { display: none; } .side .company select { min-width: 0; max-width: 100%; }
+    .side .company { flex: 1 1 auto; min-width: 0; padding: 0; } .side .company .eyebrow { display: none; }
+    .swmenu { left: 0; right: auto; width: min(320px, calc(100vw - 24px)); }
     .side .me { margin-top: 0; border-top: 0; padding: 0; } .side .me .min { display: none; }
     .wordmark span { display: none; }
     .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; flex-direction: row; justify-content: space-around; gap: 0; background: var(--void); border-top: 1px solid var(--line-dark); padding: 6px max(4px, env(safe-area-inset-right, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px)); }
@@ -118,6 +132,8 @@
   <a class="wordmark" href="index.html"><img src="brand/mark.svg" alt="" width="24" height="24"><span>Bursar</span></a>
   <div class="company">
     <div class="eyebrow muted">Company</div>
+    <button type="button" class="sw" id="switcher" aria-haspopup="listbox" aria-expanded="false"><span class="t"><span class="n" id="swName">No company</span><span class="m" id="swId">sign in or create one</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
+    <div class="swmenu" id="swMenu" hidden role="listbox"></div>
     <select id="profile" title="treasury"></select>
   </div>
   <nav class="tabs" id="tabs">
@@ -555,8 +571,16 @@ function renderProfiles() {
   sel.innerHTML = profiles.map((p) => `<option value="${esc(p.treasury)}">${esc(p.label || p.treasury)}</option>`).join("") + `<option value="">+ new treasury</option>`;
   sel.value = profiles.some((p) => p.treasury === settings.treasury) ? settings.treasury : "";
   const roleOf = (p) => p.ownerKey ? (p.ownerKeyKind === "wallet" ? "owner, signed in with the wallet" : "owner, keys in this browser") : p.operator ? `collaborator ${p.operator.split(".")[0]}` : "read-only";
+  const cur = profiles.find((p) => p.treasury === settings.treasury);
+  $("#swName").textContent = cur ? (cur.label || cur.treasury) : "No company"; $("#swId").textContent = cur ? cur.treasury : "sign in or create one";
+  $("#swMenu").innerHTML = profiles.map((p) => `<button type="button" role="option" data-pick="${esc(p.treasury)}"><span class="t"><span class="n">${esc(p.label || p.treasury)}</span><span class="m">${esc(p.treasury)}</span></span>${p.treasury === settings.treasury ? `<span class="on">OPEN</span>` : ""}</button>`).join("") + `<button type="button" class="new" data-pick="">+ New treasury</button>`;
   $("#companiesList").innerHTML = profiles.map((p) => `<div class="row${p.treasury === settings.treasury ? " on" : ""}"><div><div class="n">${esc(p.label || p.treasury)}</div><div class="m">${esc(p.treasury)} on ${esc(p.network)}</div></div><span class="r">${esc(roleOf(p))}</span>${p.treasury === settings.treasury ? `<span class="s Paid" style="font-size:12px">open now</span>` : `<button type="button" class="btn-ghost small" data-open="${esc(p.treasury)}">Open</button>`}</div>`).join("") || `<p class="muted" style="margin:0;font-size:14px">No company in this browser yet. Create one, or sign in with your wallet.</p>`;
 }
+const swClose = () => { $("#swMenu").hidden = true; $("#switcher").setAttribute("aria-expanded", "false"); };
+$("#switcher").addEventListener("click", (e) => { e.stopPropagation(); const open = $("#swMenu").hidden; $("#swMenu").hidden = !open; $("#switcher").setAttribute("aria-expanded", String(open)); });
+$("#swMenu").addEventListener("click", (e) => { const b = e.target.closest("button[data-pick]"); if (!b) return; swClose(); $("#profile").value = b.dataset.pick; $("#profile").dispatchEvent(new Event("change")); });
+document.addEventListener("click", (e) => { if (!e.target.closest(".side .company")) swClose(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") swClose(); });
 $("#companiesList").addEventListener("click", (e) => { const b = e.target.closest("button[data-open]"); if (!b) return; $("#profile").value = b.dataset.open; $("#profile").dispatchEvent(new Event("change")); });
 $("#addExisting").addEventListener("click", () => { const d = $("#advanced"); d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" }); });
 $("#dlKeysNow").addEventListener("click", () => {
