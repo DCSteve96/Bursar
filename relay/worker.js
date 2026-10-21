@@ -77,8 +77,11 @@ async function onUpdate(env, update) {
     const rec = (await kvGet(env, `treasury:${pair.treasury}`)) || { token: pair.token, chats: [] };
     if (!rec.chats.includes(chat)) rec.chats.push(chat);
     rec.label = pair.label || rec.label;
-    await Promise.all([kvPut(env, `treasury:${pair.treasury}`, rec), kvPut(env, `tg:${chat}`, { treasury: pair.treasury, label: pair.for || "" }), env.INBOX.delete(`pair:${code.toUpperCase()}`)]);
-    return say(`Connected to ${rec.label || pair.treasury}${pair.for ? ` as ${pair.for}` : ""}. Send invoices here as PDF: they land in the company's inbox, a person reads them in the console, and the treasury contract decides. Nothing is paid from this chat.`);
+    // what the company knows about this chat: the vendor it is for (a vendor id on the contract), a label, the chat's own title
+    rec.chatInfo = rec.chatInfo || {};
+    rec.chatInfo[chat] = { label: pair.for || "", vendor: pair.vendor || "", title: m.chat.title || (m.from ? [m.from.first_name, m.from.last_name].filter(Boolean).join(" ") : ""), since: Date.now() };
+    await Promise.all([kvPut(env, `treasury:${pair.treasury}`, rec), kvPut(env, `tg:${chat}`, { treasury: pair.treasury, label: pair.for || "", vendor: pair.vendor || "" }), env.INBOX.delete(`pair:${code.toUpperCase()}`)]);
+    return say(`Connected to ${rec.label || pair.treasury}${pair.vendor ? ` for the vendor ${pair.for || pair.vendor}: invoices from here are expected from that vendor, any other name is held for a person` : pair.for ? ` as ${pair.for}` : ""}. Send invoices here as PDF: they land in the company's inbox, a person reads them in the console, and the treasury contract decides. Nothing is paid from this chat.`);
   }
   const doc = m.document;
   if (!doc) { if (text) await say("Send the invoice as a PDF file. Photos and text are not read."); return; }
@@ -89,7 +92,7 @@ async function onUpdate(env, update) {
   if (doc.file_size > MAX_BODY) return say(`${name} is over 2 MB; send a smaller PDF.`);
   const items = (await kvGet(env, `inbox:${link.treasury}`)) || [];
   const from = m.from ? [m.from.first_name, m.from.last_name].filter(Boolean).join(" ") + (m.from.username ? ` (@${m.from.username})` : "") : (m.chat.title || "channel");
-  items.push({ id: `${m.message_id}-${chat}`, file_id: doc.file_id, name, size: doc.file_size || 0, from, chat, chat_title: link.label || m.chat.title || null, caption: m.caption || "", date: (m.date || Math.floor(Date.now() / 1000)) * 1000 });
+  items.push({ id: `${m.message_id}-${chat}`, file_id: doc.file_id, name, size: doc.file_size || 0, from, chat, chat_title: link.label || m.chat.title || null, vendor: link.vendor || "", caption: m.caption || "", date: (m.date || Math.floor(Date.now() / 1000)) * 1000 });
   while (items.length > INBOX_MAX) items.shift();
   await kvPut(env, `inbox:${link.treasury}`, items);
   await say(`Received ${name}. It waits in the inbox; a person will read it and the contract will decide.`);
@@ -121,7 +124,7 @@ async function inbox(request, env, url, headers) {
     if (!rec) await kvPut(env, `treasury:${treasury}`, { token: body.token, chats: [], label: body.label || "" });
     else if (body.label && body.label !== rec.label) { rec.label = body.label; await kvPut(env, `treasury:${treasury}`, rec); }
     const code = newCode();
-    await kvPut(env, `pair:${code}`, { treasury, token: body.token, label: body.label || "", for: String(body.for || "").slice(0, 60) }, 86400);
+    await kvPut(env, `pair:${code}`, { treasury, token: body.token, label: body.label || "", for: String(body.for || "").slice(0, 60), vendor: String(body.vendor || "").slice(0, 64) }, 86400);
     const bot = await botName(env);
     return json(200, { code, bot, link: `https://t.me/${bot}?start=${code}` }, headers);
   }
@@ -129,7 +132,23 @@ async function inbox(request, env, url, headers) {
   if (!rec) return json(401, { error: "bad or missing inbox token" }, headers);
   if (request.method === "GET" && p === "/inbox/list") {
     const items = (await kvGet(env, `inbox:${treasury}`)) || [];
-    return json(200, { items: items.map(({ file_id, ...x }) => x), chats: rec.chats.length, bot: await botName(env) }, headers);
+    const chatList = rec.chats.map((c) => ({ chat: c, ...(rec.chatInfo?.[c] || { label: "", vendor: "", title: "", since: 0 }) }));
+    return json(200, { items: items.map(({ file_id, ...x }) => x), chats: rec.chats.length, chatList, bot: await botName(env) }, headers);
+  }
+  // Change what a connected chat is for, or disconnect it. Items already in the inbox keep the vendor they arrived with.
+  if (request.method === "POST" && p === "/inbox/chat") {
+    const chat = body.chat; if (chat == null || !rec.chats.some((c) => String(c) === String(chat))) return json(404, { error: "no such chat on this treasury" }, headers);
+    if (body.remove) {
+      rec.chats = rec.chats.filter((c) => String(c) !== String(chat)); if (rec.chatInfo) delete rec.chatInfo[chat];
+      await Promise.all([kvPut(env, `treasury:${treasury}`, rec), env.INBOX.delete(`tg:${chat}`)]);
+      await tg(env, "sendMessage", { chat_id: chat, text: "This chat was disconnected from the company's inbox. Invoices sent here are no longer read." }).catch(() => {});
+      return json(200, { ok: true }, headers);
+    }
+    const vendor = String(body.vendor || "").slice(0, 64), label = String(body.for || "").slice(0, 60);
+    rec.chatInfo = rec.chatInfo || {}; rec.chatInfo[chat] = { ...(rec.chatInfo[chat] || { title: "", since: Date.now() }), label, vendor };
+    const link = (await kvGet(env, `tg:${chat}`)) || { treasury };
+    await Promise.all([kvPut(env, `treasury:${treasury}`, rec), kvPut(env, `tg:${chat}`, { ...link, label, vendor })]);
+    return json(200, { ok: true }, headers);
   }
   if (request.method === "GET" && p === "/inbox/file") {
     const items = (await kvGet(env, `inbox:${treasury}`)) || [];

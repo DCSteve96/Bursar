@@ -228,7 +228,7 @@
       <div class="actions" style="margin:0"><a class="btn btn-signal" href="#settings">Connect Telegram in Settings</a></div>
     </div>
     <div id="inboxOn" hidden>
-      <div class="wrap"><table id="inboxTable"><thead><tr><th>received</th><th>from</th><th>file</th><th>note</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div id="inboxGroups"></div>
       <div class="actions" style="margin-top:16px;align-items:center"><button id="inboxRefresh" type="button" class="btn-ghost">Refresh</button><span class="muted" id="inboxFoot" style="font-size:14px"></span></div>
       <div id="inboxErr" class="err" hidden></div>
     </div>
@@ -506,7 +506,7 @@
       <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Telegram inbox <i class="help" tabindex="0" data-help="A Telegram chat connected to this treasury. Every PDF posted in it shows up in Inbox, where a person reads it and the contract decides. Invite the vendor to a group with the bot, or forward their emails' attachments yourself. The bot never pays anything.">?</i></div>
       <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:72ch">Press Connect, open the link on your phone, press Start in the chat. From then on, PDFs sent to that chat land in Inbox and the bot tells the chat how each one was decided. Connect as many chats as you like: one per vendor, or one for the whole company.</p>
       <div class="grid cols-3" style="align-items:end">
-        <label><span>Who is this chat for <i class="help" tabindex="0" data-help="A vendor's name, a colleague, or the company itself. It is shown next to every invoice that arrives from that chat. Optional.">?</i></span><input id="tgFor" placeholder="Acme Hosting" autocomplete="off"></label>
+        <label><span>Who is this chat for <i class="help" tabindex="0" data-help="Pick the vendor this chat belongs to: its invoices are expected from there, and an invoice from that chat that names another vendor is held for a person. The whole company: a chat for your own team, any vendor's invoice can arrive.">?</i></span><select id="tgFor"><option value="">The whole company</option></select></label>
         <label><span>&nbsp;</span><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button></label>
         <span class="muted" style="font-size:14px;padding-bottom:12px" id="tgStatus"></span>
       </div>
@@ -515,6 +515,10 @@
         <div class="actions" style="margin-top:12px;align-items:center"><a id="tgShare" class="btn btn-signal" href="#" target="_blank" rel="noopener">Send via Telegram</a><button id="tgCopy" type="button" class="btn-ghost">Copy link</button><span class="muted" style="font-size:13px">A bot cannot write first: the other side opens the link and presses Start. The code works once and for a day.</span></div>
       </div>
       <div id="tgErr" class="err" hidden></div>
+      <div id="tgChatsWrap" hidden style="margin-top:20px">
+        <div class="eyebrow muted" style="margin-bottom:8px">Connected chats</div>
+        <div class="wrap"><table id="tgChats"><thead><tr><th>chat</th><th>for</th><th>since</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
     </div>
     <div class="grid cols-2" style="margin-top:24px">
       <div class="card">
@@ -853,7 +857,7 @@ function readingFlags(ex, text) {
   if (ex.currency && ex.currency.toUpperCase() !== "USDC") flags.push("currency_not_usdc");
   return flags;
 }
-const FLAG = { new_payment_details: "the invoice announces new payment details", urgency: "the invoice presses for immediate payment", mismatched_contact: "the contact details do not match the vendor", handwritten_or_altered: "the document looks altered", missing_invoice_number: "no invoice number", unreadable: "parts of the document are unreadable", no_text_layer: "a scan with no text layer: the amount cannot be cross-checked", amount_not_in_text: "the total the model read does not appear in the document's text", larger_amount_in_text: "a larger amount than the total appears in the document", totals_mismatch: "subtotal plus tax does not equal the total", low_confidence: "the model was not confident", currency_not_usdc: "the invoice is not in USDC" };
+const FLAG = { chat_vendor_mismatch: "it came from a chat linked to a different vendor", new_payment_details: "the invoice announces new payment details", urgency: "the invoice presses for immediate payment", mismatched_contact: "the contact details do not match the vendor", handwritten_or_altered: "the document looks altered", missing_invoice_number: "no invoice number", unreadable: "parts of the document are unreadable", no_text_layer: "a scan with no text layer: the amount cannot be cross-checked", amount_not_in_text: "the total the model read does not appear in the document's text", larger_amount_in_text: "a larger amount than the total appears in the document", totals_mismatch: "subtotal plus tax does not equal the total", low_confidence: "the model was not confident", currency_not_usdc: "the invoice is not in USDC" };
 const flagText = (f) => FLAG[f] ?? f;
 const aiHeaders = () => useOwnKey() && settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
 const sha256hex = (s) => toHex(sha256(te.encode(s)));
@@ -884,7 +888,7 @@ async function readInTee(pngPages, textFallback, step) {
   step("model", "wait", `asking ${settings.model} inside the enclave`);
   // The gateway answers 502 now and then, 524 when the model takes longer than its edge allows, and an
   // error response carries no CORS headers, so the browser reports it as a network error: retry on all.
-  const TRANSIENT = [429, 500, 502, 503, 504, 520, 522, 524], TRIES = 6;
+  const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530], TRIES = 6;
   let r = null, responseBody = "", lastErr = "";
   for (let attempt = 0; attempt < TRIES; attempt++) {
     try {
@@ -1039,7 +1043,7 @@ async function handleFile(file) {
     const claim = {
       vendor_id: matchVendor(extraction, vendors), invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
       due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
-      attestation_ref: attestationRef(receipt), flags: [...(extraction.flags ?? []), ...readingFlags(extraction, text)], order_ref: (extraction.order_ref || "").trim() || null,
+      attestation_ref: attestationRef(receipt), flags: [...(extraction.flags ?? []), ...readingFlags(extraction, text), ...chatFlags(matchVendor(extraction, vendors))], order_ref: (extraction.order_ref || "").trim() || null,
       vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(), withholding_seen: toUnits(extraction.withholding || "0"),
     };
     await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
@@ -1051,7 +1055,7 @@ async function handleFile(file) {
 async function afterRead(read, vendors) {
   const { extraction, receipt, attestation, claim } = read;
   current = read;
-  showExtraction(extraction);
+  showExtraction({ ...extraction, flags: claim.flags }); // every flag the contract will see, the reading checks and the chat check included
   const checks = $("#checks"); checks.innerHTML = `<li><span class="st wait"><i></i><i></i><i></i></span><span>verifying the receipt, fetching Intel collateral through the relay</span></li>`;
   $("#receipt").hidden = false;
   const v = await verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
@@ -1086,6 +1090,11 @@ async function loadSample(name) {
   }
 }
 for (const b of document.querySelectorAll("button.sample")) b.addEventListener("click", () => loadSample(b.dataset.file));
+/** The chat an inbox item came from is linked to one vendor: an invoice from there that names another vendor is a flag, and the contract holds it. */
+function chatFlags(vendorId) {
+  const it = inboxCurrent;
+  return it?.vendor && it.vendor !== vendorId ? ["chat_vendor_mismatch"] : [];
+}
 function matchVendor(ex, vendors) {
   const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const guess = norm(ex.vendor_id_guess || ex.vendor_name);
@@ -1174,7 +1183,7 @@ async function loadTreasury() {
     // the switcher shows the company's name once it is set in the contract
     if (company?.name && settings.label !== company.name) { $("#label").value = company.name; settings.label = company.name; try { localStorage.setItem("bursar.label", company.name); } catch {} upsertProfile(); }
     await loadDao();
-    renderOverview(); renderAttention(); renderVendors(); renderOrders(); renderAnalytics(); renderSettings();
+    renderOverview(); renderAttention(); renderVendors(); renderOrders(); renderAnalytics(); renderSettings(); fillTgFor();
     vaultOnChain = undefined; renderVault().catch((e) => console.warn("vault:", e.message));
   } catch (e) { $("#tErr").textContent = `could not read ${settings.treasury} on ${settings.network}: ${e.message}`; $("#tErr").hidden = false; }
 }
@@ -1595,13 +1604,50 @@ async function loadInbox() {
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
     inboxItems = j.items;
     $("#inboxBadge").textContent = inboxItems.length; $("#inboxBadge").hidden = inboxItems.length === 0;
-    $("#inboxTable tbody").innerHTML = inboxItems.slice().reverse().map((it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}">Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`).join("") || `<tr><td colspan="5" class="muted">nothing waiting. Send a PDF to a connected chat and press Refresh.</td></tr>`;
+    // one group per vendor (the chat the invoice came from says which), the company's own chats last
+    const vmap = Object.fromEntries(state.vendors), groups = {};
+    for (const it of inboxItems.slice().reverse()) (groups[it.vendor || ""] ??= []).push(it);
+    const keys = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : (vmap[a]?.name || a).localeCompare(vmap[b]?.name || b)));
+    const row = (it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}">Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`;
+    $("#inboxGroups").innerHTML = keys.map((k) => { const v = vmap[k]; const name = k ? (v?.name || k) : "The whole company"; return `<details class="vgroup" open><summary>
+      <span><span class="k">${k ? "vendor" : "chats"}</span><span class="n"><b>${k ? flagImg(v?.country) : ""}${esc(name)}</b>${k && !v ? ` <span class="muted">(no longer a vendor)</span>` : ""}${k && v && v.active === false ? ` <span class="muted">(inactive)</span>` : ""}</span></span>
+      <span><span class="k">waiting</span><span class="n">${groups[k].length}</span></span>
+      <span class="hide-sm"><span class="k">rule</span><span class="n muted" style="font-size:13px">${k ? "an invoice from here naming another vendor is held" : "any vendor's invoice can arrive here"}</span></span><span class="hide-sm"></span><span class="hide-sm"></span></summary>
+      <div class="wrap"><table><thead><tr><th>received</th><th>from</th><th>file</th><th>note</th><th></th></tr></thead><tbody>${groups[k].map(row).join("")}</tbody></table></div></details>`; }).join("") || `<p class="muted">nothing waiting. Send a PDF to a connected chat and press Refresh.</p>`;
+    renderChats(j.chatList || []);
     $("#inboxFoot").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}. ${inboxItems.length} waiting.`;
     $("#tgStatus").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}`;
   } catch (e) { $("#inboxErr").textContent = `could not read the inbox: ${e.message}`; $("#inboxErr").hidden = false; }
 }
 $("#inboxRefresh").addEventListener("click", loadInbox);
-$("#inboxTable").addEventListener("click", async (e) => {
+/** The vendor picker for a new chat: filled from the contract's vendors, keeps the current choice. */
+function fillTgFor() {
+  const sel = $("#tgFor"), cur = sel.value;
+  sel.innerHTML = `<option value="">The whole company</option>` + state.vendors.filter(([, v]) => v.active !== false).map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
+  sel.value = state.vendors.some(([id]) => id === cur) ? cur : "";
+}
+function renderChats(list) {
+  const wrap = $("#tgChatsWrap"); wrap.hidden = !list.length; if (!list.length) return;
+  const vmap = Object.fromEntries(state.vendors);
+  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td><select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">The whole company</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select></td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
+}
+$("#tgChats").addEventListener("change", async (e) => {
+  const sel = e.target.closest("select.chatFor"); if (!sel) return;
+  const vendorId = sel.value, name = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
+  $("#tgErr").hidden = true; sel.disabled = true;
+  try { const r = await fetch(`${RELAY}/inbox/chat`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, chat: isNaN(Number(sel.dataset.chat)) ? sel.dataset.chat : Number(sel.dataset.chat), vendor: vendorId, for: name }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
+  catch (err) { $("#tgErr").textContent = err.message; $("#tgErr").hidden = false; }
+  finally { sel.disabled = false; loadInbox(); }
+});
+$("#tgChats").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.chatOff"); if (!b) return;
+  if (!confirm("Disconnect this chat? Invoices sent there will no longer land in the inbox.")) return;
+  $("#tgErr").hidden = true; b.disabled = true;
+  try { const r = await fetch(`${RELAY}/inbox/chat`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, chat: isNaN(Number(b.dataset.chat)) ? b.dataset.chat : Number(b.dataset.chat), remove: true }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
+  catch (err) { $("#tgErr").textContent = err.message; $("#tgErr").hidden = false; b.disabled = false; }
+  loadInbox();
+});
+$("#inboxGroups").addEventListener("click", async (e) => {
   const b = e.target.closest("button.act"); if (!b) return;
   const it = inboxItems.find((x) => x.id === b.dataset.id); if (!it) return;
   $("#inboxErr").hidden = true; b.disabled = true;
@@ -1640,8 +1686,8 @@ $("#tgConnect").addEventListener("click", async () => {
   try {
     if (!settings.treasury) throw new Error("no treasury selected");
     if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
-    const company = state.company?.name || settings.label || settings.treasury, who = $("#tgFor").value.trim();
-    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who }) });
+    const company = state.company?.name || settings.label || settings.treasury, vendorId = $("#tgFor").value.trim(), who = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
+    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
     $("#tgLink").href = j.link; $("#tgLink").textContent = j.link; $("#tgCmd").textContent = `/start ${j.code}  to @${j.bot}`;
     const msg = `${who ? who + ", send" : "Send"} your invoices for ${company} here as PDF. Open the link, press Start, then just send the file: the bot confirms and tells you the outcome.`;
