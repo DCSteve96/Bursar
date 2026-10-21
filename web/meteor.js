@@ -9,9 +9,14 @@ const sdk = () => sdkPromise || (sdkPromise = import(SDK).then(async (m) => { co
 const target = (network) => ({ blockchain: "near", network: network || "testnet" });
 const unsupported = () => { throw new Error("not supported through the Meteor extension here"); };
 
-/** Register Meteor as an injected wallet of NEAR Connect. Call it after the connector exists; returns false when there is no extension. */
-export async function registerMeteorExtension() {
-  if (!meteorExtensionPresent()) return false;
+/** The extension injects its bridge a moment after the page loads, later still when its background process is waking up: wait for it. */
+export const waitForMeteorExtension = (ms = 3000) => new Promise((res) => { const t0 = Date.now(); const tick = () => meteorExtensionPresent() ? res(true) : Date.now() - t0 >= ms ? res(false) : setTimeout(tick, 100); tick(); });
+let registered = false;
+/** Register Meteor as an injected wallet of NEAR Connect. Call it after the connector exists; returns false when there is no extension. Safe to call again: it registers once. */
+export async function registerMeteorExtension(waitMs = 3000) {
+  if (registered) return true;
+  if (!(await waitForMeteorExtension(waitMs))) return false;
+  registered = true;
   const { m, mc } = await sdk();
   const account = (network) => mc.getAccount(target(network));
   const run = async (id, input) => (await mc.createAction({ id, input })).promptForExecution();

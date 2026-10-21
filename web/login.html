@@ -119,11 +119,13 @@ const connect = () => {
     // Say what the page sees of the Meteor extension: it is the one wallet that signs the vault message, and when it is
     // missing from the picker people should know whether that is the page or the extension.
     const ext = $("#wExt");
-    meteorReady = registerMeteorExtension().then((ok) => { ext.textContent = ok ? "Meteor extension detected: it is listed as \"Meteor Wallet (extension)\"; the plain entry is the web wallet." : "No Meteor extension seen on this page: the Meteor entry opens the web wallet. If you have the extension, check it is enabled and unlocked, then reload."; ext.hidden = false; return ok; })
+    meteorReady = registerMeteorExtension().then((ok) => { showExt(ok); return ok; })
       .catch((e) => { console.warn("Meteor extension bridge:", e); ext.textContent = `Meteor extension seen, but its bridge failed to load: ${e.message || e}. The Meteor entry opens the web wallet.`; ext.hidden = false; });
   }
   return connector;
 };
+const showExt = (ok) => { const ext = $("#wExt"); ext.textContent = ok ? "Meteor extension detected: it is listed as \"Meteor Wallet (extension)\"; the plain entry is the web wallet." : "No Meteor extension seen on this page: the Meteor entry opens the web wallet. If you have the extension, check it is enabled and unlocked, then press the button again."; ext.hidden = false; };
+
 function setNet(n) {
   network = n;
   for (const b of document.querySelectorAll("#net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
@@ -137,7 +139,7 @@ $("#net").addEventListener("click", (e) => { const b = e.target.closest("button"
 $("#wGo").addEventListener("click", async () => {
   $("#wErr").hidden = true; $("#wGo").disabled = true;
   try {
-    const c = connect(); await meteorReady;
+    const c = connect(); if (!(await meteorReady)) { const ok = await registerMeteorExtension(1500).catch(() => false); showExt(ok); }
     const wallet = await c.connect();
     const accounts = await wallet.getAccounts({ network });
     if (!accounts?.length) throw new Error("the wallet did not return an account");
