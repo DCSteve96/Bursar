@@ -2306,6 +2306,7 @@ mod tests {
         testing_env!(ctx(accounts(1)).build());
         let mut held = 0;
         for i in 0..80 {
+            testing_env!(ctx(accounts(1)).build());
             let mut cl = claim("hosting", &format!("h{i}"), 1, near(accounts(5))); cl.flags = vec!["x".into()];
             let id = c.request_payment(cl);
             if c.get_payment(id).unwrap().status == Status::Approval { held += 1; } else { assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("hold_quota_reached")); }
@@ -2359,16 +2360,17 @@ mod tests {
         testing_env!(ctx(accounts(0)).build());
         c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: false });
         testing_env!(ctx(accounts(1)).build());
-        for i in 0..(BLOCKED_PER_DAY + 5) { let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("nobody", &format!("f{i}"), 1, near(accounts(5)))))); }
+        // the mock VM allows 100 logs per context: a fresh context per call
+        for i in 0..(BLOCKED_PER_DAY + 5) { testing_env!(ctx(accounts(1)).build()); let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("nobody", &format!("f{i}"), 1, near(accounts(5)))))); }
         testing_env!(ctx(accounts(3)).build());
         let id = c.request_payment(claim("nobody", "op1", 1, near(accounts(5))));
         assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("unknown_vendor"), "an operator has its own quota");
         // a refused claim is stored small (the operator's quota is fresh), and nothing is recorded while paused
         testing_env!(ctx(accounts(3)).build());
-        let mut cl = claim("nobody", &"n".repeat(128), 1, near(accounts(5))); cl.attestation_ref = "a".repeat(512); cl.flags = vec!["f".repeat(64); 16];
+        let mut cl = claim("nobody", &"n".repeat(128), 1, near(accounts(5))); cl.invoice_hash = "h".repeat(128); cl.attestation_ref = "a".repeat(512); cl.flags = vec!["f".repeat(64); 16];
         let id = c.request_payment(cl);
         let p = c.get_payment(id).unwrap();
-        assert!(p.flags.len() <= 2 && p.attestation_ref.len() <= 64);
+        assert!(p.flags.len() <= 2 && p.attestation_ref.len() <= 64 && p.invoice_hash.len() <= 64);
         testing_env!(ctx(accounts(0)).build());
         c.set_paused(true);
         let before = c.get_stats().payments;
