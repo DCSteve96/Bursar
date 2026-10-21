@@ -353,7 +353,7 @@ Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI
 ## 2.30 Errori del contratto leggibili (21 ottobre)
 
 - Bug trovato da Stefano: "Add purchase order" senza riferimento dava `WebAssembly trap: unreachable` invece di "a purchase order needs a reference". Causa: con rustc 1.97 e near-sys 0.3 (`unsafe extern "C" { fn panic_utf8(..) -> !; }`) il compilatore eliminava la chiamata a `panic_utf8` e lasciava un trap muto: il wasm non importava nemmeno `panic_utf8` (`strings bursar_policy.wasm | grep panic_utf8` -> 0). Vale per tutti i contratti compilati finora, quindi anche le tesorerie di oggi: i loro controlli falliti restano muti.
-- Fix in `lib.rs`: dichiarazione propria di `panic_utf8` senza `!` (`mod host`), `fail(msg) -> !` che la chiama e poi `loop {}`, e un `require!` di crate che usa `fail`; `require` non è più importato da near_sdk. Verificato on chain su `bursar-panic-94f66172.testnet`: "Smart contract panicked: a purchase order needs a reference", "unknown vendor". I panic interni dell'SDK (deserializzazione) restano trap. 24 test, wasm 383257.
+- Fix in `lib.rs`: dichiarazione propria di `panic_utf8` senza `!` (`mod host`), `fail(msg) -> !` che la chiama e poi `loop {}`, e un `require!` di crate che usa `fail`; `require` non è più importato da near_sdk. Verificato on chain su `bursar-panic-94f66172.testnet`: "Smart contract panicked: a purchase order needs a reference", "unknown vendor". I panic interni dell'SDK (deserializzazione) restano trap. 24 test, wasm 386402.
 - Console: `txFailureText()` traduce il Failure in parole ("the contract refused it: ..."; per i contratti vecchi "one of its checks failed"); il modulo ordine d'acquisto controlla riferimento e importo prima di chiamare. Toolchain più vecchie (1.86) non compilano le dipendenze (edition 2024): niente downgrade.
 
 ## 2.31 Stress test massivo: letture e contratto (21 ottobre)
@@ -377,7 +377,7 @@ Scelto Qwen3-VL con immagini a 110 dpi + testo estratto (il testo rende esatti g
 
 Ritardo del nodo RPC: la console ora segna l'altezza del blocco in cui e' girata la sua ultima transazione (`noteTxBlock`, una chiamata `block` dopo ogni `send_tx`) e `view()` ripete la query finche' il nodo che risponde non e' almeno a quell'altezza (max 8 tentativi, 400 ms). La CLI usa near-api-js e non ha questo accorgimento; lo script di stress fa polling.
 
-Contratto: tutti i punti di panic restanti (`.expect`, `assert_can`) passano da `fail()` e sono leggibili on chain; 24 test, wasm 383257 byte.
+Contratto: tutti i punti di panic restanti (`.expect`, `assert_can`) passano da `fail()` e sono leggibili on chain; 24 test, wasm 386402 byte.
 
 ## 2.32 Mille fatture, dieci aziende: letture e contratto (21 ottobre)
 
@@ -402,3 +402,11 @@ Contratto con le letture della terza serie (`big-chain.mts`, 10 tesorerie nuove)
 Da valutare (non fatto): la ritenuta attesa dal contratto e' `bps` sull'importo del claim; in Italia la ritenuta d'acconto e' il 20% dell'imponibile, non del totale con IVA, quindi ogni fattura di un professionista con IVA finisce in `withholding_mismatch` (83 + 21 trattenute nel test). Serve o il campo `subtotal` nel claim o il calcolo sull'imponibile. Un bonifico USDC fatto con `ft_transfer` semplice invece di `ft_transfer_call` non viene visto dal saldo del contratto (lo script di stress c'e' cascato): la console finanzia con `ft_transfer_call`, ma un utente che manda USDC dal wallet con un trasferimento normale non vede il saldo salire; manca un `sync_balance` che legga `ft_balance_of`.
 
 Registro: le 60 tesorerie dello stress erano state tolte dal registro a fine test; Stefano le ha volute come documentazione, rimesse tutte (`reregister.mts`, 58 aggiunte, 85 voci in totale). L'explorer con 85 contratti carica in 22 s (una vista `get_stats` per contratto in sequenza dal browser): se cresce ancora va parallelizzato o messo in cache.
+
+## 2.33 sync_balance (21 ottobre)
+
+Lo stress ha mostrato che un deposito USDC fatto con `ft_transfer` semplice (wallet, exchange) non passa da `ft_on_transfer` e il contratto non lo vede. Aggiunto `sync_balance()` (proprietario o qualunque operatore): chiama `ft_balance_of` sul token e nel callback `on_sync_balance` imposta `balance = posseduto - in_flight`. `in_flight` e' la somma dei trasferimenti inviati il cui callback non e' ancora arrivato: incrementato in `ft_transfer` (l'helper interno usato da pagamenti, settle, withdraw), decrementato in `on_ft_transfer` in ogni esito; vive in storage grezzo (`b"inflight"`, come la cassaforte) cosi' i contratti gia' deployati si aggiornano senza migrazione. Evento `balance_synced` con vecchio:nuovo:in_flight. 26 test (due nuovi: conteggio con denaro in volo e trasferimento fallito; estraneo rifiutato). wasm 386402.
+
+Console: in Overview, se `ft_balance_of(tesoreria)` sul token supera `get_stats().balance`, compare la riga "The USDC contract holds X more..." con il bottone Sync balance (abilitato con chiave del proprietario o di un operatore). Verificato on chain su `treasury.bursar-sync-d542af4c.testnet` (1000 con ft_transfer_call, 500 con ft_transfer semplice: libri 1000, token 1500, dopo sync 1500; estraneo rifiutato con messaggio leggibile) e nella console con Playwright. README passo 9f.
+
+Le tesorerie gia' deployate (demo `treasury.bursar-b48563e6`, quelle di Stefano) hanno il wasm vecchio: `sync_balance` non esiste finche' non si rideploya con la chiave full access della tesoreria (`near deploy treasury.x.testnet web/contracts/bursar_policy.wasm`); lo stato e' compatibile, nessuna migrazione. Manca ancora un metodo di upgrade dal proprietario senza la chiave della tesoreria.

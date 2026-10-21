@@ -59,6 +59,10 @@ const USDC_DECIMALS_HINT: &str = "amounts are in the token's smallest unit (USDC
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 /// Raw storage key of the owner's encrypted vault (see `set_vault`).
 const VAULT_KEY: &[u8] = b"vault";
+/// USDC this contract has sent and whose transfer callback has not run yet. Raw storage, outside the state struct
+/// (see `set_vault`), so contracts deployed before `sync_balance` existed keep working after an upgrade.
+const IN_FLIGHT_KEY: &[u8] = b"inflight";
+const GAS_FT_VIEW: Gas = Gas::from_tgas(5);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_DAO_PROPOSAL: Gas = Gas::from_tgas(30);
 const GAS_DAO_VIEW: Gas = Gas::from_tgas(10);
@@ -283,6 +287,7 @@ pub struct Stats {
 #[ext_contract(ext_ft)]
 trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+    fn ft_balance_of(&self, account_id: AccountId) -> U128;
 }
 
 #[allow(dead_code)]
@@ -726,6 +731,7 @@ impl Bursar {
     /// the token, token paused) puts the money back on the books instead of silently losing track of it.
     #[private]
     pub fn on_ft_transfer(&mut self, id: Option<u64>, amount: U128, #[callback_result] result: Result<(), PromiseError>) -> bool {
+        self.set_in_flight(self.in_flight().saturating_sub(amount.0));
         if result.is_ok() {
             return true;
         }
@@ -793,6 +799,29 @@ impl Bursar {
     }
 
     // ----- token deposits (NEP-141 receiver) -----
+
+    /// Align the balance with what the token contract actually holds. USDC sent with a plain `ft_transfer`
+    /// (a wallet, an exchange) lands in the account without `ft_on_transfer` running, so the contract would
+    /// refuse payments for lack of funds it has. The owner or any operator asks; the answer is the token's,
+    /// minus the transfers this contract sent whose callback has not run yet.
+    pub fn sync_balance(&mut self) -> Promise {
+        self.assert_can(|_| true, "sync the balance");
+        ext_ft::ext(self.usdc.clone())
+            .with_static_gas(GAS_FT_VIEW)
+            .ft_balance_of(env::current_account_id())
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_sync_balance())
+    }
+
+    #[private]
+    pub fn on_sync_balance(&mut self, #[callback_result] held: Result<U128, PromiseError>) -> U128 {
+        let held = held.unwrap_or_else(|_| crate::fail("the token did not answer")).0;
+        let in_flight = self.in_flight();
+        let new = held.saturating_sub(in_flight);
+        let old = self.balance;
+        self.balance = new;
+        self.emit("balance_synced", &format!("{old}:{new}:{in_flight}"));
+        U128(new)
+    }
 
     /// The company funds the treasury with `ft_transfer_call` on the USDC contract.
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
@@ -1134,7 +1163,16 @@ impl Bursar {
         }
     }
 
+    fn in_flight(&self) -> u128 {
+        env::storage_read(IN_FLIGHT_KEY).and_then(|b| b.try_into().ok()).map(u128::from_le_bytes).unwrap_or(0)
+    }
+
+    fn set_in_flight(&self, v: u128) {
+        env::storage_write(IN_FLIGHT_KEY, &v.to_le_bytes());
+    }
+
     fn ft_transfer(&self, to: AccountId, amount: u128, memo: String) -> Promise {
+        self.set_in_flight(self.in_flight() + amount);
         ext_ft::ext(self.usdc.clone())
             .with_attached_deposit(ONE_YOCTO)
             .with_static_gas(GAS_FT_TRANSFER)
@@ -1653,6 +1691,41 @@ mod tests {
         // a later DAO approval cannot pay a cancelled payment
         testing_env!(ctx(accounts(3)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn sync_balance_counts_plain_transfers_and_not_money_in_flight() {
+        let mut c = setup();
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+        // a payment goes out: the balance drops at once, the USDC is in flight until the callback
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("hosting", "0923", 480_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 480_000_000);
+        // the token still holds everything (the transfer has not executed) plus 1000 USDC someone sent with a plain ft_transfer
+        testing_env!(as_self().build());
+        let synced = c.on_sync_balance(Ok(U128(50_000_000_000 + 1_000_000_000)));
+        assert_eq!(synced.0, 50_000_000_000 + 1_000_000_000 - 480_000_000, "in-flight USDC is not counted twice");
+        assert_eq!(c.get_stats().balance.0, synced.0);
+        // the transfer lands: nothing in flight any more, a sync now reads the token as it is
+        assert!(c.on_ft_transfer(Some(id), U128(480_000_000), Ok(())));
+        let synced = c.on_sync_balance(Ok(U128(50_000_000_000 + 1_000_000_000 - 480_000_000)));
+        assert_eq!(synced.0, 50_000_000_000 + 1_000_000_000 - 480_000_000);
+        // a failed transfer puts the money back and clears the in-flight count too
+        testing_env!(ctx(accounts(1)).build());
+        let id2 = c.request_payment(claim("hosting", "0924", 100_000_000, Payout::Near { account: accounts(5) }));
+        testing_env!(as_self().build());
+        assert!(!c.on_ft_transfer(Some(id2), U128(100_000_000), Err(PromiseError::Failed)));
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000 + 1_000_000_000 - 480_000_000);
+        let synced = c.on_sync_balance(Ok(U128(50_000_000_000 + 1_000_000_000 - 480_000_000)));
+        assert_eq!(synced.0, c.get_stats().balance.0);
+    }
+
+    #[test]
+    fn sync_balance_needs_the_owner_or_an_operator() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(5)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.sync_balance()));
         assert!(r.is_err());
     }
 
