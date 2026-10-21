@@ -22,9 +22,38 @@ use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::{IterableMap, LookupSet};
 use near_sdk::{
-    env, ext_contract, log, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise,
-    PromiseError, PromiseOrValue,
+    env, ext_contract, log, near, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError,
+    PromiseOrValue,
 };
+
+// The SDK's `require!` ends in `sys::panic_utf8`, declared `-> !`; the current toolchain drops that call and
+// leaves a bare `unreachable` trap, so a failed check reached the console as "WebAssembly trap" with no
+// message. This declares the same host function without `!` and calls it directly: the message survives.
+#[cfg(target_arch = "wasm32")]
+mod host {
+    #[link(wasm_import_module = "env")]
+    unsafe extern "C" {
+        pub fn panic_utf8(len: u64, ptr: u64);
+    }
+}
+#[cfg(target_arch = "wasm32")]
+#[inline(never)]
+pub(crate) fn fail(msg: &str) -> ! {
+    unsafe { host::panic_utf8(msg.len() as u64, msg.as_ptr() as u64) };
+    loop {}
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn fail(msg: &str) -> ! {
+    env::panic_str(msg)
+}
+macro_rules! require {
+    ($cond:expr, $msg:expr $(,)?) => {
+        if !$cond {
+            let m: &str = &$msg;
+            crate::fail(m)
+        }
+    };
+}
 
 const USDC_DECIMALS_HINT: &str = "amounts are in the token's smallest unit (USDC: 6 decimals)";
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);

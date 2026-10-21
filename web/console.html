@@ -835,6 +835,16 @@ const keyOf = (secretKey) => {
 const newKey = () => { const seed = crypto.getRandomValues(new Uint8Array(32)); const pub = ed25519.getPublicKey(seed); return { secretKey: "ed25519:" + b58encode(concat(seed, pub)), pubStr: "ed25519:" + b58encode(pub), pub }; };
 const nonces = {}; // last nonce used per key in this page, so back-to-back transactions do not wait for finality
 /** Sign and send one transaction with an ed25519 key held in this page (no library: borsh + ed25519 + RPC send_tx). */
+/** The contract's own words when it refuses something, instead of the runtime's JSON. */
+function txFailureText(failure) {
+  const raw = JSON.stringify(failure);
+  const m = raw.match(/Smart contract panicked: ([^"\\]+)/);
+  if (m) return `the contract refused it: ${m[1]}`;
+  if (/unreachable/.test(raw)) return "the contract refused it: one of its checks failed (this treasury runs an earlier build that does not say which; a treasury created from now on does)";
+  if (/NotEnoughBalance|LackBalanceForState/.test(raw)) return "the signing account has not enough NEAR for this call";
+  if (/InvalidAccessKeyError|MethodNameMismatch|NotEnoughAllowance/.test(raw)) return "the key in this browser is not allowed to do this; sign in again with the wallet";
+  return "transaction failed: " + raw.slice(0, 400);
+}
 async function sendTx({ signerId, secretKey, receiverId, actions, gasTgas }) {
   const { seed, pub, pubStr } = keyOf(secretKey);
   const ak = await rpc("query", { request_type: "view_access_key", finality: "final", account_id: signerId, public_key: pubStr });
@@ -858,7 +868,7 @@ async function sendTx({ signerId, secretKey, receiverId, actions, gasTgas }) {
     try { res = await waitForTx(hash, signerId); } catch (e2) { throw new Error(`${e.message}; ${e2.message}`); }
   }
   const st = res.status ?? {};
-  if (st.Failure) throw new Error("transaction failed: " + JSON.stringify(st.Failure).slice(0, 400));
+  if (st.Failure) throw new Error(txFailureText(st.Failure));
   for (const ro of res.receipts_outcome ?? []) { const f = ro.outcome?.status?.Failure; if (f) throw new Error("receipt failed: " + JSON.stringify(f).slice(0, 400)); }
   const value = st.SuccessValue ? td.decode(unb64(st.SuccessValue)) : "";
   return { hash: res.transaction?.hash, value };
@@ -1376,6 +1386,8 @@ $("#oAdd").addEventListener("click", async () => {
   $("#oErr").hidden = true;
   try {
     if (!canAct("manage_orders")) throw new Error("this needs the owner key, or an operator allowed to manage orders");
+    if (!$("#oRef").value.trim()) throw new Error("a purchase order needs the reference printed on the invoices (for example PO-2026-118): the contract matches invoices to it");
+    if (!(Number($("#oAmount").value) > 0)) throw new Error("the total must be above zero");
     await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_order", args: { vendor_id: $("#oVendor").value, reference: $("#oRef").value.trim(), description: $("#oDesc").value.trim(), amount: toUnits($("#oAmount").value || "0"), expires_at: null }, gasTgas: 30 });
     $("#oRef").value = ""; $("#oAmount").value = ""; $("#oDesc").value = "";
     await loadTreasury();
