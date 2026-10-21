@@ -1959,6 +1959,8 @@ function wizOpen() {
   wizPane("wizCompany"); if (!wiz.open) wiz.showModal();
 }
 $("#create").addEventListener("click", wizOpen);
+// Arriving from the sign-in page with a wallet that owns nothing: the person already pressed Create there, so open the wizard now.
+if (location.hash === "#start" && walletOwner()) setTimeout(wizOpen, 300);
 $("#wCancel").addEventListener("click", () => wiz.close()); $("#wCancel2").addEventListener("click", () => wiz.close());
 wiz.addEventListener("cancel", (e) => { const creating = !$("#wizCreate").hidden && $("#created").hidden && $("#wizRetry").hidden; if (creating) e.preventDefault(); }); // no Escape while it creates
 $("#wNext").addEventListener("click", () => {
