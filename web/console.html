@@ -200,6 +200,7 @@
           <button id="create" type="button" class="btn-signal">Create my treasury</button>
           <span class="muted" style="font-size:14px;max-width:46ch" id="startAside">Already have one? Add it in Settings with its keys.</span>
         </div>
+        <p class="muted" id="startOver" style="font-size:13px;margin:10px 0 0" hidden>A creation started earlier in this browser is saved here. <a href="#start" id="startFresh">Start over</a> to discard it and create a new treasury instead.</p>
         <ul class="log" id="createSteps" style="margin-top:24px"></ul>
         <div id="createErr" class="err" hidden></div>
         <div id="created" hidden style="margin-top:24px">
@@ -1895,7 +1896,15 @@ async function createTreasury() {
 }
 $("#create").addEventListener("click", createTreasury);
 reflectWalletOwner();
-try { const ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); const wo = walletOwner(); if (ob && (!wo || ob.owner === wo.account)) $("#create").textContent = `Resume creating my treasury${ob.owner ? ` for ${ob.owner}` : ""}`; } catch {}
+function reflectOnboarding() {
+  let ob = null; try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
+  const wo = walletOwner();
+  const resume = !!ob && (!wo || ob.owner === wo.account);
+  $("#create").textContent = resume ? `Resume creating my treasury${ob.owner ? ` for ${ob.owner}` : ""}` : "Create my treasury";
+  $("#startOver").hidden = !resume;
+}
+reflectOnboarding();
+$("#startFresh").addEventListener("click", (e) => { e.preventDefault(); try { localStorage.removeItem("bursar.onboarding"); } catch {} $("#createSteps").innerHTML = ""; reflectOnboarding(); });
 let lastDecision = null;
 $("#approve").addEventListener("click", async () => {
   if (!lastDecision) return;
