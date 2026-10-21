@@ -4,7 +4,7 @@
 
 The AI reads. The contract decides. A dumb executor moves the money.
 
-Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `business`, `privacy`, `security`. Development started in October 2026; the project was completed, tested and submitted during the hackathon, and the commit history is kept as it is.
+Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `business`, `privacy`, `security`. Development started on October 20, 2026; the project was completed, tested and submitted during the hackathon, and the commit history is kept as it is.
 
 ## The problem
 
