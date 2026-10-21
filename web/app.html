@@ -328,12 +328,13 @@
 <section class="band light view" id="vendors" hidden>
   <div class="in">
     <div class="band-head"><div class="eyebrow">[ VENDORS ]</div><h2 class="heading">Who the company pays, and where. Written once, by the owner.</h2></div>
-    <div class="wrap"><table id="vendorsTable"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th><th>spent this month</th><th>orders</th><th>active</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="vendorsTable"><thead><tr><th>vendor</th><th>name</th><th>identifier</th><th>payout recorded by the owner</th><th>monthly budget</th><th>spent this month</th><th>orders</th><th>active</th><th></th></tr></thead><tbody></tbody></table></div>
     <div class="card" style="margin-top:32px">
       <div class="eyebrow muted" style="margin-bottom:16px">Add a vendor</div>
       <div class="grid cols-3">
         <label><span>Vendor id (slug) <i class="help" tabindex="0" data-help="A short handle in lowercase letters and digits, for example acmehosting. The AI reads the vendor name on the invoice and the contract matches it to this id. It cannot be changed later.">?</i></span><input id="vId" placeholder="acmehosting" autocomplete="off"></label>
         <label><span>Name <i class="help" tabindex="0" data-help="The vendor's name as printed on its invoices.">?</i></span><input id="vName" placeholder="Acme Hosting" autocomplete="off"></label>
+        <label><span>Identifier printed on invoices <i class="help" tabindex="0" data-help="Optional. The VAT number, EIN, CNPJ, GSTIN, ABN or any tax id this vendor prints on its invoices. A private person or freelancer without one: give them a supplier code (for example SUP-0042) and ask them to print it. When set, an invoice that shows a different identifier waits for a person: the name can be imitated, the id cannot. Spaces and punctuation do not matter.">?</i></span><input id="vTax" placeholder="PT509876543 or SUP-0042" autocomplete="off"></label>
         <label><span>Monthly budget, USDC (0 = none) <i class="help" tabindex="0" data-help="The most this vendor is paid in one calendar month. Invoices past it are refused. 0 means no monthly limit.">?</i></span><input id="vBudget" placeholder="3000" autocomplete="off"></label>
         <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
         <label style="grid-column: span 2"><span>Account or address <i class="help" tabindex="0" data-help="The only place this vendor will ever be paid. An invoice that asks for a different account or address is refused, not paid: this is what stops the new bank details fraud. Confirm it with the vendor by phone before saving.">?</i></span><input id="vPayout" placeholder="vendor.testnet or 0x..." autocomplete="off"></label>
@@ -466,6 +467,10 @@
         <div class="grid">
           <label><span>Name</span><input id="cName" placeholder="Northwind Studio Srl" autocomplete="off"></label>
           <label><span>Description</span><input id="cDesc" placeholder="Design studio, Milano" autocomplete="off"></label>
+          <div class="grid cols-2">
+            <label><span>Country <i class="help" tabindex="0" data-help="Where the company is based, as a two-letter code. Informational.">?</i></span><input id="cCountry" placeholder="IT" maxlength="2" autocomplete="off"></label>
+            <label><span>Your tax id <i class="help" tabindex="0" data-help="Optional. Your VAT number, EIN, CNPJ or equivalent. When set, every invoice must be addressed to it: one addressed to another company waits for a person instead of being paid. Vendors print it next to your name under Bill to.">?</i></span><input id="cTax" placeholder="IT01234567890" autocomplete="off"></label>
+          </div>
         </div>
         <div class="actions" style="margin-top:16px"><button id="cSave" type="button" class="btn-inverse">Save company</button></div>
       </div>
@@ -770,8 +775,28 @@ Fields:
   "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
 - order_ref: the purchase order or reference number printed on the invoice (labels like "Purchase order", "PO", "Order ref"), as printed; empty string if none
+- vendor_tax_id: the issuing company's tax identifier as printed (VAT number, EIN, CNPJ, GSTIN, ABN, supplier code...), empty string if none
+- buyer_tax_id: the tax identifier of the company the invoice is addressed to ("Bill to"), as printed; empty string if none
+- subtotal: the amount before tax as a decimal string, empty string if not shown
+- tax_amount: the tax amount as a decimal string, empty string if not shown
 - confidence: 0 to 1
 Return only the JSON object.`;
+// Checks on the reading that do not trust the model (same as app/src/ai.ts readingFlags): each failure is a flag, and a flag holds the payment for a person.
+function parseMoney(str) { const t = str.replace(/\s/g, ""); const d = t.lastIndexOf("."), c = t.lastIndexOf(","); let n; if (d >= 0 && c >= 0) n = d > c ? t.replace(/,/g, "") : t.replace(/\./g, "").replace(",", "."); else if (c >= 0) n = t.length - c === 3 ? t.replace(",", ".") : t.replace(/,/g, ""); else n = t; return Number(n); }
+function readingFlags(ex, text) {
+  const flags = []; const amount = Number(ex.amount || "0");
+  const nums = (text.match(/\d[\d.,]*\d|\d/g) ?? []).map(parseMoney).filter(Number.isFinite);
+  const money = (text.match(/\d[\d.,]*[.,]\d{2}(?![\d.,])/g) ?? []).map(parseMoney).filter(Number.isFinite);
+  if (!text.trim()) flags.push("no_text_layer");
+  else if (amount > 0 && !nums.some((n) => Math.abs(n - amount) < 0.005)) flags.push("amount_not_in_text");
+  else if (amount > 0 && money.some((n) => n > amount + 0.005)) flags.push("larger_amount_in_text");
+  if (ex.subtotal && ex.tax_amount) { const sum = Number(ex.subtotal) + Number(ex.tax_amount); if (Number.isFinite(sum) && Math.abs(sum - amount) > 0.01) flags.push("totals_mismatch"); }
+  if (typeof ex.confidence === "number" && ex.confidence < 0.6) flags.push("low_confidence");
+  if (ex.currency && ex.currency.toUpperCase() !== "USDC") flags.push("currency_not_usdc");
+  return flags;
+}
+const FLAG = { new_payment_details: "the invoice announces new payment details", urgency: "the invoice presses for immediate payment", mismatched_contact: "the contact details do not match the vendor", handwritten_or_altered: "the document looks altered", missing_invoice_number: "no invoice number", unreadable: "parts of the document are unreadable", no_text_layer: "a scan with no text layer: the amount cannot be cross-checked", amount_not_in_text: "the total the model read does not appear in the document's text", larger_amount_in_text: "a larger amount than the total appears in the document", totals_mismatch: "subtotal plus tax does not equal the total", low_confidence: "the model was not confident", currency_not_usdc: "the invoice is not in USDC" };
+const flagText = (f) => FLAG[f] ?? f;
 const aiHeaders = () => useOwnKey() && settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
 const sha256hex = (s) => toHex(sha256(te.encode(s)));
 
@@ -955,7 +980,8 @@ async function handleFile(file) {
     const claim = {
       vendor_id: matchVendor(extraction, vendors), invoice_number: extraction.invoice_number || "unknown", amount: toUnits(extraction.amount || "0"),
       due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: extraction.payout_seen,
-      attestation_ref: attestationRef(receipt), flags: extraction.flags ?? [], order_ref: (extraction.order_ref || "").trim() || null,
+      attestation_ref: attestationRef(receipt), flags: [...(extraction.flags ?? []), ...readingFlags(extraction, text)], order_ref: (extraction.order_ref || "").trim() || null,
+      vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(),
     };
     await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
   } catch (e) {
@@ -1010,14 +1036,14 @@ function matchVendor(ex, vendors) {
 }
 const payoutText = (p) => p?.Near ? `NEAR ${p.Near.account}` : p?.Chain ? `${p.Chain.chain} ${p.Chain.address}` : "?";
 function showExtraction(ex) {
-  const rows = [["vendor", ex.vendor_name], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
+  const rows = [["vendor", `${ex.vendor_name}${ex.vendor_tax_id ? ` (${ex.vendor_tax_id})` : ""}`], ["bill to", ex.buyer_tax_id || "no tax id printed"], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}${ex.subtotal ? ` (subtotal ${ex.subtotal}, tax ${ex.tax_amount || "0"})` : ""}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
   $("#exKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
   $("#flags").innerHTML = (ex.flags?.length ? ex.flags.map((f) => `<span class="flag">${esc(f)}</span>`).join("") : `<span class="flag none">no flags</span>`);
   $("#extraction").hidden = false;
 }
 function showClaim(claim, vendors, verified) {
   const known = vendors.some(([id]) => id === claim.vendor_id);
-  const rows = [["vendor id", `${claim.vendor_id}${known ? "" : " (not in the allowlist)"}`], ["invoice", claim.invoice_number], ["amount", usdc(claim.amount)], ["payout on the invoice", payoutText(claim.payout_seen)], ["invoice hash", claim.invoice_hash], ["attestation ref", claim.attestation_ref], ["flags", claim.flags.join(", ") || "none"]];
+  const rows = [["vendor id", `${claim.vendor_id}${known ? "" : " (not in the allowlist)"}`], ["invoice", claim.invoice_number], ["amount", usdc(claim.amount)], ["payout on the invoice", payoutText(claim.payout_seen)], ["invoice hash", claim.invoice_hash], ["attestation ref", claim.attestation_ref], ["flags", claim.flags.map(flagText).join("; ") || "none"]];
   $("#claimKv").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
   $("#submit").disabled = !verified;
   $("#submitNote").textContent = verified ? "The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address." : "The receipt did not verify: this page will not submit it.";
@@ -1049,7 +1075,7 @@ const REASON = {
   dao_proposal_failed: "the DAO refused to open the proposal; budget released",
   transfer_failed: "USDC transfer failed on the token contract; balance restored",
 };
-const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the model flagged the invoice" };
+const HOLD = { over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id" };
 const holdText = (r) => (r || "over_threshold").split("+").map((x) => HOLD[x] ?? x).join(", ");
 function why(p) {
   const parts = [];
@@ -1135,8 +1161,10 @@ document.addEventListener("click", async (e) => {
     }
     const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner" }[act];
     if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
-    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", removeOp: "remove_operator" }[act];
-    const args = act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "removeOp" ? { account: b.dataset.id } : { id };
+    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", removeOp: "remove_operator" }[act];
+    let tax = null;
+    if (act === "setTax") { tax = prompt("Identifier this vendor prints on its invoices (VAT number, EIN, CNPJ, or a supplier code you assign). Leave empty to stop checking it.", b.dataset.tax || ""); if (tax === null) return; }
+    const args = act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "removeOp" ? { account: b.dataset.id } : { id };
     await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
     await loadTreasury();
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
@@ -1150,7 +1178,7 @@ $("#attnSync").addEventListener("click", async () => {
   } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; } finally { b.disabled = false; }
 });
 function renderVendors() {
-  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
+  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
   const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}">${esc(v.name)} (${esc(id)})</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
 }
@@ -1161,8 +1189,8 @@ $("#vAdd").addEventListener("click", async () => {
     const id = $("#vId").value.trim().toLowerCase().replace(/[^a-z0-9]/g, ""), name = $("#vName").value.trim(), chain = $("#vChain").value, addr = $("#vPayout").value.trim();
     if (!id || !name || !addr) throw new Error("vendor id, name and payout are required");
     const payout = chain === "near" ? { Near: { account: addr.toLowerCase() } } : { Chain: { chain, address: addr } };
-    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0") }, gasTgas: 30 });
-    for (const f of ["vId", "vName", "vBudget", "vPayout"]) $("#" + f).value = "";
+    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0"), tax_id: $("#vTax").value.trim() || null }, gasTgas: 30 });
+    for (const f of ["vId", "vName", "vBudget", "vPayout", "vTax"]) $("#" + f).value = "";
     await loadTreasury();
   } catch (e) { $("#vErr").textContent = e.message; $("#vErr").hidden = false; }
 });
@@ -1203,7 +1231,7 @@ function renderAnalytics() {
 }
 function renderSettings() {
   const { limits, roles, company, operators } = state;
-  $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || "";
+  $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || ""; $("#cCountry").value = company?.country || ""; $("#cTax").value = company?.tax_id || "";
   $("#lCap").value = Number(BigInt(limits.per_payment_cap) / 1000000n); $("#lDay").value = Number(BigInt(limits.daily_cap) / 1000000n); $("#lThr").value = Number(BigInt(limits.approval_threshold) / 1000000n); $("#lStrict").value = String(!!limits.require_orders);
   $("#rolesLine").textContent = `owner ${roles[0]}, agent ${roles[1]}, executor ${roles[2]}, DAO ${roles[3] ?? "none"}, token ${roles[4]}`;
   const help = (t) => `<i class="help" tabindex="0" data-help="${esc(t)}">?</i>`;
@@ -1231,7 +1259,7 @@ async function ownerCall(method, args, gasTgas = 30) {
   return functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method, args, gasTgas });
 }
 const onErr = (e) => { $("#sErr").textContent = e.message; $("#sErr").hidden = false; };
-$("#cSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_company", { name: $("#cName").value.trim(), description: $("#cDesc").value.trim() }); await loadTreasury(); } catch (e) { onErr(e); } });
+$("#cSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_company", { name: $("#cName").value.trim(), description: $("#cDesc").value.trim(), country: $("#cCountry").value.trim().toUpperCase() || null, tax_id: $("#cTax").value.trim() || null }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
 // ---------- governance: a Sputnik DAO for the company, from the console ----------
@@ -1423,9 +1451,10 @@ addEventListener("hashchange", route);
 // ---------- onboarding: this browser becomes the company ----------
 const TUSDC = "tusdc.bursar-b48563e6.testnet"; // throwaway NEP-141 with open mint, deployed by the README setup
 const DEMO_VENDORS = [
-  { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-b48563e6.testnet" } }, monthly_budget: "3000000000" },
-  { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: "legalpartners.bursar-b48563e6.testnet" } }, monthly_budget: "0" },
-  { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" },
+  // no tax ids here: the recorded readings predate them and must keep their outcomes; a judge sets one in Vendors to try the check
+  { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-b48563e6.testnet" } }, monthly_budget: "3000000000", tax_id: null },
+  { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: "legalpartners.bursar-b48563e6.testnet" } }, monthly_budget: "0", tax_id: null },
+  { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0", tax_id: null },
 ];
 async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
 /** Set by login.html when a wallet account signed in and owns no treasury yet: the one created here belongs to it. */

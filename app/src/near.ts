@@ -17,6 +17,10 @@ export interface InvoiceClaim {
   flags: string[];
   /** Purchase order or reference printed on the invoice, if any. */
   order_ref?: string | null;
+  /** The vendor's tax id as printed on the invoice, empty if none. */
+  vendor_tax_id?: string;
+  /** The buyer's tax id as printed on the invoice, empty if none. */
+  buyer_tax_id?: string;
 }
 
 export interface Order {
@@ -39,6 +43,8 @@ export interface Role {
 export interface Company {
   name: string;
   description: string;
+  country?: string | null;
+  tax_id?: string | null;
 }
 
 export interface Payment {
@@ -67,6 +73,8 @@ export interface Vendor {
   spent_this_month: string;
   month: number;
   active: boolean;
+  /** What the vendor prints on its invoices to identify itself (VAT number, EIN, CNPJ, or a supplier code). */
+  tax_id?: string | null;
 }
 
 export const provider = new JsonRpcProvider({ url: config.rpc });

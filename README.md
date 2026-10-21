@@ -56,7 +56,7 @@ git clone <repo> && cd bursar
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 cd app && npm install && npm test
 ```
-See: `19 passed` from `cargo test`, `bursar_policy.wasm: 364331 bytes` (smaller if `wasm-opt` is installed), and 9 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples).
+See: `20 passed` from `cargo test`, `bursar_policy.wasm: 369065 bytes` (smaller if `wasm-opt` is installed), and 9 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples).
 
 **1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR: the faucet gives 10 per account, so create two and transfer from one to the other. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
 
@@ -65,7 +65,7 @@ See: `19 passed` from `cargo test`, `bursar_policy.wasm: 364331 bytes` (smaller 
 ```bash
 npx tsx src/cli.ts setup --root you.testnet
 ```
-See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUSDC token; a Sputnik DAO with you as council; the policy contract deployed and funded with 15,000 tUSDC; three orders recorded (hosting 500 USDC a month, purchase orders PO-2026-118 and PO-2026-104); the treasury listed in the public registry (`listed treasury.you.testnet in the registry`); the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts.
+See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUSDC token; a Sputnik DAO with you as council; the policy contract deployed and funded with 15,000 tUSDC; three vendors, each with the tax id it prints on its invoices; three orders recorded (hosting 500 USDC a month, purchase orders PO-2026-118 and PO-2026-104); the treasury listed in the public registry (`listed treasury.you.testnet in the registry`); the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts.
 
 **3. Start the relayer and process the inbox.**
 
@@ -112,6 +112,21 @@ cp ../invoices/samples/06-acme-hosting-1002.pdf ../invoices/inbox/ && npm run ag
 npm run dev status
 ```
 See: `#6 acmehosting AH-1002 290.00 USDC Approval no_order dao#1`: not blocked, not paid, held for a person. With a DAO the council votes; without one the owner or an approver calls `approve_payment` or `cancel_payment`. Invoices the model flagged (urgency, new payment details) are held the same way, reason `flagged`: the AI can add scrutiny, never remove it. `set_order_policy true` makes every invoice need an order; by default only vendors that have orders are held to them.
+
+**5c. Identity on the invoice.** Names can be imitated; tax ids cannot. `setup` recorded the VAT number each vendor prints on its invoices, so the contract compares it with the one the model read. Invoice 7 is "Acme Host GmbH", a look-alike with another VAT number that asks to be paid to Acme's registered account:
+
+```bash
+cp ../invoices/samples/07-acme-host-gmbh-3001.pdf ../invoices/inbox/ && npm run agent -- --once --offline
+```
+See: `#7 acmehosting AHG-3001 480.00 USDC Approval no_order+identity_mismatch`: held for a person, with every reason the contract found (a second Acme invoice in the same period, and not Acme's tax id), not a guess from the name. Now record your own tax id, so every invoice must be addressed to you, and send invoice 8, a real Acme invoice addressed to another customer:
+
+```bash
+near contract call-function as-transaction treasury.you.testnet set_company json-args '{"name":"Northwind Studio","description":"","country":"IT","tax_id":"IT01234567890"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
+cp ../invoices/samples/08-acme-hosting-1003-other-customer.pdf ../invoices/inbox/ && npm run agent -- --once --offline
+```
+See: `#8 acmehosting AH-1003 480.00 USDC Approval no_order+buyer_mismatch`. Both identity reasons are holds, not blocks: a tax id read wrong must not refuse a real invoice, it must have a person look. In the console the same lives in Vendors ("Identifier", per vendor) and in Settings, Company. Spaces and punctuation in the ids do not matter.
+
+The reading itself is cross-checked without trusting the model: the total must appear in the PDF's text layer, no larger amount may appear in it, subtotal plus tax must equal the total when the invoice shows them, the model's confidence must be at least 0.6, and the currency must be USDC. Each failure is a flag, and the contract holds anything flagged (`Approval flagged`); a scan with no text layer is always held. A misread amount can therefore pay less than the invoice, never more than the document shows, never to another account, and never past an order or a cap.
 
 **6. Verify the TEE receipt yourself.** With `NEAR_AI_API_KEY` set, step 3 reads the invoices inside the enclave and writes one receipt per payment in `app/.bursar/receipts/<id>.json`: the exact request and response bytes, the gateway's ECDSA signature, the attestation report with the Intel TDX quote, and the nonce the agent chose. Anyone with that file can check it, without the API key:
 
@@ -166,7 +181,7 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 **10. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. With `NEAR_NETWORK=mainnet`, real USDC in the treasury and a vendor on Base, `npm run executor -- --once` quotes USDC NEAR to USDC Base with the vendor's address as recipient, calls `settle`, and marks the payment `Settled` with the Base transaction hash.
 
-**Unit tests:** `cd contracts/policy && cargo test` (19 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, owner approval without a DAO, purchase orders consumed then held, standing order one invoice per month, vendors without orders unless strict, model flags add scrutiny, operators and roles, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request, chain address case, ownership transfer). `cd contracts/registry && cargo test` (4 tests: register and look up, fee, no hijacking, owner updates and removes). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
+**Unit tests:** `cd contracts/policy && cargo test` (20 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, owner approval without a DAO, purchase orders consumed then held, standing order one invoice per month, vendors without orders unless strict, model flags add scrutiny, operators and roles, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request, chain address case, ownership transfer, tax ids on the invoice). `cd contracts/registry && cargo test` (4 tests: register and look up, fee, no hijacking, owner updates and removes). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
 
 ## NEAR features used, and why
 

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "./config.js";
-import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport } from "./ai.js";
+import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, readingFlags } from "./ai.js";
 import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
 
 const exec = promisify(execFile);
@@ -98,8 +98,10 @@ function buildClaim(read: ReadResult, vendorId: string): InvoiceClaim {
     invoice_hash: invoiceHash,
     payout_seen: extraction.payout_seen,
     attestation_ref: read.attestationRef,
-    flags: extraction.flags ?? [],
+    flags: [...(extraction.flags ?? []), ...readingFlags(extraction, read.text)],
     order_ref: extraction.order_ref?.trim() || null,
+    vendor_tax_id: (extraction.vendor_tax_id || "").trim(),
+    buyer_tax_id: (extraction.buyer_tax_id || "").trim(),
   };
 }
 

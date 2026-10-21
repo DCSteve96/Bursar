@@ -13,11 +13,14 @@ ap.add_argument("--near-vendor", default="acmehosting.testnet")
 ap.add_argument("--near-vendor-legal", default="legalpartners.testnet")
 ap.add_argument("--base-address", default="0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801")
 ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "samples"))
+# Tax ids printed on the invoices: the vendors' (what `bursar setup` records for them) and the buyer's. Fictional.
+VAT = {"Acme Hosting": "PT509876543", "DesignCo": "NL862345678B01", "Legal Partners LLP": "IT09876543210"}
+BUYER_VAT = "IT01234567890"
 a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
 
 
-def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, pay_lines, note=None, stamp=None, po=None):
+def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, pay_lines, note=None, stamp=None, po=None, vat=None, buyer_vat=BUYER_VAT, subtotal=None, tax=None):
     c = canvas.Canvas(path, pagesize=A4)
     w, h = A4
     y = h - 30 * mm
@@ -35,12 +38,14 @@ def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, 
     c.setFont("Helvetica", 10)
     c.drawString(20 * mm, y - 5 * mm, vendor_line2)
     c.drawString(20 * mm, y - 10 * mm, email)
+    c.drawString(20 * mm, y - 15 * mm, f"VAT: {vat or VAT.get(vendor, '')}")
     c.setFont("Helvetica-Bold", 11)
     c.drawString(110 * mm, y, "Bill to: Northwind Studio Srl")
     c.setFont("Helvetica", 10)
     c.drawString(110 * mm, y - 5 * mm, "Via dei Mille 4, Milano")
-    c.drawString(110 * mm, y - 10 * mm, "treasury: northwind-treasury.near")
-    y -= 25 * mm
+    c.drawString(110 * mm, y - 10 * mm, f"Customer VAT: {buyer_vat}")
+    c.drawString(110 * mm, y - 15 * mm, "treasury: northwind-treasury.near")
+    y -= 30 * mm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(20 * mm, y, "Description")
     c.drawRightString(w - 20 * mm, y, "Amount (USDC)")
@@ -54,6 +59,12 @@ def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, 
     y -= 4 * mm
     c.line(20 * mm, y, w - 20 * mm, y)
     y -= 8 * mm
+    if subtotal is not None:
+        c.setFont("Helvetica", 10)
+        c.drawRightString(w - 20 * mm, y, f"Subtotal: {subtotal}")
+        y -= 6 * mm
+        c.drawRightString(w - 20 * mm, y, f"VAT (0%, reverse charge): {tax}")
+        y -= 8 * mm
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(w - 20 * mm, y, f"Total due: {total} USDC")
     y -= 16 * mm
@@ -81,7 +92,7 @@ def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, 
 invoice(os.path.join(a.out, "01-acme-hosting-0923.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
         "AH-0923", "2026-11-01", "2026-11-15",
         [("Dedicated server EU-West, November", "420.00"), ("Backup storage 2 TB", "60.00")], "480.00",
-        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"])
+        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"], subtotal="480.00", tax="0.00")
 
 # 2. Vendor on Base, under threshold -> Queued -> Intents
 invoice(os.path.join(a.out, "02-designco-1107.pdf"), "DesignCo", "Prinsengracht 220, Amsterdam", "invoices@designco.example",
@@ -114,5 +125,17 @@ invoice(os.path.join(a.out, "06-acme-hosting-1002.pdf"), "Acme Hosting", "Rua da
         "AH-1002", "2026-11-25", "2026-12-09",
         [("Extra bandwidth, November", "290.00")], "290.00",
         [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"])
+
+# 7. Same name, another legal entity (another VAT number), Acme's registered account -> held: identity_mismatch (not Acme, whatever the name says)
+invoice(os.path.join(a.out, "07-acme-host-gmbh-3001.pdf"), "Acme Hosting", "Acme Host GmbH, Friedrichstrasse 100, Berlin", "billing@acme-host.example",
+        "AHG-3001", "2026-11-26", "2026-12-10",
+        [("Managed hosting, November", "480.00")], "480.00",
+        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"], vat="DE311234567")
+
+# 8. A real Acme invoice addressed to another customer -> held: buyer_mismatch (when the company recorded its tax id)
+invoice(os.path.join(a.out, "08-acme-hosting-1003-other-customer.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
+        "AH-1003", "2026-11-27", "2026-12-11",
+        [("Dedicated server EU-West, December", "480.00")], "480.00",
+        [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"], buyer_vat="FR40123456789")
 
 print("written to", a.out)

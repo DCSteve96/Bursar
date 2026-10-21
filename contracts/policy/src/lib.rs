@@ -75,6 +75,10 @@ pub struct Vendor {
     /// Month key as YYYYMM derived from block timestamp.
     pub month: u32,
     pub active: bool,
+    /// What the vendor prints on its invoices to identify itself: a VAT number, an EIN, a CNPJ, or a supplier
+    /// code the company assigned. Compared after normalization. None = not checked.
+    #[serde(default)]
+    pub tax_id: Option<String>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -124,6 +128,12 @@ pub struct InvoiceClaim {
     pub attestation_ref: String,
     /// Free-text flags raised by the model (urgency, new bank details, mismatched domain...).
     pub flags: Vec<String>,
+    /// The vendor's tax id as printed on the invoice, empty if none.
+    #[serde(default)]
+    pub vendor_tax_id: String,
+    /// The buyer's tax id as printed on the invoice, empty if none.
+    #[serde(default)]
+    pub buyer_tax_id: String,
     /// Purchase order or reference printed on the invoice, if any.
     #[serde(default)]
     pub order_ref: Option<String>,
@@ -158,6 +168,12 @@ pub struct Payment {
 pub struct Company {
     pub name: String,
     pub description: String,
+    /// ISO country code of the company, informational.
+    #[serde(default)]
+    pub country: Option<String>,
+    /// The company's own tax id. When set, an invoice must be addressed to it or it waits for a person.
+    #[serde(default)]
+    pub tax_id: Option<String>,
 }
 
 /// What an operator may do. The owner keeps everything else (limits, roles, withdraw, pause).
@@ -325,7 +341,7 @@ impl Bursar {
 
     // ----- owner -----
 
-    pub fn add_vendor(&mut self, vendor_id: String, name: String, payout: Payout, monthly_budget: U128) {
+    pub fn add_vendor(&mut self, vendor_id: String, name: String, payout: Payout, monthly_budget: U128, tax_id: Option<String>) {
         self.assert_can(|r| r.manage_vendors, "manage vendors");
         require!(!self.vendors.contains_key(&vendor_id), "vendor exists");
         self.vendors.insert(
@@ -337,17 +353,22 @@ impl Bursar {
                 spent_this_month: 0,
                 month: Self::month_key(),
                 active: true,
+                tax_id: tax_id.filter(|t| !Self::norm_id(t).is_empty()),
             },
         );
         self.emit("vendor_added", &vendor_id);
     }
 
     /// Changing a payout is an owner action, never something an invoice can do.
-    pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>) {
+    pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>, tax_id: Option<String>) {
         self.assert_can(|r| r.manage_vendors, "manage vendors");
         let mut v = self.vendors.get(&vendor_id).cloned().expect("unknown vendor");
         if let Some(p) = payout {
             v.payout = p;
+        }
+        if let Some(t) = tax_id {
+            // an empty string clears the check
+            v.tax_id = if Self::norm_id(&t).is_empty() { None } else { Some(t) };
         }
         if let Some(b) = monthly_budget {
             v.monthly_budget = b.0;
@@ -378,9 +399,9 @@ impl Bursar {
         self.emit("order_policy_set", if require_orders { "required" } else { "per_vendor" });
     }
 
-    pub fn set_company(&mut self, name: String, description: String) {
+    pub fn set_company(&mut self, name: String, description: String, country: Option<String>, tax_id: Option<String>) {
         self.assert_owner();
-        self.company = Some(Company { name: name.clone(), description });
+        self.company = Some(Company { name: name.clone(), description, country, tax_id: tax_id.filter(|t| !Self::norm_id(t).is_empty()) });
         self.emit("company_set", &name);
     }
 
@@ -535,6 +556,19 @@ impl Bursar {
                 }
                 if !claim.flags.is_empty() {
                     holds.push("flagged");
+                }
+                // Identity, when the owner recorded it: the vendor's tax id on the invoice must be the registered one,
+                // and the invoice must be addressed to this company. A misread id must not refuse a real invoice, so
+                // both are holds for a person, not blocks.
+                if let Some(t) = self.vendors.get(&claim.vendor_id).and_then(|v| v.tax_id.as_ref()) {
+                    if Self::norm_id(&claim.vendor_tax_id) != Self::norm_id(t) {
+                        holds.push("identity_mismatch");
+                    }
+                }
+                if let Some(t) = self.company.as_ref().and_then(|c| c.tax_id.as_ref()) {
+                    if Self::norm_id(&claim.buyer_tax_id) != Self::norm_id(t) {
+                        holds.push("buyer_mismatch");
+                    }
                 }
                 if !holds.is_empty() {
                     let reason = holds.join("+");
@@ -1015,6 +1049,11 @@ impl Bursar {
         (y as u32) * 100 + m as u32
     }
 
+    /// Tax ids compared as uppercase letters and digits only: "IT 01234567890" equals "it01234567890".
+    fn norm_id(s: &str) -> String {
+        s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).collect()
+    }
+
     fn invoice_key(vendor_id: &str, invoice_number: &str) -> String {
         format!("{}|{}", vendor_id.to_lowercase(), invoice_number.trim().to_lowercase())
     }
@@ -1063,12 +1102,14 @@ mod tests {
             "Acme Hosting".into(),
             Payout::Near { account: accounts(5) },
             U128(10_000_000_000),
+            None,
         );
         c.add_vendor(
             "design".into(),
             "DesignCo".into(),
             Payout::Chain { chain: "base".into(), address: "0xabc".into() },
             U128(0),
+            None,
         );
         // fund
         testing_env!(ctx(accounts(4)).build());
@@ -1079,6 +1120,8 @@ mod tests {
     fn claim(vendor: &str, number: &str, amount: u128, payout: Payout) -> InvoiceClaim {
         InvoiceClaim {
             order_ref: None,
+            vendor_tax_id: String::new(),
+            buyer_tax_id: String::new(),
             vendor_id: vendor.into(),
             invoice_number: number.into(),
             amount: U128(amount),
@@ -1157,7 +1200,7 @@ mod tests {
     fn without_a_dao_the_owner_approves_above_threshold() {
         testing_env!(ctx(accounts(0)).build());
         let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
-        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000));
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None);
         testing_env!(ctx(accounts(4)).build());
         let _ = c.ft_on_transfer(accounts(0), U128(15_000_000_000), "".into());
         testing_env!(ctx(accounts(1)).build());
@@ -1173,23 +1216,54 @@ mod tests {
     }
 
     #[test]
+    fn identity_on_the_invoice_is_checked_when_recorded() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        c.update_vendor("hosting".into(), None, None, None, Some("PT 123 456 789".into()));
+        c.set_company("Northwind".into(), "".into(), Some("IT".into()), Some("IT01234567890".into()));
+        testing_env!(ctx(accounts(1)).build());
+        // right ids in any formatting: paid
+        let mut ok = claim("hosting", "A-1", 100_000_000, Payout::Near { account: accounts(5) });
+        ok.vendor_tax_id = "pt123456789".into();
+        ok.buyer_tax_id = "IT 0123 4567 890".into();
+        let id = c.request_payment(ok);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        // another company's id on the invoice: held, not blocked
+        let mut other = claim("hosting", "A-2", 100_000_000, Payout::Near { account: accounts(5) });
+        other.vendor_tax_id = "DE999".into();
+        other.buyer_tax_id = "IT01234567890".into();
+        let id = c.request_payment(other);
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Approval);
+        assert_eq!(p.reason.as_deref(), Some("identity_mismatch"));
+        // not addressed to us: held
+        let mut wrong_buyer = claim("hosting", "A-3", 100_000_000, Payout::Near { account: accounts(5) });
+        wrong_buyer.vendor_tax_id = "PT123456789".into();
+        let id = c.request_payment(wrong_buyer);
+        assert_eq!(c.get_payment(id).unwrap().reason.as_deref(), Some("buyer_mismatch"));
+        // a vendor without a recorded id is not checked
+        let id = c.request_payment({ let mut x = claim("design", "D-1", 100_000_000, Payout::Chain { chain: "base".into(), address: "0xabc".into() }); x.buyer_tax_id = "IT01234567890".into(); x });
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+    }
+
+    #[test]
     fn transfer_ownership_moves_every_owner_power() {
         let mut c = setup();
         testing_env!(ctx(accounts(0)).build());
         c.transfer_ownership(accounts(5));
         assert_eq!(c.get_roles().0, accounts(5));
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_company("x".into(), "".into())));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_company("x".into(), "".into(), None, None)));
         assert!(r.is_err(), "the old owner is out");
         testing_env!(ctx(accounts(5)).build());
-        c.set_company("Wallet Co".into(), "".into());
+        c.set_company("Wallet Co".into(), "".into(), None, None);
         assert_eq!(c.get_company().unwrap().name, "Wallet Co");
     }
 
     fn no_dao() -> Bursar {
         testing_env!(ctx(accounts(0)).build());
         let mut c = Bursar::new(accounts(0), accounts(1), accounts(2), None, accounts(4), U128(5_000_000_000), U128(20_000_000_000), U128(2_000_000_000));
-        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000));
-        c.add_vendor("design".into(), "DesignCo".into(), Payout::Near { account: accounts(5) }, U128(0));
+        c.add_vendor("hosting".into(), "Acme Hosting".into(), Payout::Near { account: accounts(5) }, U128(10_000_000_000), None);
+        c.add_vendor("design".into(), "DesignCo".into(), Payout::Near { account: accounts(5) }, U128(0), None);
         testing_env!(ctx(accounts(4)).build());
         let _ = c.ft_on_transfer(accounts(0), U128(50_000_000_000), "".into());
         testing_env!(ctx(accounts(0)).build());
@@ -1274,7 +1348,7 @@ mod tests {
     fn operators_do_only_what_their_role_allows() {
         let mut c = no_dao();
         c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: true });
-        c.set_company("Northwind Studio".into(), "design studio".into());
+        c.set_company("Northwind Studio".into(), "design studio".into(), None, None);
         assert_eq!(c.get_company().unwrap().name, "Northwind Studio");
         assert_eq!(c.list_operators().len(), 1);
         testing_env!(ctx(accounts(1)).build());
@@ -1286,7 +1360,7 @@ mod tests {
         assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
         // the approver may add orders but not vendors
         c.add_order("hosting".into(), "PO-1".into(), "".into(), U128(1), None);
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_vendor("x".into(), "X".into(), Payout::Near { account: accounts(5) }, U128(0))));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_vendor("x".into(), "X".into(), Payout::Near { account: accounts(5) }, U128(0), None)));
         assert!(r.is_err());
         // a stranger can do neither
         testing_env!(ctx(accounts(5)).build());

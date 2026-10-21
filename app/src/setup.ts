@@ -129,10 +129,10 @@ export async function setup(o: Opts) {
   // 5. vendors
   const vendors = await provider.callFunction({ contractId: names.treasury, method: "list_vendors", args: {} }) as [string, unknown][];
   if (!vendors.some(([id]) => id === "acmehosting")) {
-    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: names.vendorHosting } }, monthly_budget: "3000000000" }, gas: TGAS(30) });
-    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: names.vendorLegal } }, monthly_budget: "0" }, gas: TGAS(30) });
-    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0" }, gas: TGAS(30) });
-    log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base)");
+    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: names.vendorHosting } }, monthly_budget: "3000000000", tax_id: "PT509876543" }, gas: TGAS(30) });
+    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "legalpartners", name: "Legal Partners LLP", payout: { Near: { account: names.vendorLegal } }, monthly_budget: "0", tax_id: "IT09876543210" }, gas: TGAS(30) });
+    await root.callFunction({ contractId: names.treasury, methodName: "add_vendor", args: { vendor_id: "designco", name: "DesignCo", payout: { Chain: { chain: "base", address: process.env.DEMO_BASE_ADDRESS ?? "0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801" } }, monthly_budget: "0", tax_id: "NL862345678B01" }, gas: TGAS(30) });
+    log("added vendors acmehosting (NEAR), legalpartners (NEAR), designco (Base), each with the tax id it prints on invoices");
   }
   // 5b. what the company agreed to buy: a standing order for hosting, purchase orders for the two projects
   const orders = await provider.callFunction({ contractId: names.treasury, method: "list_orders", args: {} }) as unknown[];
