@@ -15,6 +15,38 @@ export interface InvoiceClaim {
   payout_seen: Payout;
   attestation_ref: string;
   flags: string[];
+  /** Purchase order or reference printed on the invoice, if any. */
+  order_ref?: string | null;
+  /** The vendor's tax id as printed on the invoice, empty if none. */
+  vendor_tax_id?: string;
+  /** The buyer's tax id as printed on the invoice, empty if none. */
+  buyer_tax_id?: string;
+  /** Withholding tax the invoice shows as deducted, token units, "0" if none. */
+  withholding_seen?: string;
+}
+
+export interface Order {
+  id: number;
+  vendor_id: string;
+  reference: string;
+  description: string;
+  kind: { Single: { remaining: string } } | { Recurring: { amount_per_period: string; period_days: number; last_period: number | null } };
+  expires_at: number;
+  active: boolean;
+  created_at: number;
+}
+
+export interface Role {
+  approve: boolean;
+  manage_vendors: boolean;
+  manage_orders: boolean;
+}
+
+export interface Company {
+  name: string;
+  description: string;
+  country?: string | null;
+  tax_id?: string | null;
 }
 
 export interface Payment {
@@ -33,6 +65,9 @@ export interface Payment {
   deposit_address: string | null;
   dest_tx: string | null;
   dao_proposal_id: number | null;
+  order_id: number | null;
+  /** Part of amount kept in the treasury as withholding tax, token units. */
+  withheld?: string;
 }
 
 export interface Vendor {
@@ -42,6 +77,11 @@ export interface Vendor {
   spent_this_month: string;
   month: number;
   active: boolean;
+  /** What the vendor prints on its invoices to identify itself (VAT number, EIN, CNPJ, or a supplier code). */
+  tax_id?: string | null;
+  country?: string | null;
+  /** Withholding the company keeps back when paying this vendor, basis points of the invoice total. */
+  withholding_bps?: number;
 }
 
 export const provider = new JsonRpcProvider({ url: config.rpc });

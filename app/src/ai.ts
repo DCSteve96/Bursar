@@ -20,6 +20,17 @@ export interface Extraction {
   payout_seen: Payout;
   flags: string[];
   confidence: number;
+  /** Purchase order or reference number printed on the invoice, empty if none. */
+  order_ref: string;
+  /** The vendor's tax id (VAT, EIN, CNPJ...) as printed, empty if none. */
+  vendor_tax_id?: string;
+  /** The buyer's tax id as printed on the invoice, empty if none. */
+  buyer_tax_id?: string;
+  /** Subtotal before tax and the tax amount, decimal strings, empty if the invoice does not show them. */
+  subtotal?: string;
+  tax_amount?: string;
+  /** Withholding tax the invoice shows as deducted from the total (ritenuta d'acconto, TDS, retencion), empty if none. */
+  withholding?: string;
 }
 
 /** Everything needed to re-verify one inference independently. Stored next to the payment, never on chain. */
@@ -74,7 +85,7 @@ Fields:
 - vendor_name: the company issuing the invoice
 - vendor_id_guess: lowercase slug of the vendor name, letters and digits only (e.g. "acmehosting")
 - invoice_number: as printed
-- amount: total due as a decimal string, no currency symbol
+- amount: the invoice total as a decimal string, no currency symbol, before any withholding tax deducted on it
 - currency: ISO code (USDC, USD, EUR...)
 - due_date: YYYY-MM-DD
 - payout_seen: where the invoice asks to be paid. Either {"Near":{"account":"name.near"}} for a NEAR account,
@@ -82,6 +93,12 @@ Fields:
 - flags: list any of: "new_payment_details" (text like new bank details, updated wallet, please note our new address),
   "urgency" (pay immediately, overdue, final notice), "mismatched_contact" (email or domain differs from the vendor name),
   "handwritten_or_altered", "missing_invoice_number", "unreadable". Empty list if none.
+- order_ref: the purchase order or reference number printed on the invoice (labels like "Purchase order", "PO", "Order ref"), as printed; empty string if none
+- vendor_tax_id: the issuing company's tax identifier as printed (VAT number, EIN, CNPJ, GSTIN, ABN, supplier code...), empty string if none
+- buyer_tax_id: the tax identifier of the company the invoice is addressed to ("Bill to"), as printed; empty string if none
+- subtotal: the amount before tax as a decimal string, empty string if not shown
+- tax_amount: the tax amount as a decimal string, empty string if not shown
+- withholding: withholding tax the invoice shows as deducted from the total (labels like "withholding tax", "ritenuta d'acconto", "TDS", "retencion"), decimal string, empty string if none
 - confidence: 0 to 1
 Return only the JSON object.`;
 
@@ -182,6 +199,10 @@ export function readInvoiceOffline(text: string): Extraction {
   const near = pick(/Pay to NEAR account:\s*([a-z0-9._-]+)/i);
   const chain = pick(/Pay to\s+(base|arb|sol|sui|eth)\s+address:/i).toLowerCase();
   const addr = pick(/address:\s*(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})/);
+  // the demo invoices label the buyer's id "Customer VAT"; the vendor's is the plain "VAT" line
+  const idRe = /(?:VAT|Tax id|EIN|CNPJ|GSTIN|ABN|Supplier code)\s*(?:no\.?|number)?\s*:\s*([A-Z]{0,3}[0-9][A-Z0-9]{3,20})/gi;
+  const buyerId = text.match(/Customer\s+(?:VAT|Tax id)\s*(?:no\.?|number)?\s*:\s*([A-Z]{0,3}[0-9][A-Z0-9]{3,20})/i)?.[1] ?? "";
+  const vendorId = [...text.matchAll(idRe)].map((m) => m[1]).find((id) => id !== buyerId) ?? "";
   const flags: string[] = [];
   if (/new (bank|wallet|payment) (details|address)|updated wallet|please note our new/i.test(text)) flags.push("new_payment_details");
   if (/immediately|final notice|overdue/i.test(text)) flags.push("urgency");
@@ -189,11 +210,51 @@ export function readInvoiceOffline(text: string): Extraction {
     vendor_name: vendor,
     vendor_id_guess: vendor.toLowerCase().replace(/[^a-z0-9]/g, ""),
     invoice_number: pick(/Invoice\s*(?:#|No\.?|number)\s*:?\s*([A-Z]{1,4}-?[0-9]{2,8})/i),
-    amount: pick(/Total due:\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
-    currency: pick(/Total due:\s*[0-9.,]+\s*([A-Z]{3,4})/i) || "USDC",
+    amount: pick(/\bTotal(?: due)?:\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
+    withholding: pick(/(?:Withholding|Ritenuta)[^:\n]*:\s*-?\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
+    currency: pick(/\bTotal(?: due)?:\s*[0-9.,]+\s*([A-Z]{3,4})/i) || "USDC",
     due_date: pick(/Due date:\s*(\d{4}-\d{2}-\d{2})/i),
     payout_seen: near ? { Near: { account: near } } : { Chain: { chain, address: addr } },
     flags,
-    confidence: 0.5,
+    confidence: 0.9, // a parser, not a model: deterministic on the demo invoices
+    order_ref: pick(/(?:Purchase order|Order ref(?:erence)?|PO)\s*(?:#|No\.?|number)?\s*:?\s*([A-Z]{1,4}-?[0-9]{2,8}(?:-[0-9A-Z]{1,8})?)/i),
+    // the demo invoices print the vendor's id first and the buyer's second, whatever the column layout does to the text order
+    vendor_tax_id: vendorId,
+    buyer_tax_id: buyerId,
+    subtotal: pick(/Subtotal:\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
+    tax_amount: pick(/(?:VAT|Tax)\s*(?:\([^)]*\))?\s*:\s*([0-9][0-9,]*\.?[0-9]*)/i).replace(/,/g, ""),
   };
 }
+
+/**
+ * Checks on the model's reading that do not trust the model: each one that fails becomes a flag, and a flag
+ * makes the contract hold the payment for a person. They never let a payment through; they only stop it.
+ */
+export function readingFlags(ex: Extraction, text: string): string[] {
+  const flags: string[] = [];
+  const amount = Number(ex.amount || "0");
+  // every number in the text; "money" is the ones written with cents, which is how invoices print amounts
+  const nums = (text.match(/\d[\d.,]*\d|\d/g) ?? []).map((n) => parseMoney(n)).filter((n) => Number.isFinite(n));
+  const money = (text.match(/\d[\d.,]*[.,]\d{2}(?![\d.,])/g) ?? []).map((n) => parseMoney(n)).filter((n) => Number.isFinite(n));
+  if (!text.trim()) flags.push("no_text_layer");
+  else if (amount > 0 && !nums.some((n) => Math.abs(n - amount) < 0.005)) flags.push("amount_not_in_text");
+  else if (amount > 0 && money.some((n) => n > amount + 0.005)) flags.push("larger_amount_in_text");
+  if (ex.subtotal && ex.tax_amount) {
+    const sum = Number(ex.subtotal) + Number(ex.tax_amount);
+    if (Number.isFinite(sum) && Math.abs(sum - amount) > 0.01) flags.push("totals_mismatch");
+  }
+  if (typeof ex.confidence === "number" && ex.confidence < 0.6) flags.push("low_confidence");
+  if (ex.currency && ex.currency.toUpperCase() !== "USDC") flags.push("currency_not_usdc");
+  return flags;
+}
+/** "1.250,00", "1,250.00", "1250" all read as 1250. */
+export function parseMoney(s: string): number {
+  const t = s.replace(/\s/g, "");
+  const lastDot = t.lastIndexOf("."), lastComma = t.lastIndexOf(",");
+  let norm: string;
+  if (lastDot >= 0 && lastComma >= 0) norm = lastDot > lastComma ? t.replace(/,/g, "") : t.replace(/\./g, "").replace(",", ".");
+  else if (lastComma >= 0) norm = t.length - lastComma === 3 ? t.replace(",", ".") : t.replace(/,/g, "");
+  else norm = t;
+  return Number(norm);
+}
+

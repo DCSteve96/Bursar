@@ -29,8 +29,9 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 ## Struttura
 
 ```
-contracts/policy      contratto di policy, Rust, near-sdk 5 (7 unit test)
+contracts/policy      contratto di policy, Rust, near-sdk 5 (21 unit test)
 contracts/test-usdc   NEP-141 usa e getta per testnet, con mint aperto
+contracts/registry    registro pubblico delle tesorerie (explorer e login lo leggono, 4 unit test)
 app/src/              TypeScript, near-api-js 7
   config.ts           tutta la configurazione da env; asset id USDC per chain (Intents)
   near.ts             helper NEAR, meta transaction (NEP-366)
@@ -41,8 +42,9 @@ app/src/              TypeScript, near-api-js 7
   mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
   setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
   cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
-web/                  index.html (dashboard) e app.html (console web: lettura TEE, verifica, request_payment dal browser)
-invoices/             make_invoices.py e 5 PDF di esempio (il quinto per la console web)
+web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), app.html (console: onboarding, lettura TEE, verifica, request_payment dal browser), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
+relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri)
+invoices/             make_invoices.py e 9 PDF di esempio (5 e 6 per la console, 7 e 8 per i tax id, 9 per la ritenuta)
 ```
 
 ## Comandi
@@ -51,6 +53,7 @@ invoices/             make_invoices.py e 5 PDF di esempio (il quinto per la cons
 # contratti
 (cd contracts/policy && cargo test && cargo build --release --target wasm32-unknown-unknown)
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
+(cd contracts/registry && cargo test && ./build.sh)
 # app
 cd app && npm install && npx tsc -p . --noEmit
 npx tsx src/cli.ts setup --root <account>.testnet

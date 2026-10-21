@@ -1,4 +1,4 @@
-# Bursar
+# <img src="web/brand/mark.svg" width="28" height="28" alt=""> Bursar
 
 **An AI treasurer that pays invoices within limits it cannot change.**
 
@@ -27,6 +27,7 @@ Every company pays invoices. The two things that go wrong are boring and expensi
    - a USDC transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked `transfer_failed`, nothing lost
 6. Everything is an on-chain event. The MCP server lets any assistant drive it, with exactly the agent's powers.
 7. Anyone can re-verify the TEE receipt behind a payment, without the API key and without trusting the agent (`bursar verify`).
+8. Orders: the owner records what the company agreed to buy (a purchase order with a total, or a standing order per period). An invoice outside them, or one the model flagged, is held for a person instead of paid on the AI's word. Operators get on-chain roles (approve, manage vendors, manage orders), revocable by the owner.
 
 The AI never chooses an address. The executor cannot redirect funds. The owner is the only one who can change a payout, and a changed payout on an invoice is a block, not a payment.
 
@@ -34,13 +35,14 @@ The AI never chooses an address. The executor cannot redirect funds. The owner i
 
 | | |
 |---|---|
-| Policy contract | `treasury.bursar-c34d05b8.testnet` |
-| Agent (one function-call key) | `agent.bursar-c34d05b8.testnet` |
-| Executor / relayer | `executor.bursar-c34d05b8.testnet` |
-| DAO (Sputnik v2) | `bursar-bursar-c34d05b8.sputnik-v2.testnet` |
-| Test USDC | `tusdc.bursar-c34d05b8.testnet` |
+| Policy contract | `treasury.bursar-b48563e6.testnet` |
+| Agent (one function-call key) | `agent.bursar-b48563e6.testnet` |
+| Executor / relayer | `executor.bursar-b48563e6.testnet` |
+| DAO (Sputnik v2) | `bursar-bursar-b48563e6.sputnik-v2.testnet` |
+| Test USDC | `tusdc.bursar-b48563e6.testnet` |
+| Registry (the list of treasuries) | `registry.bursar-b48563e6.testnet` |
 
-Payments 1 to 5 on that contract are the walkthrough below, run end to end on 20 October 2026 with the invoices read by NEAR AI Cloud inside the TEE (every `attestation_ref` starts with `nearai:`): paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate. Open `web/index.html?network=testnet&treasury=treasury.bursar-c34d05b8.testnet` to see them. The two failure paths of step 4, a DAO rejection and a rolled-back transfer, are payments 6 and 7 on the earlier deployment `treasury.bursar-itlecew5.testnet`.
+Payments 1 to 6 on that contract are the walkthrough below, run end to end on 20 October 2026 with the invoices read by NEAR AI Cloud inside the TEE (every `attestation_ref` starts with `nearai:`): paid, queued, approved by the DAO and paid, blocked for a changed payout, blocked as duplicate, held because no order covers it. Open `web/dashboard.html?network=testnet&treasury=treasury.bursar-b48563e6.testnet` to see them. The two failure paths of step 4, a DAO rejection and a rolled-back transfer, are payments 6 and 7 on the earlier deployment `treasury.bursar-itlecew5.testnet`.
 
 Mainnet deployment with real USDC and NEAR Intents: see the demo post (link added at submission).
 
@@ -54,7 +56,7 @@ git clone <repo> && cd bursar
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 cd app && npm install && npm test
 ```
-See: `11 passed` from `cargo test`, `bursar_policy.wasm: 303102 bytes` (249 KB if `wasm-opt` is installed), and 9 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples).
+See: `21 passed` from `cargo test`, `bursar_policy.wasm: 377122 bytes` (smaller if `wasm-opt` is installed), and 9 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples).
 
 **1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR: the faucet gives 10 per account, so create two and transfer from one to the other. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
 
@@ -63,7 +65,7 @@ See: `11 passed` from `cargo test`, `bursar_policy.wasm: 303102 bytes` (249 KB i
 ```bash
 npx tsx src/cli.ts setup --root you.testnet
 ```
-See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUSDC token; a Sputnik DAO with you as council; the policy contract deployed and funded with 15,000 tUSDC; the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts.
+See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUSDC token; a Sputnik DAO with you as council; the policy contract deployed and funded with 15,000 tUSDC; four vendors, each with the tax id it prints on its invoices, one of them a freelancer with a 20% withholding set on it; three orders recorded (hosting 500 USDC a month, purchase orders PO-2026-118 and PO-2026-104); the treasury listed in the public registry (`listed treasury.you.testnet in the registry`); the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts.
 
 **3. Start the relayer and process the inbox.**
 
@@ -79,7 +81,7 @@ See, in `status` (the account names are yours; the same four decisions are live 
 ```
 #1 acmehosting   AH-0923   480.00 USDC  Paid                      <- NEAR vendor, under caps: paid in the same tx
 #2 designco      DC-1107  1250.00 USDC  Queued                    <- Base vendor: waits for the executor (Intents, mainnet)
-#3 legalpartners LP-2210  9800.00 USDC  Approval dao#0            <- above 2,000: DAO proposal 0 opened by the contract
+#3 legalpartners LP-2210  9800.00 USDC  Approval over_threshold dao#0  <- above 2,000: DAO proposal 0 opened by the contract
 #4 acmehosting   AH-0924   480.00 USDC  Blocked payout_changed    <- "please note our new wallet": refused
 ```
 and in the relayer log, the agent's meta transactions paid by the executor account.
@@ -102,6 +104,37 @@ A vendor whose NEAR account is not registered on the token contract makes `ft_tr
 cp ../invoices/samples/01-acme-hosting-0923.pdf ../invoices/inbox/again.pdf && npm run agent -- --once --offline
 ```
 See: `Blocked duplicate_invoice`.
+
+**5b. A registered vendor invents an invoice.** Right account, right amount, under every cap: the one case a bank, an employee and most tools would pay. Bursar pays only what the company agreed to buy. `setup` recorded a standing order for Acme (500 USDC a month, one invoice per month) and purchase orders for the two projects; invoice 1 consumed November's hosting slot, invoices 2 and 3 print their purchase order numbers.
+
+```bash
+cp ../invoices/samples/06-acme-hosting-1002.pdf ../invoices/inbox/ && npm run agent -- --once --offline
+npm run dev status
+```
+See: `#6 acmehosting AH-1002 290.00 USDC Approval no_order dao#1`: not blocked, not paid, held for a person. With a DAO the council votes; without one the owner or an approver calls `approve_payment` or `cancel_payment`. Invoices the model flagged (urgency, new payment details) are held the same way, reason `flagged`: the AI can add scrutiny, never remove it. `set_order_policy true` makes every invoice need an order; by default only vendors that have orders are held to them.
+
+**5c. Identity on the invoice.** Names can be imitated; tax ids cannot. `setup` recorded the VAT number each vendor prints on its invoices, so the contract compares it with the one the model read. Invoice 7 is "Acme Host GmbH", a look-alike with another VAT number that asks to be paid to Acme's registered account:
+
+```bash
+cp ../invoices/samples/07-acme-host-gmbh-3001.pdf ../invoices/inbox/ && npm run agent -- --once --offline
+```
+See: `#7 acmehosting AHG-3001 480.00 USDC Approval no_order+identity_mismatch`: held for a person, with every reason the contract found (a second Acme invoice in the same period, and not Acme's tax id), not a guess from the name. Now record your own tax id, so every invoice must be addressed to you, and send invoice 8, a real Acme invoice addressed to another customer:
+
+```bash
+near contract call-function as-transaction treasury.you.testnet set_company json-args '{"name":"Northwind Studio","description":"","country":"IT","tax_id":"IT01234567890"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
+cp ../invoices/samples/08-acme-hosting-1003-other-customer.pdf ../invoices/inbox/ && npm run agent -- --once --offline
+```
+See: `#8 acmehosting AH-1003 480.00 USDC Approval no_order+buyer_mismatch`. Both identity reasons are holds, not blocks: a tax id read wrong must not refuse a real invoice, it must have a person look. In the console the same lives in Vendors ("Identifier", per vendor) and in Settings, Company. Spaces and punctuation in the ids do not matter.
+
+The reading itself is cross-checked without trusting the model: the total must appear in the PDF's text layer, no larger amount may appear in it, subtotal plus tax must equal the total when the invoice shows them, the model's confidence must be at least 0.6, and the currency must be USDC. Each failure is a flag, and the contract holds anything flagged (`Approval flagged`); a scan with no text layer is always held. A misread amount can therefore pay less than the invoice, never more than the document shows, never to another account, and never past an order or a cap.
+
+**5d. Withholding tax, set by your accountant.** Bursar knows no tax rules; the company's accountant sets, per vendor, what to keep back (ritenuta d'acconto in Italy, TDS in India, retencion in Spain and Latin America), and the contract applies it. `setup` registered `consultant`, a freelancer, with country IT and a 20% withholding. Invoice 9 is theirs: total 1,000, withholding 200 shown, net payable 800.
+
+```bash
+cp ../invoices/samples/09-studio-bianchi-0044.pdf ../invoices/inbox/ && npm run agent -- --once --offline
+npm run dev status
+```
+See: `#9 consultant SB-0044 1000.00 USDC Paid`, the vendor's tUSDC balance up by 800, and in `status` the line `withheld for the state, to remit 200.00 USDC`: the 200 never left the treasury, it is earmarked. Budgets and caps count the gross. An invoice that shows a different withholding than the rate set, or shows one for a vendor with none set, is held (`Approval withholding_mismatch`). The withheld share is the vendor's money paid to the state on its behalf, and remitting and filing stay with the company and its accountant (in Italy the F24, the Certificazione Unica and the 770): Bursar talks to no tax authority. When the company has paid the state, the owner calls `mark_withholding_remitted` (in the console: Analytics, "Mark as remitted") and the counter goes down; the USDC leaves with the usual `withdraw`.
 
 **6. Verify the TEE receipt yourself.** With `NEAR_AI_API_KEY` set, step 3 reads the invoices inside the enclave and writes one receipt per payment in `app/.bursar/receipts/<id>.json`: the exact request and response bytes, the gateway's ECDSA signature, the attestation report with the Intel TDX quote, and the nonce the agent chose. Anyone with that file can check it, without the API key:
 
@@ -137,7 +170,7 @@ See: the extraction as JSON (`"flags": ["new_payment_details", "urgency"]`), the
 Without any key at all, check the receipt behind payment #1 on the live contract (invoice 1, read by `z-ai/glm-5.3-flash` on 2026-10-20, kept in the repo as a test fixture):
 
 ```bash
-BURSAR_TREASURY=treasury.bursar-c34d05b8.testnet npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json
+BURSAR_TREASURY=treasury.bursar-b48563e6.testnet npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json
 ```
 See: all the `ok` lines above, `quote_tcb` included (the Intel collateral is fetched live) and `on_chain` (the reference is read from the contract). The file holds the exact request (with the invoice page as PNG), the exact response, the signature and the attestation report with the TDX quote and GPU evidence: 444 KB, nothing secret.
 
@@ -148,13 +181,15 @@ See: all the `ok` lines above, `quote_tcb` included (the Intel collateral is fet
 ```
 Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf and explain the decision". See: the tool `submit_invoice` returns `Blocked payout_changed`, and `explain_decision` says why in plain words. `verify_attestation` runs the checks of step 6; `sync_dao_approvals` the DAO check of step 4.
 
-**8. Dashboard.** Open `web/index.html` in a browser (a static file, no build) and paste the treasury account. See: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC. Hostable on GitHub Pages as is.
+**8. Explorer and dashboard.** Open `web/explorer.html` (a static file, no build; live at `https://bursar.network/explorer`). See: every treasury on the network, read from the registry contract and verified against each policy contract (`1 registered, 1 verified` plus yours after step 2), the totals across companies (treasury balance, paid out today, this month and all time, decisions, blocked, waiting for a person) and the last decisions of every company, with no vendor names and no invoice numbers. `web/dashboard.html?treasury=treasury.you.testnet` is one company's own page: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC.
 
-**9. Do it all from a browser.** `web/app.html` is the agent as a web page: no server, no build. Open it, fill Settings (treasury, agent account, the agent's function-call key from `~/.near-credentials/testnet/agent.you.testnet.json`, your NEAR AI Cloud key; all kept in that browser's local storage) and drop `invoices/samples/05-acme-hosting-1001.pdf` on it. See: the PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, the enclave's answer, then the same receipt checks as step 6 (minus the Intel collateral check) and a "Download receipt JSON" link. Press "Request payment": the page signs `request_payment` with the agent key (plain borsh plus ed25519, no NEAR library) and shows the contract's decision, `#7 Paid` on the live contract, with the transaction link. Drop invoice 4 instead: `Blocked payout_changed`. The agent account needs a little NEAR for gas on this direct path (`setup` leaves it 0.5); the CLI agent goes through the relayer and needs none. The workflow in `.github/workflows/pages.yml` publishes `web/` with GitHub Pages (enable Pages with source "GitHub Actions" in the repository settings).
+**9. Be the customer, from a browser.** `web/login.html` is the door (live at `https://bursar.network/login`): pick the network, press "Continue with NEAR wallet" and choose your wallet in the picker (NEAR Connect: Meteor, Intear, Nightly, Near Mobile and Unity on testnet; HOT and OKX too on mainnet; with the Meteor browser extension installed, the Meteor entry goes through the extension). The wallet tells the page who you are; the page asks the registry for the treasuries that account owns and checks each one's `get_roles`. If there is one, pick it and the wallet adds a key limited to that contract to your browser: enough for vendors, orders, limits and approvals, never a transfer. If there is none, the page creates the company's treasury at this first sign-in, at no cost to you: it asks the testnet faucet for a payer account, deploys the policy contract from `web/contracts/bursar_policy.wasm`, creates an agent with one function-call key, mints 15,000 test USDC, registers the three demo vendors and their orders, hands the contract to your wallet account with `transfer_ownership`, and lists it in the registry; then "Connect the wallet key" asks the wallet to approve one transaction, the key for this treasury. See: `OK account`, `OK contract`, `OK agent`, `OK usdc`, `OK vendors`, `OK orders`, `OK owner ... is owned by you.testnet`, `OK registry`, then the console with "you.testnet, owner, wallet key" at the bottom of the sidebar and your treasury counted in the explorer. The payer account's key stays in the browser (and in "Download the keys") to fund invites and the DAO, which need NEAR deposits a wallet key cannot attach; it holds no power over the contract. The other doors: an invite link from a colleague, a keys file from a treasury created with throwaway keys, and "Try it with throwaway keys" for a browser with no wallet at all (same creation, the browser's own key as owner). No password and no server.
 
-**9. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. With `NEAR_NETWORK=mainnet`, real USDC in the treasury and a vendor on Base, `npm run executor -- --once` quotes USDC NEAR to USDC Base with the vendor's address as recipient, calls `settle`, and marks the payment `Settled` with the Base transaction hash.
+`web/app.html` is the back office: nothing to install, every number read from the contract and every change signed in the browser. Pages: Overview (balance, what waits for a person, last decisions), Invoices (read, receipt, decide), Attention (approve or cancel what is held, see what was refused and why), Vendors (allowlist, payouts, budgets), Orders (purchase orders and standing orders), Analytics (spend by vendor and by month, straight from the payments), Settings (company, limits, strict order mode, operators with on-chain roles, keys). Several treasuries live side by side in the switcher at the top of the sidebar. Collaborators: in Settings, "Invite a collaborator" creates an account for them with one key limited to the methods of their role (approve, vendors, orders), records the role in the contract, and gives you a link that carries the key after the hash sign, so it never reaches a server; send it however you like. Whoever opens it is signed in as that account with that role and nothing else. "Remove" next to the operator revokes it on chain. A DAO: in Settings, "Governance", pick the council (you, operators, any NEAR account) and press "Create the DAO": the page calls the Sputnik factory, leaves 2 NEAR in the treasury for proposal bonds and points the contract at the DAO; from then on every held payment opens a proposal, and council members vote in Attention (or in Trezu on mainnet). Then load the recorded readings (the real receipts the enclave signed on 20 October, verified in the page with the same checks as `bursar verify`, Intel collateral included, fetched through the relay) and press "Request payment" on each: Legal Partners `#1 Approval` (no DAO here, so "Approve as the owner" turns it into `Paid`), Acme with a new wallet `#2 Blocked payout_changed`, Acme `#3 Paid`, DesignCo `Queued`. Your contract, your keys, the same decisions as the walkthrough above. To read a PDF live, drop one of the files in `web/samples/`: with "Bursar reading", a hackathon demo convenience, the page goes through Bursar's relay (`relay/worker.js`, a Cloudflare Worker that holds a NEAR AI Cloud key paid by the team and forwards the bytes untouched, so the signature still verifies; daily caps apply); a company using Bursar brings its own NEAR AI Cloud key, and then the invoice goes from the browser straight to the enclave and never passes through Bursar. "Use the demo treasury" points the page at the README deployment instead (read-only without its agent key). See: the PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, the enclave's answer, then the same receipt checks as step 6 (minus the Intel collateral check) and a "Download receipt JSON" link. Press "Request payment": the page signs `request_payment` with the agent key (plain borsh plus ed25519, no NEAR library) and shows the contract's decision, `#7 Paid` on the live contract, with the transaction link. Drop invoice 4 instead: `Blocked payout_changed`. The agent account needs a little NEAR for gas on this direct path (`setup` leaves it 0.5); the CLI agent goes through the relayer and needs none. Invoices can also arrive by Telegram: in Settings, "Connect a Telegram chat" gives a link; open it, press Start, and every PDF posted in that chat (by you, a colleague, or a vendor in a group) appears in the console's Inbox with the sender and the file name, nothing read yet. Press Read: the same enclave reading and the same contract decision as a dropped file, and the bot tells the chat the outcome with the transaction link. The relay keeps only the sender, the name and Telegram's file reference; the PDF stays on Telegram until Read (`relay/README.md`, "Telegram inbox", for the bot setup). `web/docs.html` explains all of this in one page. The workflow in `.github/workflows/pages.yml` publishes `web/` with GitHub Pages (enable Pages with source "GitHub Actions" in the repository settings).
 
-**Unit tests:** `cd contracts/policy && cargo test` (11 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
+**10. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. With `NEAR_NETWORK=mainnet`, real USDC in the treasury and a vendor on Base, `npm run executor -- --once` quotes USDC NEAR to USDC Base with the vendor's address as recipient, calls `settle`, and marks the payment `Settled` with the Base transaction hash.
+
+**Unit tests:** `cd contracts/policy && cargo test` (21 tests: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, owner approval without a DAO, purchase orders consumed then held, standing order one invoice per month, vendors without orders unless strict, model flags add scrutiny, operators and roles, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request, chain address case, ownership transfer, tax ids on the invoice, withholding kept back for the state). `cd contracts/registry && cargo test` (4 tests: register and look up, fee, no hijacking, owner updates and removes). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
 
 ## NEAR features used, and why
 
@@ -167,12 +202,14 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 | NEAR Intents (1-Click) | `executor.ts` | Vendors get USDC on their chain. The contract pins the recipient to the vendor record. |
 | Sputnik DAO v2 / Trezu | `policy` contract | Human approval above a threshold, opened by the contract itself as a FunctionCall proposal; the callback stores the proposal id, `sync_dao_proposal` reads the verdict back. |
 | NEP-141, NEP-297 events | `policy` contract | USDC in, every decision out as an event, so dashboards need no database. |
+| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the company's contract: the browser can manage the treasury but never move USDC. |
 
 ## Repository
 
 ```
 contracts/policy      Rust, the policy contract (near-sdk 5), with unit tests
 contracts/test-usdc   Rust, throwaway NEP-141 for testnet
+contracts/registry    Rust, the public list of treasuries the explorer and the sign-in page read
 app/src/agent.ts      inbox watcher, PDF to PNG, NEAR AI call, claim submission
 app/src/ai.ts         NEAR AI Cloud client: attestation preflight, structured extraction, signed receipt with exact bytes
 app/src/verify.ts     independent receipt verification: signature, nonce, TDX quote binding, Intel collateral, chain
@@ -182,14 +219,26 @@ app/src/executor.ts   NEAR Intents 1-Click routing for cross-chain vendors
 app/src/mcp.ts        MCP server (submit_invoice, list_payments, explain_decision, vendors, treasury_status)
 app/src/setup.ts      one-shot environment setup
 app/test/             vitest: receipt tampering, offline parser
-web/index.html        static dashboard, reads the contract over RPC
-web/app.html          the agent as a web page: PDF to PNG, enclave call, receipt checks, request_payment signed in the browser
-invoices/             make_invoices.py and five fictional sample invoices
+web/index.html        landing page: the three roles, the last decisions read live from the contract
+web/login.html        sign in: any NEAR wallet via NEAR Connect (a treasury is created at first sign-in), an invite link, or a keys file
+web/meteor.js         Meteor through its own SDK when the browser extension is on the page (the sandboxed connector cannot see it)
+web/vendor/           the Meteor Connect SDK bundled as one ES module, with the script that rebuilds it
+web/explorer.html     the network: every treasury from the registry, totals across companies, last decisions
+web/docs.html         the documentation in one page
+web/dashboard.html    one company's public dashboard, reads the contract over RPC
+web/app.html          the console: PDF to PNG, enclave call, receipt checks, request_payment signed in the browser
+web/style.css         shared styles (NEAR's palette: obsidian, paper, one signal green)
+web/contracts/        the policy wasm the console deploys for a new customer
+web/samples/          the sample PDFs and four recorded readings with their receipts
+web/brand/            mark, favicon, lockup
+relay/                Cloudflare Worker: the hosted reading relay (holds the NEAR AI key, forwards bytes untouched, daily caps) and the Telegram inbox
+invoices/             make_invoices.py and six fictional sample invoices
 ```
 
 ## Honest limits
 
-- Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through us.
+- Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through us. Paying vendors in a stablecoin is regulated differently from country to country (unrestricted, to be reported, or not allowed for businesses): checking that is the company's responsibility, not something Bursar can do.
+- Structured e-invoices (SDI and FatturaPA in Italy, Peppol in Europe, Singapore and Australia, Factur-X, Verifactu, KSeF, CFDI in Mexico, NF-e in Brazil, India's GST e-invoice, Saudi Fatoora) are not parsed yet; the United States has no mandate and runs on PDFs: where they exist, the reading step can become a deterministic parser and the contract decides the same way. The demo reads PDFs.
 - The offline parser (`--offline`) only understands the sample invoices. Real invoices need NEAR AI Cloud.
 - Intents cross-chain payouts are mainnet only; the testnet demo stops at `Queued` for the Base vendor.
 - `bursar verify` checks the signature, the nonce, the quote's `report_data` binding and the quote against Intel collateral. It does not yet replay the RTMR3 event log against the quote (which images and compose file ran in the enclave) and does not check GPU evidence; the receipt keeps both, so it can be added without re-running anything.

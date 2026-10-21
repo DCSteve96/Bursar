@@ -83,7 +83,7 @@ async function main() {
       const { view, fmtUsdc } = await import("./near.js");
       const [stats, limits, payments] = await Promise.all([view<any>("get_stats"), view<any>("get_limits"), view<any[]>("list_payments", { from: 0, limit: 100 })]);
       console.log(`treasury ${config.treasury} on ${config.network}`);
-      console.log(`balance ${fmtUsdc(stats.balance)}  spent today ${fmtUsdc(stats.spent_today)}  paused ${stats.paused}`);
+      console.log(`balance ${fmtUsdc(stats.balance)}  spent today ${fmtUsdc(stats.spent_today)}  paused ${stats.paused}${BigInt(stats.withheld_due ?? "0") > 0n ? `  withheld for the state, to remit ${fmtUsdc(stats.withheld_due)}` : ""}`);
       console.log(`caps: per payment ${fmtUsdc(limits.per_payment_cap)}, daily ${fmtUsdc(limits.daily_cap)}, approval from ${fmtUsdc(limits.approval_threshold)}`);
       for (const p of payments) console.log(`#${p.id} ${p.vendor_id} ${p.invoice_number} ${fmtUsdc(p.amount)} ${p.status}${p.reason ? " " + p.reason : ""}${p.dao_proposal_id !== null ? ` dao#${p.dao_proposal_id}` : ""}${p.dest_tx ? " " + p.dest_tx : ""}`);
       break;

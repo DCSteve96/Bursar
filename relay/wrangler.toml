@@ -1,0 +1,22 @@
+name = "bursar-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Origins allowed to call the relay, comma separated. "*" allows every page (fine for a demo, not for production).
+ALLOWED_ORIGINS = "https://bursar.network,https://www.bursar.network,*.bursar.pages.dev,https://dcsteve96.github.io"
+ALLOWED_MODELS = "z-ai/glm-5.3-flash"
+MAX_READS_PER_IP_PER_DAY = "20"
+MAX_READS_PER_DAY = "300"
+
+# The API key is a secret, never a var:  wrangler secret put NEAR_AI_API_KEY
+# Daily caps need a KV namespace:        wrangler kv namespace create LIMITS   then uncomment and paste the id
+# [[kv_namespaces]]
+# binding = "LIMITS"
+# id = "..."
+
+# Telegram inbox (optional). Secrets:  wrangler secret put TELEGRAM_BOT_TOKEN   and   wrangler secret put TELEGRAM_WEBHOOK_SECRET
+# It needs a KV namespace (created in the dashboard as bursar-inbox):
+[[kv_namespaces]]
+binding = "INBOX"
+id = "88d0ad9b7314401388361a5e439fade8"

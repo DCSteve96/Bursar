@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Bursar">
+  <!-- Three roles, one gate: the AI reads (top bar), the contract decides (the green bar), the executor moves (bottom bar). -->
+  <rect width="64" height="64" rx="4" fill="#000"/>
+  <rect x="14" y="16" width="36" height="8" fill="#fff"/>
+  <rect x="14" y="28" width="24" height="8" fill="#00ec97"/>
+  <rect x="14" y="40" width="36" height="8" fill="#fff"/>
+</svg>
