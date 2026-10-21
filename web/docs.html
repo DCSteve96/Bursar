@@ -163,6 +163,9 @@
     <li><strong>Keys file.</strong> For a treasury created with throwaway keys ("Download the keys"), when there is no wallet at all.</li>
   </ul>
   <p>Several treasuries live side by side in the console's switcher. "Switch account" takes you back to the door.</p>
+  <h3>The vault: lose the browser, keep the company</h3>
+  <p>Everything that matters is on the contract and comes back at every sign-in: vendors, limits, payments, roles. What lives only in a browser is secret by nature: the agent key, the Telegram inbox token, the labels. A wallet owner keeps them in the <strong>vault</strong>: the wallet signs one fixed message (no transaction, no cost), the signature becomes an encryption key, the secrets are encrypted in the browser and stored on the contract with <span class="mono">set_vault</span>, owner only. A new browser, after signing in with the same wallet, presses "Unlock with the wallet" and gets them back. Nobody can open the vault without that wallet, Bursar included. The contract never reads it. If the wallet's key changes, the vault stays shut: keep the keys backup file too.</p>
+  <p>A person in the console can also ask the contract directly: <span class="mono">request_payment</span> accepts the agent, the owner and the operators. The decision is the same whoever asks; only the contract decides.</p>
 </section>
 
 <section id="console">

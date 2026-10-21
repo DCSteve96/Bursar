@@ -19,7 +19,7 @@ export async function registerMeteorExtension() {
     manifest: {
       id: "meteor-wallet", name: "Meteor Wallet", description: "Browser extension on this page", website: "https://meteorwallet.app",
       icon: "https://raw.githubusercontent.com/Meteor-Wallet/meteor_wallet_sdk/main/assets/meteor-logo-svg.svg", version: "3.24.0", executor: "", type: "injected", platform: [], permissions: {},
-      features: { signMessage: false, signTransaction: false, signAndSendTransaction: true, signAndSendTransactions: true, signInWithoutAddKey: true, signInAndSignMessage: false, signDelegateActions: false, addFunctionCallKey: false, mainnet: true, testnet: true },
+      features: { signMessage: true, signTransaction: false, signAndSendTransaction: true, signAndSendTransactions: true, signInWithoutAddKey: true, signInAndSignMessage: false, signDelegateActions: false, addFunctionCallKey: false, mainnet: true, testnet: true },
     },
     signIn: async ({ network } = {}) => { const a = await run("near::sign_in", { target: target(network) }); return [{ accountId: a.identifier.accountId, publicKey: a.publicKeys?.[0]?.publicKey }]; },
     getAccounts: async ({ network } = {}) => { const a = await account(network); return a ? [{ accountId: a.identifier.accountId }] : []; },
@@ -29,7 +29,13 @@ export async function registerMeteorExtension() {
       return run("near::sign_transactions", { target: a.identifier, useFunctionCallKey: false, transactions: transactions.map((t) => ({ receiverId: t.receiverId, actions: t.actions.map(m.convertSelectorActionToNearAction) })) });
     },
     signAndSendTransaction: async (p) => (await wallet.signAndSendTransactions({ network: p.network, transactions: [{ receiverId: p.receiverId, actions: p.actions }] }))[0],
-    signMessage: unsupported, signInAndSignMessage: unsupported, signDelegateActions: unsupported, addFunctionCallKey: unsupported,
+    // NEP-413: the console derives its vault key from this signature, so it must be deterministic (ed25519 is).
+    signMessage: async ({ network, message, nonce, recipient, state } = {}) => {
+      const a = await account(network); if (!a) throw new Error("not signed in with Meteor");
+      const r = await run("near::sign_message", { target: a.identifier, messageParams: { message, nonce, recipient, state } });
+      return { accountId: r?.accountId || a.identifier.accountId, publicKey: r?.publicKey, signature: r?.signature, state: r?.state };
+    },
+    signInAndSignMessage: unsupported, signDelegateActions: unsupported, addFunctionCallKey: unsupported,
   };
   window.dispatchEvent(new CustomEvent("near-wallet-injected", { detail: wallet }));
   return true;

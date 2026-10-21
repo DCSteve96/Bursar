@@ -28,6 +28,8 @@ use near_sdk::{
 
 const USDC_DECIMALS_HINT: &str = "amounts are in the token's smallest unit (USDC: 6 decimals)";
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
+/// Raw storage key of the owner's encrypted vault (see `set_vault`).
+const VAULT_KEY: &[u8] = b"vault";
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_DAO_PROPOSAL: Gas = Gas::from_tgas(30);
 const GAS_DAO_VIEW: Gas = Gas::from_tgas(10);
@@ -539,10 +541,15 @@ impl Bursar {
 
     // ----- agent -----
 
-    /// The only method the agent's key can call. Returns the payment id.
-    /// The decision is deterministic and fully on chain; the claim is checked, not trusted.
+    /// The only method the agent's key can call. The owner and the operators may call it too: a person
+    /// in the console asks the same question the agent asks, and the contract decides the same way.
+    /// Returns the payment id. The decision is deterministic and fully on chain; the claim is checked, not trusted.
     pub fn request_payment(&mut self, claim: InvoiceClaim) -> u64 {
-        require!(env::predecessor_account_id() == self.agent, "only the agent");
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == self.agent || caller == self.owner || self.operators.contains_key(&caller),
+            "only the agent, the owner or an operator"
+        );
         self.roll_day();
         let id = self.next_id;
         self.next_id += 1;
@@ -1118,6 +1125,25 @@ impl Bursar {
         format!("{}|{}", vendor_id.to_lowercase(), invoice_number.trim().to_lowercase())
     }
 
+    // ----- vault: the owner's secrets, encrypted in the browser, kept here so any browser can get them back -----
+
+    /// Store an opaque blob for the owner (the console keeps its secrets here, encrypted with a key only the
+    /// owner's wallet can derive). The contract never reads it. Raw storage, outside the state struct, so a
+    /// contract deployed before this method existed can be upgraded without a migration.
+    pub fn set_vault(&mut self, blob: String) {
+        self.assert_owner();
+        require!(blob.len() <= 16_384, "vault blob too large (16 KB max)");
+        if blob.is_empty() {
+            env::storage_remove(VAULT_KEY);
+        } else {
+            env::storage_write(VAULT_KEY, blob.as_bytes());
+        }
+    }
+
+    pub fn get_vault(&self) -> Option<String> {
+        env::storage_read(VAULT_KEY).map(|b| String::from_utf8(b).unwrap_or_default())
+    }
+
     fn assert_owner(&self) {
         require!(env::predecessor_account_id() == self.owner, "only the owner");
     }
@@ -1570,12 +1596,43 @@ mod tests {
     }
 
     #[test]
-    fn only_agent_can_request() {
+    fn a_stranger_cannot_request() {
         let mut c = setup();
-        testing_env!(ctx(accounts(0)).build());
+        testing_env!(ctx(accounts(4)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             c.request_payment(claim("hosting", "1", 1, Payout::Near { account: accounts(5) }));
         }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn owner_and_operator_can_request_payment_a_stranger_cannot() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_operator(accounts(5), Role { approve: true, manage_vendors: false, manage_orders: false });
+        let id = c.request_payment(claim("hosting", "o1", 1_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        testing_env!(ctx(accounts(5)).build());
+        let id = c.request_payment(claim("hosting", "o2", 1_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        testing_env!(ctx(accounts(4)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.request_payment(claim("hosting", "o3", 1, Payout::Near { account: accounts(5) }));
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn vault_is_owner_only_and_round_trips() {
+        let mut c = setup();
+        assert_eq!(c.get_vault(), None);
+        testing_env!(ctx(accounts(0)).build());
+        c.set_vault("v1:ciphertext".into());
+        assert_eq!(c.get_vault().as_deref(), Some("v1:ciphertext"));
+        c.set_vault(String::new());
+        assert_eq!(c.get_vault(), None);
+        testing_env!(ctx(accounts(1)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_vault("x".into())));
         assert!(r.is_err());
     }
 }
