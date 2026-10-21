@@ -204,7 +204,10 @@ npm run dev verify 1                             # the receipt behind payment 1<
     <li>The verifier checks the signature, the nonce, the quote's binding and the quote against Intel collateral. It does not yet replay the RTMR3 event log or check GPU evidence; the receipt keeps both.</li>
     <li>The wallet sign-in adds a function-call key. Creating the DAO and inviting collaborators need NEAR deposits, which the payer account kept from creation funds on testnet.</li>
     <li>Sample invoices are fictional. Nothing in the demo is a real person or company.</li>
+    <li>Paying vendors in a stablecoin is regulated differently from country to country: in some it is unrestricted, in some it must be reported, in a few it is not allowed for businesses. Bursar does not check this and cannot: the company runs the contract on its own accounts, with its own keys, under its own law. Check your jurisdiction before you fund a treasury.</li>
   </ul>
+  <h3>Where invoices are already structured</h3>
+  <p>More and more countries mandate electronic invoices in a fixed format: SDI and FatturaPA in Italy, Peppol across much of Europe, Factur-X and ZUGFeRD in France and Germany, Verifactu in Spain, KSeF in Poland. There the vendor, the amount, the tax ids and the payment details come as fields, not as a picture. Bursar's reading step is built for the PDF that still dominates everywhere else; where a structured invoice exists, that step becomes optional: a deterministic parser builds the claim, and the contract decides exactly as it does today. This is the direction after the hackathon, not something the demo does.</p>
 </section>
 
 <section id="glossary" style="border-bottom:0">
