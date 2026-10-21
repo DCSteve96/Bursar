@@ -641,7 +641,9 @@ function renderProfiles() {
   sel.value = profiles.some((p) => p.treasury === settings.treasury) ? settings.treasury : "";
   const roleOf = (p) => p.ownerKey ? (p.ownerKeyKind === "wallet" ? "owner, signed in with the wallet" : "owner, keys in this browser") : p.operator ? `collaborator ${p.operator.split(".")[0]}` : "read-only";
   const cur = profiles.find((p) => p.treasury === settings.treasury);
-  $("#swName").textContent = cur ? (cur.label || cur.treasury) : "No company"; $("#swId").textContent = cur ? cur.treasury : "sign in or create one";
+  // while a wallet owner is creating a treasury, the switcher names that, not whichever company this browser last opened
+  const creating = location.hash === "#start" ? walletOwner() : null;
+  $("#swName").textContent = creating ? "New treasury" : cur ? (cur.label || cur.treasury) : "No company"; $("#swId").textContent = creating ? `for ${creating.account}` : cur ? cur.treasury : "sign in or create one";
   $("#swMenu").innerHTML = profiles.map((p) => `<button type="button" role="option" data-pick="${esc(p.treasury)}"><span class="t"><span class="n">${esc(p.label || p.treasury)}</span><span class="m">${esc(p.treasury)}</span></span>${p.treasury === settings.treasury ? `<span class="on">OPEN</span>` : ""}</button>`).join("") + `<button type="button" class="new" data-pick="">+ New treasury</button>`;
   $("#companiesList").innerHTML = profiles.map((p) => `<div class="row${p.treasury === settings.treasury ? " on" : ""}"><div><div class="n">${esc(p.label || p.treasury)}</div><div class="m">${esc(p.treasury)} on ${esc(p.network)}</div></div><span class="r">${esc(roleOf(p))}</span>${p.treasury === settings.treasury ? `<span class="s Paid" style="font-size:12px">open now</span>` : `<button type="button" class="btn-ghost small" data-open="${esc(p.treasury)}">Open</button>`}</div>`).join("") || `<p class="muted" style="margin:0;font-size:14px">No company in this browser yet. Create one, or sign in with your wallet.</p>`;
 }
@@ -682,6 +684,8 @@ function loadSettings() {
 function reflectSettings() {
   renderProfiles();
   const who = settings.ownerKey ? { name: settings.owner, role: settings.ownerKeyKind === "wallet" ? "owner, wallet key" : "owner" } : settings.operator ? { name: settings.operator, role: Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "operator" } : settings.treasury ? { name: settings.treasury, role: "read-only" } : { name: "Not signed in", role: "no keys here" };
+  const creating = location.hash === "#start" ? walletOwner() : null;
+  if (creating) { who.name = creating.account; who.role = "owner, signed in with the wallet"; }
   $("#meName").textContent = who.name; $("#meRole").textContent = who.role; $("#meAvatar").textContent = (who.name || "?").replace(/^agent\.|^treasury\./, "").slice(0, 2).toUpperCase();
 }
 /** The wallet added a function-call key to the owner's account: it signs vendors, orders, limits and approvals, not deposits or new accounts. */
@@ -1730,7 +1734,7 @@ function route() {
   for (const a of document.querySelectorAll("#tabs a")) { if (a.dataset.view === v) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); }
   window.scrollTo({ top: 0 });
 }
-addEventListener("hashchange", route);
+addEventListener("hashchange", () => { route(); reflectSettings(); });
 
 // ---------- onboarding: this browser becomes the company ----------
 const TUSDC = "tusdc.bursar-b48563e6.testnet"; // throwaway NEP-141 with open mint, deployed by the README setup
