@@ -129,11 +129,14 @@
   .cty .menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 25; background: var(--paper); border: 1px solid var(--line-light); border-radius: 4px; padding: 6px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); display: flex; flex-direction: column; gap: 2px; }
   .cty .menu input { margin: 0 0 6px; padding: 8px 10px; font-size: 14px; border-color: var(--line-light); background: var(--bone); }
   .cty .list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+  @media (max-width: 900px) { .cty .menu { position: fixed; left: 12px; right: 12px; top: auto; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 7; box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25); } .cty .list { max-height: 40vh; } }
   .cty .list button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 7px 10px; border: 0; background: transparent; color: var(--fg-light); border-radius: 4px; font: 400 14px/1.3 var(--display); cursor: pointer; }
   .cty .list button:hover, .cty .list button.hl { background: var(--mint); } .cty .list button.on { font-weight: 600; }
   .cty .list button .c { margin-left: auto; font: 500 11px var(--mono); color: var(--mute-light); }
-  .flag { width: 22px; height: 16px; border-radius: 2px; object-fit: cover; flex: none; box-shadow: 0 0 0 1px var(--line-light); vertical-align: middle; }
-  td .flag { width: 20px; height: 15px; margin-right: 6px; }
+  /* flags come from one sprite in brand/flags.png (see brand/make_flags.py), nothing loads from a third party */
+  .flag { display: inline-block; width: 22px; height: 16px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px var(--line-light); vertical-align: middle; background: url(brand/flags.png) no-repeat 0 0 / 22px auto; }
+  .flag.none { background: none; box-shadow: none; }
+  td .flag { margin-right: 6px; }
   .who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--mint); border-radius: 4px; color: var(--fg-light); }
   .who .av { width: 36px; height: 36px; border-radius: 4px; background: var(--void); color: var(--signal); display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
   .who .n { font-weight: 600; font-size: 14px; word-break: break-all; }
@@ -1210,19 +1213,19 @@ function renderVendors() {
 // Countries for the vendor and company fields: ISO code and name; the flag is an image, fetched by code.
 const COUNTRIES = [["AR","Argentina"],["AU","Australia"],["AT","Austria"],["BE","Belgium"],["BR","Brazil"],["BG","Bulgaria"],["CA","Canada"],["CL","Chile"],["CN","China"],["CO","Colombia"],["HR","Croatia"],["CY","Cyprus"],["CZ","Czechia"],["DK","Denmark"],["EE","Estonia"],["FI","Finland"],["FR","France"],["DE","Germany"],["GR","Greece"],["HK","Hong Kong"],["HU","Hungary"],["IN","India"],["ID","Indonesia"],["IE","Ireland"],["IL","Israel"],["IT","Italy"],["JP","Japan"],["KE","Kenya"],["LV","Latvia"],["LT","Lithuania"],["LU","Luxembourg"],["MY","Malaysia"],["MT","Malta"],["MX","Mexico"],["NL","Netherlands"],["NZ","New Zealand"],["NG","Nigeria"],["NO","Norway"],["PE","Peru"],["PH","Philippines"],["PL","Poland"],["PT","Portugal"],["RO","Romania"],["SA","Saudi Arabia"],["SG","Singapore"],["SK","Slovakia"],["SI","Slovenia"],["ZA","South Africa"],["KR","South Korea"],["ES","Spain"],["SE","Sweden"],["CH","Switzerland"],["TW","Taiwan"],["TH","Thailand"],["TR","Turkey"],["UA","Ukraine"],["AE","United Arab Emirates"],["GB","United Kingdom"],["US","United States"],["UY","Uruguay"],["VN","Vietnam"]];
 const countryName = (code) => COUNTRIES.find(([c]) => c === code)?.[1] || code;
-const flagImg = (code) => /^[A-Z]{2}$/.test(code) ? `<img class="flag" src="https://flagcdn.com/w40/${code.toLowerCase()}.png" alt="${esc(code)}">` : "";
-const flagUrl = (code) => `https://flagcdn.com/w40/${code.toLowerCase()}.png`;
+const flagPos = (code) => { const i = COUNTRIES.findIndex(([c]) => c === code); return i < 0 ? "" : `style="background-position:0 -${i * 16}px"`; };
+const flagImg = (code) => flagPos(code) ? `<span class="flag" ${flagPos(code)} role="img" aria-label="${esc(code)}"></span>` : "";
 /** A country picker over a hidden select: button with flag and name, list with a flag per row, type to filter. */
 function countryPicker(wrapId) {
   const wrap = $(wrapId), el = wrap.querySelector("select");
   el.innerHTML = `<option value="">Not set</option>` + COUNTRIES.map(([c, n]) => `<option value="${c}">${esc(n)}</option>`).join("");
-  wrap.insertAdjacentHTML("beforeend", `<button type="button" class="pick" aria-haspopup="listbox" aria-expanded="false"><img class="flag" alt="" hidden><span class="n muted">Not set</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button><div class="menu" hidden><input type="text" placeholder="Type to search" autocomplete="off"><div class="list" role="listbox"></div></div>`);
+  wrap.insertAdjacentHTML("beforeend", `<button type="button" class="pick" aria-haspopup="listbox" aria-expanded="false"><span class="flag" hidden></span><span class="n muted">Not set</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button><div class="menu" hidden><input type="text" placeholder="Type to search" autocomplete="off"><div class="list" role="listbox"></div></div>`);
   const pick = wrap.querySelector(".pick"), img = pick.querySelector(".flag"), name = pick.querySelector(".n"), menu = wrap.querySelector(".menu"), search = menu.querySelector("input"), list = menu.querySelector(".list");
-  const show = () => { const c = el.value; img.hidden = !c; if (c) img.src = flagUrl(c); name.textContent = c ? countryName(c) : "Not set"; name.classList.toggle("muted", !c); };
+  const show = () => { const c = el.value; img.hidden = !c; if (c) img.style.backgroundPosition = `0 -${COUNTRIES.findIndex(([k]) => k === c) * 16}px`; name.textContent = c ? countryName(c) : "Not set"; name.classList.toggle("muted", !c); };
   const render = (q = "") => {
     const needle = q.trim().toLowerCase();
     const rows = [["", "Not set"], ...COUNTRIES].filter(([c, n]) => !needle || n.toLowerCase().includes(needle) || c.toLowerCase() === needle);
-    list.innerHTML = rows.map(([c, n]) => `<button type="button" role="option" data-c="${c}" class="${c === el.value ? "on" : ""}">${c ? `<img class="flag" src="${flagUrl(c)}" alt="" loading="lazy">` : `<span class="flag" style="box-shadow:none"></span>`}<span>${esc(n)}</span>${c ? `<span class="c">${c}</span>` : ""}</button>`).join("") || `<div class="muted" style="padding:8px 10px;font-size:14px">no match</div>`;
+    list.innerHTML = rows.map(([c, n]) => `<button type="button" role="option" data-c="${c}" class="${c === el.value ? "on" : ""}">${c ? `<span class="flag" ${flagPos(c)}></span>` : `<span class="flag none"></span>`}<span>${esc(n)}</span>${c ? `<span class="c">${c}</span>` : ""}</button>`).join("") || `<div class="muted" style="padding:8px 10px;font-size:14px">no match</div>`;
   };
   const open = () => { menu.hidden = false; pick.setAttribute("aria-expanded", "true"); search.value = ""; render(); search.focus(); };
   const close = () => { menu.hidden = true; pick.setAttribute("aria-expanded", "false"); };
