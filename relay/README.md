@@ -40,5 +40,7 @@ Setup, once:
 
 Then, in the console: Settings, "Connect a Telegram chat", open the link, press Start. Send a PDF to the chat. See it in Inbox.
 
+A vendor never sees the console: generate a link for them in Settings and send it; they open it, press Start, and from then on send their invoices to the bot, which answers with the receipt and, later, the decision on that invoice only. For a group (you, the vendor, the bot): add the bot to the group and post `/start <code>` there. Bots in groups only see documents if privacy mode is off: in @BotFather, `/setprivacy`, pick the bot, Disable (or make the bot an admin of the group).
+
 Routes: `POST /tg/webhook` (Telegram only, checked by the secret header), `GET /tg/setup`, `POST /inbox/pair`, and with the treasury's inbox token as a Bearer header `GET /inbox/list`, `GET /inbox/file`, `POST /inbox/discard`, `POST /inbox/notify`. A company that brings its own NEAR AI Cloud key deploys this Worker on its own Cloudflare account, so nothing of its passes through Bursar.
 

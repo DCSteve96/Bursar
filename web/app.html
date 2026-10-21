@@ -1351,11 +1351,13 @@ async function inboxAfterDecision(id, p, hash) {
   if (!settings.inboxToken) return;
   const h = { ...inboxHeaders(), "content-type": "application/json" };
   const item = inboxCurrent; inboxCurrent = null;
+  if (!item) return; // a dropped file: nobody on Telegram is waiting for this one
   try {
-    if (item) await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, id: item.id }) });
+    await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, id: item.id }) });
     const what = p ? `${p.status}${p.reason ? ` (${p.reason})` : ""}` : "decided";
-    const text = `${item ? item.name + ": " : ""}payment #${id} ${what}. ${p ? `${p.vendor_id} ${p.invoice_number}, ${usdc(p.amount)}. ` : ""}${p?.status === "Approval" ? "It waits for a person in the console. " : ""}${EXPLORER[settings.network]}/txns/${hash}`;
-    await fetch(`${RELAY}/inbox/notify`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, text }) });
+    const text = `${item.name}: payment #${id} ${what}. ${p ? `${p.vendor_id} ${p.invoice_number}, ${usdc(p.amount)}. ` : ""}${p?.status === "Approval" ? "It waits for a person at the company. " : ""}${EXPLORER[settings.network]}/txns/${hash}`;
+    // only the chat the invoice came from hears the outcome
+    await fetch(`${RELAY}/inbox/notify`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, chat: item.chat, text }) });
     loadInbox();
   } catch {}
 }

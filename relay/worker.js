@@ -145,11 +145,14 @@ async function inbox(request, env, url, headers) {
     await kvPut(env, `inbox:${treasury}`, items.filter((x) => x.id !== body.id));
     return json(200, { ok: true }, headers);
   }
+  // The outcome goes back to the chat the invoice came from (body.chat), so one vendor never sees another's decisions;
+  // without a chat it goes to every connected chat (the company's own channels).
   if (request.method === "POST" && p === "/inbox/notify") {
     const text = String(body.text || "").slice(0, 1000);
     if (!text) return json(400, { error: "text is required" }, headers);
-    await Promise.all(rec.chats.map((c) => tg(env, "sendMessage", { chat_id: c, text, disable_web_page_preview: true }).catch(() => {})));
-    return json(200, { ok: true, chats: rec.chats.length }, headers);
+    const targets = body.chat != null ? rec.chats.filter((c) => String(c) === String(body.chat)) : rec.chats;
+    await Promise.all(targets.map((c) => tg(env, "sendMessage", { chat_id: c, text, disable_web_page_preview: true }).catch(() => {})));
+    return json(200, { ok: true, chats: targets.length }, headers);
   }
   return json(404, { error: "not found" }, headers);
 }
