@@ -178,6 +178,16 @@ pub struct Payment {
     pub withheld: u128,
 }
 
+/// The answer `preview_payment` gives: what `request_payment` would record, before anyone asks.
+#[near(serializers = [json])]
+#[derive(Clone, Debug)]
+pub struct Preview {
+    pub status: Status,
+    pub reason: Option<String>,
+    pub withheld: U128,
+    pub order_id: Option<u64>,
+}
+
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Debug)]
 pub struct Company {
@@ -590,46 +600,8 @@ impl Bursar {
                 // What the company agreed to buy: consume the matching order, or note that there is none.
                 let (order_id, covered) = self.consume_order(&claim);
                 p.order_id = order_id;
-                // A human decides when: the amount is above the threshold; no order covers the invoice
-                // (always in strict mode, otherwise only for vendors that have orders); the model raised flags.
-                // The AI can add scrutiny through its flags, never remove it.
-                let mut holds: Vec<&str> = Vec::new();
-                if amount >= self.limits.approval_threshold {
-                    holds.push("over_threshold");
-                }
-                if !covered && (self.limits.require_orders || self.vendor_has_orders(&claim.vendor_id)) {
-                    holds.push("no_order");
-                }
-                if !claim.flags.is_empty() {
-                    holds.push("flagged");
-                }
-                // Identity, when the owner recorded it: the vendor's tax id on the invoice must be the registered one,
-                // and the invoice must be addressed to this company. A misread id must not refuse a real invoice, so
-                // both are holds for a person, not blocks.
-                if let Some(t) = self.vendors.get(&claim.vendor_id).and_then(|v| v.tax_id.as_ref()) {
-                    if Self::norm_id(&claim.vendor_tax_id) != Self::norm_id(t) {
-                        holds.push("identity_mismatch");
-                    }
-                }
-                if let Some(t) = self.company.as_ref().and_then(|c| c.tax_id.as_ref()) {
-                    if Self::norm_id(&claim.buyer_tax_id) != Self::norm_id(t) {
-                        holds.push("buyer_mismatch");
-                    }
-                }
-                // Withholding, as the company's accountant set it on the vendor: the treasury keeps that share back
-                // for the state and pays the rest. An invoice that shows a different withholding, or shows one the
-                // company did not configure, waits for a person.
-                let bps = self.vendors.get(&claim.vendor_id).map(|v| v.withholding_bps).unwrap_or(0) as u128;
-                let expected = amount * bps / 10_000;
-                let seen = claim.withholding_seen.0;
-                if bps > 0 {
-                    p.withheld = expected;
-                    if seen > 0 && seen.abs_diff(expected) > amount / 100 {
-                        holds.push("withholding_mismatch");
-                    }
-                } else if seen > 0 {
-                    holds.push("withholding_mismatch");
-                }
+                let (holds, withheld) = self.holds(&claim, covered);
+                p.withheld = withheld;
                 if !holds.is_empty() {
                     let reason = holds.join("+");
                     p.status = Status::Approval;
@@ -879,6 +851,50 @@ impl Bursar {
 
     // ----- internals -----
 
+    /// Why a person must decide, and the withholding kept back. Pure: `request_payment` and `preview_payment` share it.
+    /// A human decides when: the amount is above the threshold; no order covers the invoice (always in strict mode,
+    /// otherwise only for vendors that have orders); the model raised flags; the tax ids do not match what the owner
+    /// recorded; the withholding shown differs from the accountant's rate. The AI can add scrutiny, never remove it.
+    fn holds(&self, claim: &InvoiceClaim, covered: bool) -> (Vec<&'static str>, u128) {
+        let amount = claim.amount.0;
+        let mut holds: Vec<&str> = Vec::new();
+        if amount >= self.limits.approval_threshold {
+            holds.push("over_threshold");
+        }
+        if !covered && (self.limits.require_orders || self.vendor_has_orders(&claim.vendor_id)) {
+            holds.push("no_order");
+        }
+        if !claim.flags.is_empty() {
+            holds.push("flagged");
+        }
+        // Identity, when the owner recorded it: a misread id must not refuse a real invoice, so these are holds, not blocks.
+        if let Some(t) = self.vendors.get(&claim.vendor_id).and_then(|v| v.tax_id.as_ref()) {
+            if Self::norm_id(&claim.vendor_tax_id) != Self::norm_id(t) {
+                holds.push("identity_mismatch");
+            }
+        }
+        if let Some(t) = self.company.as_ref().and_then(|c| c.tax_id.as_ref()) {
+            if Self::norm_id(&claim.buyer_tax_id) != Self::norm_id(t) {
+                holds.push("buyer_mismatch");
+            }
+        }
+        // Withholding, as the company's accountant set it on the vendor: the treasury keeps that share back for the
+        // state and pays the rest. A different withholding on the invoice, or one the company did not configure, waits.
+        let bps = self.vendors.get(&claim.vendor_id).map(|v| v.withholding_bps).unwrap_or(0) as u128;
+        let expected = amount * bps / 10_000;
+        let seen = claim.withholding_seen.0;
+        let mut withheld = 0;
+        if bps > 0 {
+            withheld = expected;
+            if seen > 0 && seen.abs_diff(expected) > amount / 100 {
+                holds.push("withholding_mismatch");
+            }
+        } else if seen > 0 {
+            holds.push("withholding_mismatch");
+        }
+        (holds, withheld)
+    }
+
     fn decide(&self, c: &InvoiceClaim) -> Result<(), String> {
         if self.paused {
             return Err("paused".into());
@@ -1025,7 +1041,8 @@ impl Bursar {
 
     /// Find the order this claim fits and consume it. A purchase order is matched by the reference printed on
     /// the invoice; a standing order by vendor, once per period. Returns the order id and whether one covered it.
-    fn consume_order(&mut self, c: &InvoiceClaim) -> (Option<u64>, bool) {
+    /// The order that would cover this invoice, with its consumption applied on the returned copy. Pure.
+    fn find_order(&self, c: &InvoiceClaim) -> Option<Order> {
         let amount = c.amount.0;
         let reference = c.order_ref.as_deref().map(|r| r.trim().to_lowercase()).unwrap_or_default();
         let candidates: Vec<Order> = self
@@ -1039,9 +1056,7 @@ impl Bursar {
                 if let OrderKind::Single { remaining } = &mut o.kind {
                     if o.reference.to_lowercase() == reference && *remaining >= amount {
                         *remaining -= amount;
-                        let id = o.id;
-                        self.orders.insert(id, o);
-                        return (Some(id), true);
+                        return Some(o);
                     }
                 }
             }
@@ -1051,13 +1066,22 @@ impl Bursar {
                 let period = Self::period_key(*period_days);
                 if *amount_per_period >= amount && *last_period != Some(period) {
                     *last_period = Some(period);
-                    let id = o.id;
-                    self.orders.insert(id, o);
-                    return (Some(id), true);
+                    return Some(o);
                 }
             }
         }
-        (None, false)
+        None
+    }
+
+    fn consume_order(&mut self, c: &InvoiceClaim) -> (Option<u64>, bool) {
+        match self.find_order(c) {
+            Some(o) => {
+                let id = o.id;
+                self.orders.insert(id, o);
+                (Some(id), true)
+            }
+            None => (None, false),
+        }
     }
 
     /// Calendar month for monthly orders, epoch-aligned periods otherwise.
@@ -1123,6 +1147,30 @@ impl Bursar {
 
     fn invoice_key(vendor_id: &str, invoice_number: &str) -> String {
         format!("{}|{}", vendor_id.to_lowercase(), invoice_number.trim().to_lowercase())
+    }
+
+    // ----- preview -----
+
+    /// What `request_payment` would answer for this claim right now, without recording anything: the same checks,
+    /// in the same order, on the same state. The console shows it before a person presses the button.
+    pub fn preview_payment(&self, claim: InvoiceClaim) -> Preview {
+        match self.decide(&claim) {
+            Err(reason) => Preview { status: Status::Blocked, reason: Some(reason), withheld: U128(0), order_id: None },
+            Ok(()) => {
+                let order = self.find_order(&claim);
+                let (holds, withheld) = self.holds(&claim, order.is_some());
+                let paid = match self.vendors.get(&claim.vendor_id).map(|v| &v.payout) {
+                    Some(Payout::Near { .. }) => Status::Paid,
+                    _ => Status::Queued,
+                };
+                Preview {
+                    status: if holds.is_empty() { paid } else { Status::Approval },
+                    reason: if holds.is_empty() { None } else { Some(holds.join("+")) },
+                    withheld: U128(withheld),
+                    order_id: order.map(|o| o.id),
+                }
+            }
+        }
     }
 
     // ----- vault: the owner's secrets, encrypted in the browser, kept here so any browser can get them back -----
@@ -1634,5 +1682,33 @@ mod tests {
         testing_env!(ctx(accounts(1)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_vault("x".into())));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn preview_matches_the_decision_and_records_nothing() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(1)).build());
+        let ok = claim("hosting", "p1", 1_000_000, Payout::Near { account: accounts(5) });
+        let pv = c.preview_payment(ok.clone());
+        assert_eq!(pv.status, Status::Paid);
+        assert_eq!(pv.reason, None);
+        assert_eq!(c.get_stats().payments, 0);
+        let id = c.request_payment(ok);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid);
+        // the same invoice again: preview says duplicate, exactly as the contract would
+        let again = claim("hosting", "p1", 1_000_000, Payout::Near { account: accounts(5) });
+        let pv = c.preview_payment(again);
+        assert_eq!(pv.status, Status::Blocked);
+        assert_eq!(pv.reason.as_deref(), Some("duplicate_invoice"));
+        // a big one is a hold, and an inactive vendor a block
+        let big = claim("hosting", "p2", 3_000_000_000, Payout::Near { account: accounts(5) });
+        let pv = c.preview_payment(big);
+        assert_eq!(pv.status, Status::Approval);
+        assert_eq!(pv.reason.as_deref(), Some("over_threshold"));
+        testing_env!(ctx(accounts(0)).build());
+        c.update_vendor("hosting".into(), None, None, Some(false), None, None, None);
+        let pv = c.preview_payment(claim("hosting", "p3", 1_000_000, Payout::Near { account: accounts(5) }));
+        assert_eq!(pv.reason.as_deref(), Some("vendor_inactive"));
+        assert_eq!(c.get_stats().payments, 1);
     }
 }

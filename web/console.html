@@ -67,6 +67,9 @@
   .view .heading { font-size: clamp(24px, 3vw, 34px); }
   .view .card { background: var(--paper); border-color: var(--line-light); }
   .view .stat { background: var(--paper); border-color: var(--line-light); }
+  .preview { margin: 16px 0 4px; padding: 12px 16px; border-radius: 4px; border: 1px solid var(--line-light); background: var(--bone); font-size: 14px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .preview .stamp { font: 600 12px/1.5 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; } .preview .stamp.Paid, .preview .stamp.Queued { color: var(--paid-light); } .preview .stamp.Blocked { color: var(--blocked-light); } .preview .stamp.Approval { color: var(--wait-light); }
+  .preview .muted { font-size: 13px; }
   .vaultbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 24px; background: var(--mint); color: var(--fg-light); font-size: 14px; border-bottom: 1px solid var(--line-light); } .vaultbar .btn-signal { padding: 8px 14px; font-size: 14px; }
   /* analytics: charts drawn as inline SVG, no library */
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 24px; }
@@ -320,6 +323,7 @@
     <div id="claimBox" hidden>
       <div class="card">
         <div class="kv" id="claimKv"></div>
+        <div id="verdictPreview" class="preview" hidden></div>
         <div class="actions" style="align-items:center">
           <button id="submit" type="button" class="btn-signal">Request payment</button>
           <span class="muted" style="font-size:14px;max-width:60ch" id="submitNote">The contract matches the vendor, the payout, the orders, the caps and the duplicates. The browser never chooses an address.</span>
@@ -1116,6 +1120,22 @@ function showClaim(claim, vendors, verified) {
   $("#submit").disabled = !verified;
   $("#submitNote").textContent = verified ? "The contract matches the vendor, the payout, the caps and the duplicates. The browser never chooses an address." : "The receipt did not verify: this page will not submit it.";
   $("#claimBox").hidden = false; $("#claimEmpty").hidden = true;
+  showPreview(claim);
+}
+/** What the contract would answer right now: the same checks it will run when the button is pressed, read from the chain, recording nothing. */
+async function showPreview(claim) {
+  const el = $("#verdictPreview"); el.hidden = true;
+  if (!settings.treasury) return;
+  let pv;
+  try { pv = await view(settings.treasury, "preview_payment", { claim }); }
+  catch (e) { console.warn("preview:", e.message || e); if (/MethodNotFound|doesn't exist|does not exist/i.test(e.message || "")) return; el.innerHTML = `<span class="muted">preview unavailable: ${esc(e.message)}</span>`; el.hidden = false; return; }
+  if (current?.claim !== claim) return; // a newer reading replaced this one meanwhile
+  const words = pv.status === "Blocked" ? `the contract will refuse it: ${REASON[pv.reason] ?? pv.reason}.`
+    : pv.status === "Approval" ? `the contract will hold it for a person: ${holdText(pv.reason)}.`
+    : pv.status === "Queued" ? "the contract will accept it and queue it for the cross-chain executor." : "the contract will pay it now.";
+  const extra = [pv.order_id != null ? `order ${pv.order_id} covers it` : "", BigInt(pv.withheld || "0") > 0n ? `${usdc(pv.withheld)} kept back for the state` : ""].filter(Boolean).join("; ");
+  el.innerHTML = `<span class="stamp ${esc(pv.status)}">${esc(pv.status === "Approval" ? "will wait" : pv.status === "Blocked" ? "will be refused" : "will pay")}</span><span>If you press Request payment now, ${esc(words)}${extra ? ` <span class="muted">(${esc(extra)})</span>` : ""}</span><span class="muted">Read from the contract a moment ago; it decides again, on the same rules, when asked.</span>`;
+  el.hidden = false;
 }
 
 // ---------- submit ----------
