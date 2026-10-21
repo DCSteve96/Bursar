@@ -435,10 +435,12 @@ Web: explorer e login accettano una voce del registro solo se l'hash del codice 
 
 Accettato e documentato, non cambiato: la soglia di approvazione e' per fattura (5 fatture al giorno per fornitore senza persona, poi trattenuta; il cap giornaliero resta il limite vero); le bandierine e i tax id del claim vengono dalla lettura e possono solo aggiungere controlli; l'executor e' fidato per gli importi in coda entro l'account di settlement; i pagamenti in coda e trattenuti non riservano il saldo (over-commitment: `settle`/`approve` falliscono con messaggio chiaro); una `ft_transfer_call` di deposito che arriva mentre gira un `sync_balance` puo' essere contata due volte fino al sync successivo. I contratti gia' deployati (demo, tesorerie di Stefano) restano sul wasm vecchio finche' non vengono rideployati con la chiave della tesoreria: lo stato e' compatibile, nessuna migrazione.
 
-## 2.35 Primo commit il 1 novembre: procedura (decisa il 21 ottobre)
+## 2.35 Primo commit il 2 novembre: procedura (decisa il 21 ottobre)
 
-Gli organizzatori hanno confermato a Stefano che il primo commit della repository della submission deve essere del 1 novembre. Regola e spirito: nessuna data cambiata, nessuna history riscritta. Procedura:
-1. Fino al 31 ottobre si lavora qui (`DCSteve96/Bursar`, privata): e' la provenienza con le date vere. Resta privata anche dopo.
-2. Il 1 novembre: nuova repository pubblica per la submission (es. `DCSteve96/bursar`), primo commit fatto quel giorno con l'import del codice: "Initial import. Work started on October 20, 2026 in a private repository; this repository opens on November 1 as the hackathon rules require." Niente `HANDOFF.md`, `ARCHITETTURA.md`, `CLAUDE.md` interno (vedi "Prima di rendere pubblica la repo"). Da li' commit giornalieri fino al 14.
-3. GitHub Pages passa alla repo nuova (CNAME `bursar.network` dentro `web/`, DNS invariato); `treasury-console` diventa privata (era solo la copia di deploy). Il workflow `pages.yml` va riattivato nella repo nuova.
-4. Prima di tutto questo Stefano chiede conferma scritta nel ticket che importare codice scritto prima del 1 novembre e' accettabile (testo inviato in chat il 21 ottobre). Se la risposta e' no, non esiste una soluzione tecnica onesta: decide Stefano.
+Gli organizzatori hanno detto a Stefano che il primo commit della repository della submission deve essere dopo il 1 novembre (la regola mancava nell'HACKATHON.md, la aggiungono) e sanno che il codice esiste da ottobre. Decisione: lavoro locale il 1 e 2 novembre, primo commit il 2 novembre con tutto dentro. Niente date cambiate, niente history riscritta, niente sequenze di commit simulate. Nel README la riga vera (testo inviato in chat il 21 ottobre: "First built in October 2026 in a private repository. This public repository opens on November 2, 2026...").
+
+Procedura del 1-2 novembre (script da preparare in `app/.bursar/nov1/`):
+1. Ridistribuzione da zero su testnet: nuovo account radice, nuova tesoreria demo, nuovo registro, nuovo token di prova, fornitori, le fatture del walkthrough rilette dal TEE con ricevute nuove (`bursar setup`, `bursar read`), indirizzi nuovi in README, `web/*.html` (REGISTRY, DEMO), `web/samples/`.
+2. Nuova repository pubblica, primo commit il 2 novembre: codice com'e', senza `HANDOFF.md`, `ARCHITETTURA.md` e il `CLAUDE.md` interno (vedi "Prima di rendere pubblica la repo"); la riga nel README; poi commit normali fino al 14.
+3. GitHub Pages sulla repo nuova (CNAME `bursar.network` in `web/`, DNS invariato, `pages.yml`), `treasury-console` privata. Il registro vecchio con le tesorerie di test resta su testnet ma le pagine leggono quello nuovo.
+4. Questa repo resta privata, come prova delle date vere.
