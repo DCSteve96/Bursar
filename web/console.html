@@ -215,12 +215,17 @@
     <p class="muted" id="wizCreateText">About a minute. Bursar asks the testnet faucet for a payer account, deploys the policy contract, writes your company on it, mints test USDC and registers three demo vendors. Nothing to pay.</p>
     <ul class="log" id="createSteps"></ul>
     <div id="createErr" class="err" hidden></div>
-    <div id="created" hidden style="margin-top:20px">
+    <div class="actions" id="wizRetry" hidden><button type="button" class="btn-signal" id="wRetry">Try again</button><button type="button" class="btn-ghost" id="wCancel2">Close</button></div>
+  </div>
+  <div class="pane" id="wizCreated" hidden>
+    <div class="eyebrow muted">Step 2 of 3, done</div>
+    <h3>Your treasury is ready</h3>
+    <div id="created" hidden>
       <div class="kv" id="createdKv"></div>
-      <p class="muted" id="createdNote" hidden style="font-size:14px;margin:12px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs vendors, orders, limits and approvals, never a transfer. Then it asks for one signature, no transaction: it locks your settings in the contract's vault.</p>
+      <p class="muted" id="createdNote" hidden style="font-size:14px;margin:16px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs vendors, orders, limits and approvals, never a transfer. Then it asks for one signature, no transaction: it locks your settings in the contract's vault.</p>
+      <p class="muted" id="createdKeysNote" hidden style="font-size:14px;margin:16px 0 0">The keys of this treasury live in this browser. Download them now: they are the only way back in from another browser.</p>
       <div class="actions" style="margin-top:16px"><button type="button" class="btn-signal" id="createdWallet" hidden>Connect the wallet key</button><a class="btn btn-signal" href="#start" id="createdGo">Continue</a><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a></div>
     </div>
-    <div class="actions" id="wizRetry" hidden><button type="button" class="btn-signal" id="wRetry">Try again</button><button type="button" class="btn-ghost" id="wCancel2">Close</button></div>
   </div>
   <div class="pane" id="wizReading" hidden>
     <div class="eyebrow muted">Step 3 of 3</div>
@@ -1940,17 +1945,18 @@ async function createTreasury(company) {
     $("#createdKv").innerHTML = [["owner", owner], ["treasury", treasury], ["agent", agent], ...(wallet ? [["payer", root]] : [])].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
     const keys = { network: "testnet", label, owner: wallet ? { account_id: owner, note: "your wallet account: the wallet adds its own key to the browser" } : { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, ...(wallet ? { payer: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey, note: "funds invites and the DAO" } } : {}), treasury: { account_id: treasury, public_key: treasuryKey.pubStr, private_key: treasuryKey.secretKey }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
     $("#dlKeys").href = URL.createObjectURL(new Blob([JSON.stringify(keys, null, 2)], { type: "application/json" })); $("#dlKeys").download = `${root}-keys.json`;
-    $("#createdGo").hidden = wallet; $("#createdWallet").hidden = !wallet; $("#createdNote").hidden = !wallet;
+    $("#createdGo").hidden = wallet; $("#createdWallet").hidden = !wallet; $("#createdNote").hidden = !wallet; $("#createdKeysNote").hidden = wallet;
     if (wallet) $("#createdWallet").onclick = () => connectWalletKey(treasury, owner, label, () => wizPane("wizReading"));
     $("#created").hidden = false;
     step("done", "ok", wallet ? "created; connect the wallet key to sign in as the owner" : "created; your keys are in this browser");
+    wizPane("wizCreated");
   } catch (e) {
     $("#createErr").textContent = e.message; $("#createErr").hidden = false; $("#wizRetry").hidden = false;
   } finally { btn.disabled = false; }
 }
 // ----- the wizard -----
 const wiz = $("#wiz");
-const wizPane = (id) => { for (const p of ["wizCompany", "wizCreate", "wizReading"]) $("#" + p).hidden = p !== id; };
+const wizPane = (id) => { for (const p of ["wizCompany", "wizCreate", "wizCreated", "wizReading"]) $("#" + p).hidden = p !== id; };
 function wizOpen() {
   let ob = null; try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
   const c = ob?.company || {};
