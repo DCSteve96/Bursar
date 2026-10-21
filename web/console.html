@@ -1962,7 +1962,11 @@ function wizOpen() {
   const c = ob?.company || {};
   $("#wName").value = c.name || ""; $("#wDesc").value = c.description || ""; $("#wCountry").value = c.country || ""; $("#wCountry")._showFlag?.(); $("#wTax").value = c.tax_id || "";
   $("#wizErr1").hidden = true; $("#createErr").hidden = true; $("#created").hidden = true; $("#wizRetry").hidden = true; $("#createSteps").innerHTML = "";
-  wizPane("wizCompany"); if (!wiz.open) wiz.showModal();
+  if (!wiz.open) wiz.showModal();
+  // a creation left halfway (page reloaded, network hiccup) resumes where it stopped instead of asking the company again
+  const wo = walletOwner();
+  if (ob?.company?.name && (!wo || ob.owner === wo.account)) { wizPane("wizCreate"); createTreasury(ob.company); return; }
+  wizPane("wizCompany");
 }
 $("#create").addEventListener("click", wizOpen);
 // Arriving from the sign-in page with a wallet that owns nothing: the person already pressed Create there, so open the wizard now.
