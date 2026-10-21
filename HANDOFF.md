@@ -342,3 +342,10 @@ Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI
 
 - Contratto: `holds()` e `find_order()` puri, condivisi da `request_payment` (che poi consuma l'ordine) e dal nuovo view `preview_payment(claim) -> Preview {status, reason, withheld, order_id}`: stessi controlli, stesso ordine, stesso stato, nessuna scrittura. 24 test, wasm 383577 byte.
 - Console: `showPreview(claim)` dopo `showClaim`: riquadro `#preview` con "will pay / will wait: motivo / will be refused: regola" letto dal contratto; sui contratti vecchi (metodo assente) il riquadro non compare. README passo 9e, docs riga Invoices.
+
+## 2.29 Procedura guidata alla prima creazione (21 ottobre)
+
+- `console.html`: `<dialog id="wiz">` in tre pannelli. 1) Azienda: nome, descrizione e paese obbligatori (picker paese `#wCty`), partita IVA facoltativa; salvata in `bursar.onboarding.company` per riprendere. 2) Creazione: i passi (`#createSteps`), errori e "Try again", il blocco `#created` (chiave del wallet o download chiavi, "Continue"). 3) Lettura: `#wRead` (relay Bursar o chiave propria, con campo chiave), testo sul vault e sul backup, "Open my treasury" (salva readMode/aiKey e va in Overview), "Download a backup of the keys".
+- `createTreasury(company)` scrive l'azienda sul contratto con `set_company` mentre il pagatore ne è ancora proprietario (passo `company`), e usa il nome come etichetta del profilo. `connectWalletKey(..., onDone)` torna al pannello 3 invece che all'Overview quando guida il wizard.
+- Il pulsante `#create` apre il wizard; "Not now" lo chiude. Escape disattivato durante la creazione. Stile: input e pulsanti ghost ridefiniti dentro il dialog (il tema scuro li rendeva invisibili).
+- Test: tutti gli script in `app/.bursar` che creano una tesoreria compilano il wizard (`#wName`, `#wDesc`, `#wCountry`, `#wNext`) e lo chiudono (`#createdGo` + `#wFinish`, o `#wFinish` dopo la chiave del wallet). `scratchpad/wizshot.cjs` fa gli screenshot dei pannelli 1 e 3.

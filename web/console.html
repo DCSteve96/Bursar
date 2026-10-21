@@ -70,6 +70,14 @@
   .preview { margin: 16px 0 4px; padding: 12px 16px; border-radius: 4px; border: 1px solid var(--line-light); background: var(--bone); font-size: 14px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
   .preview .stamp { font: 600 12px/1.5 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; } .preview .stamp.Paid, .preview .stamp.Queued { color: var(--paid-light); } .preview .stamp.Blocked { color: var(--blocked-light); } .preview .stamp.Approval { color: var(--wait-light); }
   .preview .muted { font-size: 13px; }
+  dialog.wiz { border: 0; border-radius: 6px; padding: 0; width: min(600px, calc(100vw - 32px)); background: var(--paper); color: var(--fg-light); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35); }
+  dialog.wiz::backdrop { background: rgba(0, 0, 0, 0.55); }
+  .wiz .pane { padding: 28px; } .wiz h3 { font-size: 26px; line-height: 1.2; margin: 8px 0 8px; } .wiz p.muted { font-size: 14px; margin: 0 0 18px; max-width: 60ch; }
+  .wiz label { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; } .wiz label > span:first-child { font: 600 12px/1.17 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); }
+  .wiz .actions { margin-top: 20px; align-items: center; gap: 12px; } .wiz .log { margin: 8px 0 0; } .wiz select { width: 100%; }
+  .wiz input, .wiz select { border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); } .wiz .btn-ghost { color: var(--fg-light); border-color: var(--line-light); }
+  .wiz .log .ok { color: var(--paid-light); } .wiz .log .fail { color: var(--blocked-light); } .wiz .log .wait { color: var(--wait-light); } .wiz .kv .k { color: var(--mute-light); }
+  @media (max-width: 640px) { .wiz .pane { padding: 20px; } .wiz .grid.cols-2 { grid-template-columns: 1fr; } }
   .vaultbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 24px; background: var(--mint); color: var(--fg-light); font-size: 14px; border-bottom: 1px solid var(--line-light); } .vaultbar .btn-signal { padding: 8px 14px; font-size: 14px; }
   /* analytics: charts drawn as inline SVG, no library */
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 24px; }
@@ -186,6 +194,45 @@
   </div>
 </aside>
 <main class="work">
+<!-- the first-run wizard: company, creation, reading. Three small windows so a newcomer always knows what to do next. -->
+<dialog id="wiz" class="wiz">
+  <div class="pane" id="wizCompany">
+    <div class="eyebrow muted">Step 1 of 3</div>
+    <h3>Your company</h3>
+    <p class="muted">Written on your contract, shown to vendors and in reports. You can change it later in Settings.</p>
+    <label><span>Company name</span><input id="wName" placeholder="Northwind Studio Srl" autocomplete="organization"></label>
+    <label><span>What the company does</span><input id="wDesc" placeholder="Design studio, Milano" autocomplete="off"></label>
+    <div class="grid cols-2">
+      <label><span>Country</span><span class="cty" id="wCty"><select id="wCountry"></select></span></label>
+      <label><span>Your tax id <span class="muted">(optional)</span> <i class="help" tabindex="0" data-help="VAT number, EIN, or whatever your invoices are addressed to. When set, an invoice not addressed to it waits for a person. Leave it empty if unsure.">?</i></span><input id="wTax" placeholder="IT01234567890" autocomplete="off"></label>
+    </div>
+    <div id="wizErr1" class="err" hidden></div>
+    <div class="actions"><button type="button" class="btn-signal" id="wNext">Continue</button><button type="button" class="btn-ghost" id="wCancel">Not now</button></div>
+  </div>
+  <div class="pane" id="wizCreate" hidden>
+    <div class="eyebrow muted">Step 2 of 3</div>
+    <h3 id="wizCreateTitle">Creating your treasury</h3>
+    <p class="muted" id="wizCreateText">About a minute. Bursar asks the testnet faucet for a payer account, deploys the policy contract, writes your company on it, mints test USDC and registers three demo vendors. Nothing to pay.</p>
+    <ul class="log" id="createSteps"></ul>
+    <div id="createErr" class="err" hidden></div>
+    <div id="created" hidden style="margin-top:20px">
+      <div class="kv" id="createdKv"></div>
+      <p class="muted" id="createdNote" hidden style="font-size:14px;margin:12px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs vendors, orders, limits and approvals, never a transfer. Then it asks for one signature, no transaction: it locks your settings in the contract's vault.</p>
+      <div class="actions" style="margin-top:16px"><button type="button" class="btn-signal" id="createdWallet" hidden>Connect the wallet key</button><a class="btn btn-signal" href="#start" id="createdGo">Continue</a><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a></div>
+    </div>
+    <div class="actions" id="wizRetry" hidden><button type="button" class="btn-signal" id="wRetry">Try again</button><button type="button" class="btn-ghost" id="wCancel2">Close</button></div>
+  </div>
+  <div class="pane" id="wizReading" hidden>
+    <div class="eyebrow muted">Step 3 of 3</div>
+    <h3>How your invoices are read</h3>
+    <p class="muted">Every invoice is read by a model inside a secure enclave (a TEE on NEAR AI Cloud) that signs what it read. Pick who pays for that reading.</p>
+    <label><span>Reading</span><select id="wRead"><option value="relay">Bursar reading (free demo, daily caps)</option><option value="own">My own NEAR AI Cloud key</option></select></label>
+    <p class="muted" id="wReadText">With Bursar reading, the PDF goes through Bursar's relay to the enclave; the relay holds the key and counts the readings. With your own key (from cloud.near.ai) the PDF goes from this browser straight to the enclave and never touches Bursar. The signed receipt and its checks are the same either way.</p>
+    <label id="wAiKeyRow" hidden><span>NEAR AI Cloud API key</span><input id="wAiKey" type="password" placeholder="from cloud.near.ai" autocomplete="off"></label>
+    <p class="muted" id="wizKeysText">Your keys stay in this browser. A wallet owner gets them back in any browser from the contract's vault, after signing with the wallet; a backup file is the second way, and the only one without a wallet.</p>
+    <div class="actions"><button type="button" class="btn-signal" id="wFinish">Open my treasury</button><button type="button" class="btn-ghost" id="wBackup">Download a backup of the keys</button></div>
+  </div>
+</dialog>
 <div id="vaultBar" class="vaultbar" hidden><span>This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.</span><button type="button" class="btn-signal small" id="vaultUnlockTop">Unlock with the wallet</button><span class="err" id="vaultBarErr" hidden></span></div>
 
 <!-- ============ START: a new treasury ============ -->
@@ -201,13 +248,7 @@
           <span class="muted" style="font-size:14px;max-width:46ch" id="startAside">Already have one? Add it in Settings with its keys.</span>
         </div>
         <p class="muted" id="startOver" style="font-size:13px;margin:10px 0 0" hidden>A creation started earlier in this browser is saved here. <a href="#start" id="startFresh">Start over</a> to discard it and create a new treasury instead.</p>
-        <ul class="log" id="createSteps" style="margin-top:24px"></ul>
-        <div id="createErr" class="err" hidden></div>
-        <div id="created" hidden style="margin-top:24px">
-          <div class="kv" id="createdKv"></div>
-          <div class="actions" style="margin-top:16px"><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a><a class="btn btn-signal" href="#invoices" id="createdGo">Go to invoices</a><button type="button" class="btn-signal" id="createdWallet" hidden>Connect the wallet key</button></div>
-          <p class="muted" id="createdNote" hidden style="font-size:14px;margin:12px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs vendors, orders, limits and approvals, never a transfer. The payer account's key stays here to fund invites and the DAO.</p>
-        </div>
+
       </div>
       <div class="card">
         <div class="eyebrow muted" style="margin-bottom:12px">What you get</div>
@@ -1770,7 +1811,7 @@ async function ownerWallet(owner) {
   if (!accounts?.some((a) => a.accountId === owner)) throw new Error(`the wallet is signed in as ${accounts?.[0]?.accountId || "nobody"}, not ${owner}`);
   return wallet;
 }
-async function connectWalletKey(treasury, owner, label) {
+async function connectWalletKey(treasury, owner, label, onDone) {
   const btn = $("#createdWallet"); btn.disabled = true; btn.textContent = "Waiting for the wallet...";
   $("#createErr").hidden = true;
   try {
@@ -1780,7 +1821,7 @@ async function connectWalletKey(treasury, owner, label) {
     $("#owner").value = owner; $("#ownerKey").value = key.secretKey; $("#ownerKeyKind").value = "wallet"; $("#label").value = label;
     saveSettings();
     try { localStorage.removeItem("bursar.walletOwner"); } catch {}
-    location.hash = "#overview";
+    if (onDone) onDone(); else location.hash = "#overview";
     vaultSave(wallet).catch((e) => console.warn("vault:", e.message));
   } catch (e) { $("#createErr").textContent = `the wallet did not add the key: ${e.message || e}`; $("#createErr").hidden = false; }
   finally { btn.disabled = false; btn.textContent = "Connect the wallet key"; }
@@ -1796,9 +1837,9 @@ async function registerTreasury(signer, treasury, owner, step) {
     step("registry", "ok", "listed in the Bursar registry: the explorer counts it, your wallet finds it at sign-in", t.hash);
   } catch (e) { step("registry", "fail", `could not list in the registry: ${e.message}`); }
 }
-async function createTreasury() {
+async function createTreasury(company) {
   const btn = $("#create"); btn.disabled = true;
-  $("#createErr").hidden = true; $("#created").hidden = true;
+  $("#createErr").hidden = true; $("#created").hidden = true; $("#wizRetry").hidden = true;
   const step = stepper($("#createSteps"));
   try {
     if ($("#network").value !== "testnet") { $("#network").value = "testnet"; }
@@ -1836,6 +1877,15 @@ async function createTreasury() {
       const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
       const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)]);
       step("contract", "ok", `policy contract live at ${treasury}`, t1.hash);
+    }
+    if (company?.name) {
+      const have = await view(treasury, "get_company").catch(() => null);
+      if (have?.name === company.name) step("company", "ok", `${company.name} already on the contract`);
+      else {
+        step("company", "wait", `writing ${company.name} on the contract`);
+        const tc = await send(treasury, [A.functionCall("set_company", { name: company.name, description: company.description || "", country: company.country || null, tax_id: company.tax_id || null }, 30)]);
+        step("company", "ok", `${company.name}${company.country ? `, ${company.country}` : ""} on the contract`, tc.hash);
+      }
     }
     if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
     else {
@@ -1880,7 +1930,7 @@ async function createTreasury() {
     await registerTreasury({ signerId: root, secretKey: rootKey.secretKey }, treasury, owner, step);
     try { localStorage.removeItem("bursar.onboarding"); } catch {}
     const wallet = owner !== root;
-    const label = `My treasury (${root.split(".")[0].slice(7)})`;
+    const label = company?.name || `My treasury (${root.split(".")[0].slice(7)})`;
     for (const f of PROFILE_FIELDS) $("#" + f).value = "";
     const fields = wallet
       ? { network: "testnet", treasury, agent, agentKey: agentKey.secretKey, owner, ownerKey: "", ownerKeyKind: "wallet", payer: root, payerKey: rootKey.secretKey, label }
@@ -1891,14 +1941,44 @@ async function createTreasury() {
     const keys = { network: "testnet", label, owner: wallet ? { account_id: owner, note: "your wallet account: the wallet adds its own key to the browser" } : { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, ...(wallet ? { payer: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey, note: "funds invites and the DAO" } } : {}), treasury: { account_id: treasury, public_key: treasuryKey.pubStr, private_key: treasuryKey.secretKey }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
     $("#dlKeys").href = URL.createObjectURL(new Blob([JSON.stringify(keys, null, 2)], { type: "application/json" })); $("#dlKeys").download = `${root}-keys.json`;
     $("#createdGo").hidden = wallet; $("#createdWallet").hidden = !wallet; $("#createdNote").hidden = !wallet;
-    if (wallet) $("#createdWallet").onclick = () => connectWalletKey(treasury, owner, label);
+    if (wallet) $("#createdWallet").onclick = () => connectWalletKey(treasury, owner, label, () => wizPane("wizReading"));
     $("#created").hidden = false;
-    step("done", "ok", wallet ? "created; connect the wallet key to sign in as the owner" : "settings saved in this browser; go to Invoices and load a recorded reading");
+    step("done", "ok", wallet ? "created; connect the wallet key to sign in as the owner" : "created; your keys are in this browser");
   } catch (e) {
-    $("#createErr").textContent = e.message; $("#createErr").hidden = false;
+    $("#createErr").textContent = e.message; $("#createErr").hidden = false; $("#wizRetry").hidden = false;
   } finally { btn.disabled = false; }
 }
-$("#create").addEventListener("click", createTreasury);
+// ----- the wizard -----
+const wiz = $("#wiz");
+const wizPane = (id) => { for (const p of ["wizCompany", "wizCreate", "wizReading"]) $("#" + p).hidden = p !== id; };
+function wizOpen() {
+  let ob = null; try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
+  const c = ob?.company || {};
+  $("#wName").value = c.name || ""; $("#wDesc").value = c.description || ""; $("#wCountry").value = c.country || ""; $("#wCountry")._showFlag?.(); $("#wTax").value = c.tax_id || "";
+  $("#wizErr1").hidden = true; $("#createErr").hidden = true; $("#created").hidden = true; $("#wizRetry").hidden = true; $("#createSteps").innerHTML = "";
+  wizPane("wizCompany"); if (!wiz.open) wiz.showModal();
+}
+$("#create").addEventListener("click", wizOpen);
+$("#wCancel").addEventListener("click", () => wiz.close()); $("#wCancel2").addEventListener("click", () => wiz.close());
+wiz.addEventListener("cancel", (e) => { const creating = !$("#wizCreate").hidden && $("#created").hidden && $("#wizRetry").hidden; if (creating) e.preventDefault(); }); // no Escape while it creates
+$("#wNext").addEventListener("click", () => {
+  const company = { name: $("#wName").value.trim(), description: $("#wDesc").value.trim(), country: $("#wCountry").value.trim().toUpperCase(), tax_id: $("#wTax").value.trim() };
+  const missing = [!company.name && "the company name", !company.description && "what the company does", !company.country && "the country"].filter(Boolean);
+  if (missing.length) { $("#wizErr1").textContent = `Please fill in ${missing.join(", ")}.`; $("#wizErr1").hidden = false; return; }
+  $("#wizErr1").hidden = true;
+  try { const ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); if (ob) { ob.company = company; localStorage.setItem("bursar.onboarding", JSON.stringify(ob)); } } catch {}
+  wizPane("wizCreate");
+  createTreasury(company);
+});
+$("#wRetry").addEventListener("click", () => { $("#wizRetry").hidden = true; let c = null; try { c = JSON.parse(localStorage.getItem("bursar.onboarding") || "null")?.company; } catch {} createTreasury(c || { name: $("#wName").value.trim(), description: $("#wDesc").value.trim(), country: $("#wCountry").value.trim().toUpperCase(), tax_id: $("#wTax").value.trim() }); });
+$("#createdGo").addEventListener("click", (e) => { e.preventDefault(); wizPane("wizReading"); });
+$("#wRead").addEventListener("change", () => { $("#wAiKeyRow").hidden = $("#wRead").value !== "own"; });
+$("#wBackup").addEventListener("click", () => $("#dlKeysNow").click());
+$("#wFinish").addEventListener("click", () => {
+  $("#readMode").value = $("#wRead").value; $("#aiKey").value = $("#wRead").value === "own" ? $("#wAiKey").value.trim() : ""; syncReadMode();
+  saveSettings(); wiz.close(); location.hash = "#overview";
+});
+countryPicker("#wCty");
 reflectWalletOwner();
 function reflectOnboarding() {
   let ob = null; try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
