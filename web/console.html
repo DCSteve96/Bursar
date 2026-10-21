@@ -850,20 +850,21 @@ async function readInTee(pngPages, textFallback, step) {
   const body = { model: settings.model, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false };
   const requestBody = JSON.stringify(body);
   step("model", "wait", `asking ${settings.model} inside the enclave`);
-  // The gateway answers 502 now and then, and an error response carries no CORS headers, so the browser
-  // reports it as a network error: retry on both before giving up.
+  // The gateway answers 502 now and then, 524 when the model takes longer than its edge allows, and an
+  // error response carries no CORS headers, so the browser reports it as a network error: retry on all.
+  const TRANSIENT = [429, 500, 502, 503, 504, 520, 522, 524], TRIES = 6;
   let r = null, responseBody = "", lastErr = "";
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < TRIES; attempt++) {
     try {
       r = await fetch(`${AI}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
       responseBody = await r.text();
-      if (r.ok || ![429, 502, 503, 504].includes(r.status)) break;
+      if (r.ok || !TRANSIENT.includes(r.status)) break;
       lastErr = `gateway answered ${r.status}`;
     } catch (e) { r = null; lastErr = `network error (${e.message})`; }
-    step("model", "wait", `${lastErr}, retrying`);
-    await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
+    if (attempt < TRIES - 1) { step("model", "wait", `${lastErr}, retrying (${attempt + 2} of ${TRIES})`); await new Promise((res) => setTimeout(res, 2000 * (attempt + 1))); }
   }
-  if (!r) throw new Error(`chat: ${lastErr}`);
+  if (!r) throw new Error(`chat: ${lastErr} after ${TRIES} attempts; the NEAR AI Cloud gateway is not reachable right now, try again in a minute`);
+  if (!r.ok && TRANSIENT.includes(r.status)) throw new Error(`chat ${r.status} after ${TRIES} attempts: the NEAR AI Cloud gateway is slow right now (${r.status === 524 ? "the model did not answer within its time limit" : responseBody.slice(0, 120)}); try again in a minute`);
   if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 300)}`);
   const completion = JSON.parse(responseBody);
   const extraction = JSON.parse(completion.choices?.[0]?.message?.content ?? "{}");
@@ -967,7 +968,7 @@ function stepper(list) {
   return (name, state, detail, tx) => {
     let li = stepEl[list.id + name];
     if (!li) { li = document.createElement("li"); stepEl[list.id + name] = li; list.appendChild(li); }
-    const mark = state === "ok" ? "OK" : state === "fail" ? "FAIL" : state === "skip" ? "SKIP" : "...";
+    const mark = state === "ok" ? "OK" : state === "fail" ? "FAIL" : state === "skip" ? "SKIP" : "<i></i><i></i><i></i>";
     const link = tx ? ` <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(tx)}" target="_blank" rel="noopener">tx ${esc(tx.slice(0, 8))}...</a>` : "";
     li.innerHTML = `<span class="st ${state}">${mark}</span><span><b>${esc(name)}</b> ${esc(detail)}${link}</span>`;
   };
@@ -1019,7 +1020,7 @@ async function afterRead(read, vendors) {
   const { extraction, receipt, attestation, claim } = read;
   current = read;
   showExtraction(extraction);
-  const checks = $("#checks"); checks.innerHTML = `<li><span class="st wait">...</span><span>verifying the receipt, fetching Intel collateral through the relay</span></li>`;
+  const checks = $("#checks"); checks.innerHTML = `<li><span class="st wait"><i></i><i></i><i></i></span><span>verifying the receipt, fetching Intel collateral through the relay</span></li>`;
   $("#receipt").hidden = false;
   const v = await verifyReceipt({ extraction, claim, ai: { receipt, attestation } });
   checks.innerHTML = "";
