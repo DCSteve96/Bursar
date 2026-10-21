@@ -65,6 +65,7 @@
       <h2>Continue with your NEAR wallet</h2>
       <p>Meteor, HOT, Intear, Nightly, Near Mobile and the other NEAR wallets. The wallet signs you in. If your account owns a treasury, the console opens it. If it owns none yet, Bursar creates one on the spot: Bursar pays for the accounts and the contract, you pay nothing.</p>
       <button id="wGo" type="button" class="btn-signal">Continue with NEAR wallet</button>
+      <p class="fine" id="wExt" hidden></p>
       <p>No NEAR wallet yet? <a href="https://meteorwallet.app" target="_blank" rel="noopener">Meteor</a>, <a href="https://wallet.intear.tech" target="_blank" rel="noopener">Intear</a> or <a href="https://nightly.app" target="_blank" rel="noopener">Nightly</a> take a minute to set up, and testnet accounts are free. <span id="wNetNote">On testnet, HOT and OKX are not available: they run on mainnet only.</span></p>
       <div id="wErr" class="err" hidden></div>
     </div>
@@ -112,7 +113,17 @@ let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
 // NEAR Connect: one picker for every NEAR wallet (Meteor, HOT, Intear, Nightly, Near Mobile, OKX, WalletConnect). Each wallet's
 // own code runs in a sandboxed iframe; this page only sees the account id and the transactions it asks the wallet to sign.
 let connector = null, meteorReady = null;
-const connect = () => { if (!connector) { connector = new NearConnector({ network, footerBranding: null }); window.bursarConnector = connector; meteorReady = registerMeteorExtension().catch((e) => console.warn("Meteor extension bridge:", e)); } return connector; };
+const connect = () => {
+  if (!connector) {
+    connector = new NearConnector({ network, footerBranding: null }); window.bursarConnector = connector;
+    // Say what the page sees of the Meteor extension: it is the one wallet that signs the vault message, and when it is
+    // missing from the picker people should know whether that is the page or the extension.
+    const ext = $("#wExt");
+    meteorReady = registerMeteorExtension().then((ok) => { ext.textContent = ok ? "Meteor extension detected: it is listed as \"Meteor Wallet (extension)\"; the plain entry is the web wallet." : "No Meteor extension seen on this page: the Meteor entry opens the web wallet. If you have the extension, check it is enabled and unlocked, then reload."; ext.hidden = false; return ok; })
+      .catch((e) => { console.warn("Meteor extension bridge:", e); ext.textContent = `Meteor extension seen, but its bridge failed to load: ${e.message || e}. The Meteor entry opens the web wallet.`; ext.hidden = false; });
+  }
+  return connector;
+};
 function setNet(n) {
   network = n;
   for (const b of document.querySelectorAll("#net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
