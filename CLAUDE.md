@@ -36,14 +36,14 @@ app/src/              TypeScript, near-api-js 7
   config.ts           tutta la configurazione da env; asset id USDC per chain (Intents)
   near.ts             helper NEAR, meta transaction (NEP-366)
   ai.ts               NEAR AI Cloud: attestazione prima, estrazione JSON, firma della risposta; parser offline per i PDF di esempio
-  agent.ts            watcher dell'inbox, PDF -> PNG (pdftoppm) e testo (pdftotext), claim -> request_payment
+  agent.ts            watcher dell'inbox (cartella e fatture approvate da Telegram via relay), PDF -> PNG (pdftoppm) e testo (pdftotext), claim -> request_payment
   relayer.ts          relayer NEP-366 che accetta solo request_payment dall'agente
   executor.ts         NEAR Intents 1-Click per i fornitori su altre chain (solo mainnet)
   mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
   setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
   cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
 web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), console.html (la console: onboarding, lettura TEE, verifica, request_payment dal browser; app.html rimanda lì), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
-relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri)
+relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri), inbox Telegram e approvazioni da Telegram (bottoni, take/outcome per l'agente)
 invoices/             make_invoices.py e 9 PDF di esempio (5 e 6 per la console, 7 e 8 per i tax id, 9 per la ritenuta)
 ```
 

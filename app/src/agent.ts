@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { config } from "./config.js";
 import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, claimFlags, claimValues, payoutProblem, clip, CLAIM_LIMITS } from "./ai.js";
 import type { Payout } from "./near.js";
-import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
+import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, fmtUsdc, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
 
 const exec = promisify(execFile);
 
@@ -157,7 +157,54 @@ export async function processInvoice(pdfPath: string, opts: { offline?: boolean;
   return { file: basename(pdfPath), extraction, claim, paymentId: sent.paymentId, txHash: sent.txHash, payment };
 }
 
-/** Poll the inbox folder. Processed files move to inbox/done. */
+// ---------- invoices approved from Telegram ----------
+// The relay keeps the inbox; the owner's chat gets every invoice with Approve and Reject. An approved one is taken here,
+// read like a dropped file and submitted; the outcome goes back to the relay, which tells the chats.
+interface InboxItem { id: string; name: string; status: string; vendor: string; chat: number | string; from: string }
+const relayOn = () => !!(config.relay && config.inboxToken);
+async function relay(path: string, init: RequestInit = {}): Promise<Response> {
+  const r = await fetch(`${config.relay}${path}`, { ...init, headers: { Authorization: `Bearer ${config.inboxToken}`, "content-type": "application/json", ...(init.headers || {}) } });
+  if (!r.ok) throw new Error(`relay ${path} ${r.status}: ${(await r.json().catch(() => ({}))).error || ""}`);
+  return r;
+}
+const telegramTries = new Map<string, { path: string; tries: number }>();
+/** One pass over the relay inbox: take what was approved, read and submit it, report. Errors are retried on later ticks, three times. */
+async function telegramTick(opts: { offline?: boolean; direct?: boolean }) {
+  const q = `treasury=${encodeURIComponent(config.treasury)}`;
+  const { items } = (await (await relay(`/inbox/list?${q}`)).json()) as { items: InboxItem[] };
+  for (const it of items.filter((x) => x.status === "approved" || telegramTries.has(x.id))) {
+    let job = telegramTries.get(it.id);
+    try {
+      if (!job) {
+        const taken = await relay("/inbox/take", { method: "POST", body: JSON.stringify({ treasury: config.treasury, id: it.id }) });
+        if (!taken.ok) continue;
+        const dir = join(config.state, "telegram");
+        await mkdir(dir, { recursive: true });
+        const path = join(dir, `${it.id.replace(/[^\w-]/g, "_")}-${basename(it.name).replace(/[^\w.-]/g, "_")}`);
+        const pdf = await relay(`/inbox/file?${q}&id=${encodeURIComponent(it.id)}`);
+        await writeFile(path, Buffer.from(await pdf.arrayBuffer()));
+        job = { path, tries: 0 };
+        telegramTries.set(it.id, job);
+      }
+      job.tries++;
+      const r = await processInvoice(job.path, opts);
+      const p = r.payment;
+      const vendorName = (await view<[string, Vendor][]>("list_vendors").catch(() => [] as [string, Vendor][])).find(([id]) => id === r.claim.vendor_id)?.[1].name || r.claim.vendor_id;
+      console.log(`[agent] telegram ${it.name} -> payment #${r.paymentId} ${p?.status}${p?.reason ? " (" + p.reason + ")" : ""}`);
+      telegramTries.delete(it.id);
+      await relay("/inbox/outcome", { method: "POST", body: JSON.stringify({ treasury: config.treasury, id: it.id, status: p?.status ?? "decided", reason: p?.reason ?? null, vendor: vendorName, invoice_number: r.claim.invoice_number, amount: fmtUsdc(r.claim.amount), tx_url: `${config.explorer}/txns/${r.txHash}` }) });
+    } catch (e) {
+      const msg = (e as Error).message;
+      console.error(`[agent] telegram ${it.name} failed (${job?.tries ?? 0}/3): ${msg}`);
+      if (job && job.tries >= 3) {
+        telegramTries.delete(it.id);
+        await relay("/inbox/outcome", { method: "POST", body: JSON.stringify({ treasury: config.treasury, id: it.id, status: "error", message: msg.slice(0, 200) }) }).catch(() => {});
+      }
+    }
+  }
+}
+
+/** Poll the inbox folder, and the relay's Telegram inbox when BURSAR_RELAY and BURSAR_INBOX_TOKEN are set. Processed files move to inbox/done. */
 export async function watchInbox(opts: { offline?: boolean; direct?: boolean; once?: boolean } = {}) {
   const inbox = config.inbox;
   const done = join(inbox, "done");
@@ -166,6 +213,7 @@ export async function watchInbox(opts: { offline?: boolean; direct?: boolean; on
   const failures = new Map<string, number>();
   const parked = join(inbox, "failed");
   const tick = async () => {
+    if (relayOn()) await telegramTick(opts).catch((e) => console.error("[agent] telegram inbox:", (e as Error).message));
     if (!existsSync(inbox)) return;
     for (const f of (await readdir(inbox)).filter((f) => f.toLowerCase().endsWith(".pdf")).sort()) {
       const p = join(inbox, f);
@@ -185,5 +233,5 @@ export async function watchInbox(opts: { offline?: boolean; direct?: boolean; on
   await tick();
   if (opts.once) return;
   setInterval(tick, 3000);
-  console.log(`[agent] watching ${inbox}`);
+  console.log(`[agent] watching ${inbox}${relayOn() ? ` and the Telegram inbox on ${config.relay}` : ""}`);
 }

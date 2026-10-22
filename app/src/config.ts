@@ -36,6 +36,11 @@ export const config = {
   oneClickJwt: process.env.ONE_CLICK_JWT ?? "",
 
   inbox: process.env.BURSAR_INBOX ?? join(process.cwd(), "..", "invoices", "inbox"),
+  // The reading relay that hosts the Telegram inbox, and this treasury's inbox token (Settings, Keys, in the console).
+  // Both set: the agent also reads and submits the invoices approved from Telegram.
+  relay: (process.env.BURSAR_RELAY ?? "").replace(/\/$/, ""),
+  inboxToken: process.env.BURSAR_INBOX_TOKEN ?? "",
+  explorer: process.env.NEAR_EXPLORER ?? (process.env.NEAR_NETWORK === "mainnet" ? "https://nearblocks.io" : "https://testnet.nearblocks.io"),
   state: process.env.BURSAR_STATE ?? join(process.cwd(), ".bursar"),
 };
 

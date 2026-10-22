@@ -287,7 +287,7 @@
 <!-- ============ INBOX: invoices received through Telegram ============ -->
 <section class="band view" id="inbox" hidden>
   <div class="in">
-    <div class="band-head"><div class="eyebrow">[ INBOX ]</div><h2 class="heading">Invoices received. Nothing is read, let alone paid, until a person presses Read.</h2></div>
+    <div class="band-head"><div class="eyebrow">[ INBOX ]</div><h2 class="heading">Invoices received. Nothing is read, let alone paid, until a person presses Read, here or on Telegram.</h2></div>
     <div id="inboxOff" class="card" hidden>
       <p style="margin:0 0 16px;max-width:70ch">Vendors send invoices as they always do. Connect a Telegram chat to this treasury and every PDF posted there lands here: you, a colleague, or a group with the vendor in it. Bursar keeps only the sender and the file name; the PDF stays on Telegram until someone presses Read.</p>
       <div class="actions" style="margin:0"><a class="btn btn-signal" href="#settings">Connect Telegram in Settings</a></div>
@@ -560,7 +560,7 @@
           <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
           <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
-          <label><span>Inbox token (Telegram)</span><input id="inboxToken" type="password" placeholder="set by Connect a Telegram chat" autocomplete="off"></label>
+          <label><span>Inbox token (Telegram) <i class="help" tabindex="0" data-help="Set when you connect the first Telegram chat. The agent needs it too, to read what you approve from Telegram: BURSAR_INBOX_TOKEN in its environment, with BURSAR_RELAY set to the relay URL.">?</i></span><input id="inboxToken" type="password" placeholder="set by Connect a Telegram chat" autocomplete="off"></label>
         </div>
         <input id="model" type="hidden" value="Qwen/Qwen3-VL-30B-A3B-Instruct">
         <div class="actions" style="margin-top:16px;align-items:center">
@@ -573,6 +573,12 @@
     <div class="card" style="margin-top:24px" id="tgCard">
       <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Telegram inbox <i class="help" tabindex="0" data-help="A Telegram chat connected to this treasury. Every PDF posted in it shows up in Inbox, where a person reads it and the contract decides. Invite the vendor to a group with the bot, or forward their emails' attachments yourself. The bot never pays anything.">?</i></div>
       <p class="muted" style="font-size:14px;margin:0 0 16px;max-width:72ch">Press Connect, open the link on your phone, press Start in the chat. From then on, PDFs sent to that chat land in Inbox and the bot tells the chat how each one was decided. Connect as many chats as you like: one per vendor, or one for the whole company.</p>
+      <div class="card" style="margin:0 0 16px;padding:14px 16px;background:var(--bg-2, transparent)">
+        <div style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:260px;max-width:72ch"><b>Approve from your phone.</b> <span class="muted" style="font-size:14px">Connect your own Telegram as approver: every invoice that reaches the inbox is forwarded to you with the PDF and two buttons. Approve means the agent reads it in the enclave and the contract decides within your limits; Reject declines it. What the contract holds comes back here, to be approved with your wallet. No key leaves this browser. The agent must run with the inbox token (Keys, below): <span class="mono">bursar agent</span>. <i class="help" tabindex="0" data-help="Only the Telegram user who presses Start with your code can decide; in a group, nobody else's buttons count. With several invoices waiting, reply to the one you mean or use its buttons. Telegram never holds a key: an approved invoice goes through request_payment with the agent's key, a method that can only ask the contract, and the contract applies the same caps, thresholds and holds as always.">?</i></span></div>
+          <button id="tgApprover" type="button" class="btn-ghost">Connect your Telegram as approver</button>
+        </div>
+      </div>
       <div class="grid cols-3" style="align-items:end">
         <label><span>Who is this chat for <i class="help" tabindex="0" data-help="This is a list of your vendors. Pick the one this chat belongs to: its invoices are expected from there, and an invoice from that chat that names another vendor is held for a person. No vendor: a chat of your own team, where any vendor's invoice can arrive.">?</i></span><select id="tgFor"><option value="">No vendor (our own chat, any invoice)</option></select></label>
         <label><span>&nbsp;</span><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button></label>
@@ -1876,15 +1882,17 @@ async function loadInbox() {
     const vmap = Object.fromEntries(state.vendors), groups = {};
     for (const it of inboxItems.slice().reverse()) (groups[it.vendor || ""] ??= []).push(it);
     const keys = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : (vmap[a]?.name || a).localeCompare(vmap[b]?.name || b)));
-    const row = (it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}">Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`;
+    const stateOf = (it) => it.status === "approved" ? `<span class="pill Approval">approved on Telegram</span><div class="muted" style="font-size:12px">by ${esc(it.approved_by || "the approver")}; the agent reads it when it runs, or press Read</div>` : it.status === "reading" ? `<span class="pill Queued">the agent is reading it</span>` : `<span class="muted">waiting${j.approvers ? " for Telegram or Read" : ""}</span>`;
+    const row = (it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}${it.caption ? "<br>" : ""}${stateOf(it)}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}"${it.status === "reading" ? " disabled" : ""}>Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`;
     $("#inboxGroups").innerHTML = keys.map((k) => { const v = vmap[k]; const name = k ? (v?.name || k) : "The whole company"; return `<details class="vgroup" open><summary>
       <span><span class="k">${k ? "vendor" : "chats"}</span><span class="n"><b>${k ? flagImg(v?.country) : ""}${esc(name)}</b>${k && !v ? ` <span class="muted">(no longer a vendor)</span>` : ""}${k && v && v.active === false ? ` <span class="muted">(inactive)</span>` : ""}</span></span>
       <span><span class="k">waiting</span><span class="n">${groups[k].length}</span></span>
       <span class="hide-sm"><span class="k">rule</span><span class="n muted" style="font-size:13px">${k ? "an invoice from here naming another vendor is held" : "any vendor's invoice can arrive here"}</span></span><span class="hide-sm"></span><span class="hide-sm"></span></summary>
       <div class="wrap"><table><thead><tr><th>received</th><th>from</th><th>file</th><th>note</th><th></th></tr></thead><tbody>${groups[k].map(row).join("")}</tbody></table></div></details>`; }).join("") || `<p class="muted">nothing waiting. Send a PDF to a connected chat and press Refresh.</p>`;
     renderChats(j.chatList || []);
-    $("#inboxFoot").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}. ${inboxItems.length} waiting.`;
-    $("#tgStatus").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}`;
+    const approvers = j.approvers ? `, ${j.approvers} approver${j.approvers === 1 ? "" : "s"} on Telegram` : "";
+    $("#inboxFoot").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}${approvers}. ${inboxItems.length} waiting.`;
+    $("#tgStatus").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}${approvers}`;
   } catch (e) { $("#inboxErr").textContent = `could not read the inbox: ${e.message}`; $("#inboxErr").hidden = false; }
 }
 $("#inboxRefresh").addEventListener("click", loadInbox);
@@ -1897,7 +1905,7 @@ function fillTgFor() {
 function renderChats(list) {
   const wrap = $("#tgChatsWrap"); wrap.hidden = !list.length; if (!list.length) return;
   const vmap = Object.fromEntries(state.vendors);
-  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td><select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">No vendor: our own chat</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select></td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
+  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td>${c.approver ? `<b>approver</b><div class="muted" style="font-size:12px">decides from Telegram; holds come back here</div>` : `<select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">No vendor: our own chat</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select>`}</td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
   enhanceSelectsIn($("#tgChats"));
 }
 $("#tgChats").addEventListener("change", async (e) => {
@@ -1941,31 +1949,36 @@ async function inboxAfterDecision(id, p, hash) {
   const item = inboxCurrent; inboxCurrent = null;
   if (!item) return; // a dropped file: nobody on Telegram is waiting for this one
   try {
-    await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, id: item.id }) });
-    const what = p ? `${p.status}${p.reason ? ` (${p.reason})` : ""}` : "decided";
-    const text = `${item.name}: payment #${id} ${what}. ${p ? `${p.vendor_id} ${p.invoice_number}, ${usdc(p.amount)}. ` : ""}${p?.status === "Approval" ? "It waits for a person at the company. " : ""}${EXPLORER[settings.network]}/txns/${hash}`;
-    // only the chat the invoice came from hears the outcome
-    await fetch(`${RELAY}/inbox/notify`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, chat: item.chat, text }) });
+    const vendor = p ? (Object.fromEntries(state.vendors)[p.vendor_id]?.name || p.vendor_id) : "";
+    const body = { treasury: settings.treasury, id: item.id, status: p?.status ?? "decided", reason: p?.reason ?? null, vendor, invoice_number: p?.invoice_number ?? "", amount: p ? usdc(p.amount) : "", tx_url: `${EXPLORER[settings.network]}/txns/${hash}` };
+    // the relay tells the approvers with the contract's reason, and the chat the invoice came from the outcome only
+    const r = await fetch(`${RELAY}/inbox/outcome`, { method: "POST", headers: h, body: JSON.stringify(body) });
+    if (!r.ok) await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, id: item.id }) });
     loadInbox();
   } catch {}
 }
 $("#tgCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#tgLink").href); $("#tgCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#tgCopy").textContent = "Copy link"; }, 1500); });
-$("#tgConnect").addEventListener("click", async () => {
-  $("#tgErr").hidden = true; $("#tgOut").hidden = true; const b = $("#tgConnect"); b.disabled = true;
+/** A pairing link: for a vendor's chat (or the company's own), or for the owner's chat as approver. */
+async function tgPair(b, approver) {
+  $("#tgErr").hidden = true; $("#tgOut").hidden = true; b.disabled = true;
   try {
     if (!settings.treasury) throw new Error("no treasury selected");
     if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
-    const company = state.company?.name || settings.label || settings.treasury, vendorId = $("#tgFor").value.trim(), who = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
-    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId }) });
+    const company = state.company?.name || settings.label || settings.treasury, vendorId = approver ? "" : $("#tgFor").value.trim(), who = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
+    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId, approver }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
     $("#tgLink").href = j.link; $("#tgLink").textContent = j.link; $("#tgCmd").textContent = `/start ${j.code}  to @${j.bot}`;
-    const msg = `${who ? who + ", send" : "Send"} your invoices for ${company} here as PDF. Open the link, press Start, then just send the file: the bot confirms and tells you the outcome.`;
+    const msg = approver ? `Approve ${company}'s invoices from Telegram: open the link and press Start.` : `${who ? who + ", send" : "Send"} your invoices for ${company} here as PDF. Open the link, press Start, then just send the file: the bot confirms and tells you the outcome.`;
     $("#tgShare").href = `https://t.me/share/url?url=${encodeURIComponent(j.link)}&text=${encodeURIComponent(msg)}`;
+    $("#tgShare").textContent = approver ? "Open in Telegram" : "Send via Telegram";
+    if (approver) $("#tgShare").href = j.link;
     $("#tgOut").hidden = false;
     loadInbox();
   } catch (e) { $("#tgErr").textContent = e.message; $("#tgErr").hidden = false; }
   finally { b.disabled = false; }
-});
+}
+$("#tgConnect").addEventListener("click", () => tgPair($("#tgConnect"), false));
+$("#tgApprover").addEventListener("click", () => tgPair($("#tgApprover"), true));
 
 // ---------- router: one view at a time, by hash ----------
 const VIEWS = ["start", "inbox", "overview", "invoices", "attention", "vendors", "orders", "analytics", "settings"];

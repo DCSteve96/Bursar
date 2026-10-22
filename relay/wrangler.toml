@@ -8,6 +8,8 @@ ALLOWED_ORIGINS = "https://bursar.network,https://www.bursar.network,*.bursar.pa
 ALLOWED_MODELS = "Qwen/Qwen3-VL-30B-A3B-Instruct,z-ai/glm-5.3-flash"
 MAX_READS_PER_IP_PER_DAY = "20"
 MAX_READS_PER_DAY = "300"
+# Where "open the console" links in Telegram messages point.
+CONSOLE_URL = "https://bursar.network/console.html"
 
 # The API key is a secret, never a var:  wrangler secret put NEAR_AI_API_KEY
 # Daily caps need a KV namespace:        wrangler kv namespace create LIMITS   then uncomment and paste the id
