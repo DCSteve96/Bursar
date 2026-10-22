@@ -6,6 +6,10 @@ import { deserialize } from "borsh";
 import { account, txHash } from "./near.js";
 import { config } from "./config.js";
 
+const MAX_GAS = 150_000_000_000_000n;
+const MAX_PER_HOUR = Number(process.env.RELAYER_MAX_PER_HOUR ?? 300);
+const recent: number[] = [];
+
 export async function runRelayer(port = Number(new URL(config.relayerUrl).port || 8787)) {
   const relayer = await account(config.relayerAccount || config.executorAccount);
   const server = createServer(async (req, res) => {
@@ -24,11 +28,20 @@ export async function runRelayer(port = Number(new URL(config.relayerUrl).port |
         d.receiverId === config.treasury &&
         d.actions.length === 1 &&
         fc?.methodName === "request_payment" &&
-        BigInt(fc.deposit ?? 0) === 0n;
+        BigInt(fc.deposit ?? 0) === 0n &&
+        BigInt(fc.gas ?? 0) <= MAX_GAS;
       if (!ok) {
-        res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ error: "relayer only forwards request_payment from the agent" }));
+        res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ error: "relayer only forwards request_payment from the agent, with at most 150 TGas" }));
         return;
       }
+      // a stolen agent key must not burn the relayer's NEAR on failing calls: a fixed number of relays per hour
+      const now = Date.now();
+      while (recent.length && recent[0] < now - 3_600_000) recent.shift();
+      if (recent.length >= MAX_PER_HOUR) {
+        res.writeHead(429, { "content-type": "application/json" }).end(JSON.stringify({ error: `relayer limit: ${MAX_PER_HOUR} calls per hour` }));
+        return;
+      }
+      recent.push(now);
       const outcome: any = await relayer.relayMetaTransaction(signed);
       // The payment id is the return value of the delegated call, i.e. the receipt executed by the treasury.
       let paymentId: number | null = null;

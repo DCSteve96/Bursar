@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "./config.js";
-import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, claimFlags, claimValues, payoutProblem } from "./ai.js";
+import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, claimFlags, claimValues, payoutProblem, clip, CLAIM_LIMITS } from "./ai.js";
 import type { Payout } from "./near.js";
 import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
 
@@ -54,17 +54,23 @@ async function pdfText(pdfPath: string): Promise<string> {
 }
 
 /** Map the model's vendor guess to a vendor id known by the contract (by id or by name, case-insensitive). */
-async function matchVendor(ex: Extraction, vendors: [string, Vendor][]): Promise<string> {
+/** The vendor id the claim carries: an exact id or name, else the tax id, else a name containment (flagged `vendor_ambiguous`:
+ *  "consultant" would otherwise claim "Senior Consultant Services"). Unknown vendors are still submitted: the contract
+ *  records the block with reason unknown_vendor. */
+export function matchVendorWith(ex: Extraction, vendors: [string, Vendor][]): { id: string; fuzzy: boolean } {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const guess = norm(ex.vendor_id_guess || ex.vendor_name);
   for (const [id, v] of vendors) {
-    if (norm(id) === guess || norm(v.name) === guess) return id;
+    if (norm(id) === guess || norm(v.name) === guess) return { id, fuzzy: false };
   }
-  for (const [id, v] of vendors) {
-    if (guess.includes(norm(id)) || norm(v.name).includes(guess) || guess.includes(norm(v.name))) return id;
-  }
-  // Unknown vendors are still submitted: the contract records the block with reason unknown_vendor.
-  return ex.vendor_id_guess || "unknown";
+  const tax = norm(ex.vendor_tax_id || "");
+  if (tax) for (const [id, v] of vendors) if (v.tax_id && norm(v.tax_id) === tax) return { id, fuzzy: false };
+  const hits = vendors.filter(([id, v]) => guess.length >= 4 && (guess.includes(norm(id)) || norm(v.name).includes(guess) || guess.includes(norm(v.name))));
+  if (hits.length === 1) return { id: hits[0][0], fuzzy: true };
+  return { id: clip(ex.vendor_id_guess || "unknown", CLAIM_LIMITS.vendor_id), fuzzy: false };
+}
+async function matchVendor(ex: Extraction, vendors: [string, Vendor][]): Promise<string> {
+  return matchVendorWith(ex, vendors).id;
 }
 
 export interface ReadResult {
@@ -90,21 +96,22 @@ export async function readInvoiceFile(pdfPath: string, opts: { offline?: boolean
   return { file: basename(pdfPath), invoiceHash, text, extraction: r.extraction, ai: { receipt: r.receipt, attestation: r.attestation }, attestationRef: attestationRef(r.receipt) };
 }
 
-function buildClaim(read: ReadResult, vendorId: string, registeredPayout: Payout | null = null): InvoiceClaim {
+function buildClaim(read: ReadResult, vendorId: string, registeredPayout: Payout | null = null, fuzzy = false): InvoiceClaim {
   const { extraction, invoiceHash } = read;
   const values = claimValues(extraction);
+  const payout = values.payout_seen;
   return {
-    vendor_id: vendorId,
-    invoice_number: extraction.invoice_number || "unknown",
+    vendor_id: clip(vendorId, CLAIM_LIMITS.vendor_id),
+    invoice_number: clip(extraction.invoice_number || "unknown", CLAIM_LIMITS.invoice_number),
     amount: toUnits(values.amount),
-    due_date: extraction.due_date || "",
+    due_date: clip(extraction.due_date || "", CLAIM_LIMITS.due_date),
     invoice_hash: invoiceHash,
-    payout_seen: values.payout_seen,
-    attestation_ref: read.attestationRef,
-    flags: claimFlags(extraction, read.text, registeredPayout),
-    order_ref: extraction.order_ref?.trim() || null,
-    vendor_tax_id: (extraction.vendor_tax_id || "").trim(),
-    buyer_tax_id: (extraction.buyer_tax_id || "").trim(),
+    payout_seen: "Chain" in payout && payout.Chain ? { Chain: { chain: clip(payout.Chain.chain, CLAIM_LIMITS.chain), address: clip(payout.Chain.address, CLAIM_LIMITS.address) } } : payout,
+    attestation_ref: clip(read.attestationRef, CLAIM_LIMITS.attestation_ref),
+    flags: [...claimFlags(extraction, read.text, registeredPayout), ...(fuzzy ? ["vendor_ambiguous"] : [])].slice(0, CLAIM_LIMITS.flags).map((f) => clip(f, CLAIM_LIMITS.flag)),
+    order_ref: extraction.order_ref?.trim() ? clip(extraction.order_ref.trim(), CLAIM_LIMITS.order_ref) : null,
+    vendor_tax_id: clip((extraction.vendor_tax_id || "").trim(), CLAIM_LIMITS.tax_id),
+    buyer_tax_id: clip((extraction.buyer_tax_id || "").trim(), CLAIM_LIMITS.tax_id),
     withholding_seen: toUnits(values.withholding),
   };
 }
@@ -128,8 +135,8 @@ export async function processInvoice(pdfPath: string, opts: { offline?: boolean;
   const { extraction } = read;
   const receipt = read.ai;
   const vendors = await view<[string, Vendor][]>("list_vendors");
-  const vendorId = await matchVendor(extraction, vendors);
-  const claim = buildClaim(read, vendorId, vendors.find(([id]) => id === vendorId)?.[1].payout ?? null);
+  const { id: vendorId, fuzzy } = matchVendorWith(extraction, vendors);
+  const claim = buildClaim(read, vendorId, vendors.find(([id]) => id === vendorId)?.[1].payout ?? null, fuzzy);
   // An abbreviated or garbled payout would not even deserialize in the contract: a person has to read this one.
   const problem = payoutProblem(claim.payout_seen);
   if (problem) throw new Error(`not submitted: ${problem}; a person has to read this invoice`);
@@ -155,19 +162,23 @@ export async function watchInbox(opts: { offline?: boolean; direct?: boolean; on
   const inbox = config.inbox;
   const done = join(inbox, "done");
   await mkdir(done, { recursive: true });
-  const seen = new Set<string>();
+  // a file that failed (RPC hiccup, a quota, the gateway) is tried again on later ticks, three times, then parked
+  const failures = new Map<string, number>();
+  const parked = join(inbox, "failed");
   const tick = async () => {
     if (!existsSync(inbox)) return;
     for (const f of (await readdir(inbox)).filter((f) => f.toLowerCase().endsWith(".pdf")).sort()) {
-      if (seen.has(f)) continue;
-      seen.add(f);
       const p = join(inbox, f);
       try {
         const r = await processInvoice(p, opts);
         console.log(`[agent] ${f} -> payment #${r.paymentId} ${r.payment?.status}${r.payment?.reason ? " (" + r.payment.reason + ")" : ""}`);
+        failures.delete(f);
         await rename(p, join(done, f));
       } catch (e) {
-        console.error(`[agent] ${f} failed:`, (e as Error).message);
+        const n = (failures.get(f) ?? 0) + 1;
+        failures.set(f, n);
+        console.error(`[agent] ${f} failed (${n}/3):`, (e as Error).message);
+        if (n >= 3) { await mkdir(parked, { recursive: true }); await rename(p, join(parked, f)); failures.delete(f); console.error(`[agent] ${f} parked in inbox/failed`); }
       }
     }
   };

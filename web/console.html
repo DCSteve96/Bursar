@@ -1203,12 +1203,12 @@ async function handleFile(file) {
     const { extraction, receipt, attestation } = await readInTee(pages, text.trim() ? text : "", step);
     const vendors = await view(settings.treasury, "list_vendors");
     const values = claimValues(extraction);
-    const vendorId = matchVendor(extraction, vendors); const registered = vendors.find(([id]) => id === vendorId)?.[1]?.payout ?? null;
+    const { id: vendorId, fuzzy } = matchVendorWith(extraction, vendors); const registered = vendors.find(([id]) => id === vendorId)?.[1]?.payout ?? null;
     const claim = {
-      vendor_id: vendorId, invoice_number: extraction.invoice_number || "unknown", amount: toUnits(values.amount),
-      due_date: extraction.due_date || "", invoice_hash: invoiceHash, payout_seen: values.payout_seen,
-      attestation_ref: attestationRef(receipt), flags: [...claimFlags(extraction, text, registered), ...chatFlags(vendorId)], order_ref: (extraction.order_ref || "").trim() || null,
-      vendor_tax_id: (extraction.vendor_tax_id || "").trim(), buyer_tax_id: (extraction.buyer_tax_id || "").trim(), withholding_seen: toUnits(values.withholding),
+      vendor_id: clip(vendorId, CLAIM_LIMITS.vendor_id), invoice_number: clip(extraction.invoice_number || "unknown", CLAIM_LIMITS.invoice_number), amount: toUnits(values.amount),
+      due_date: clip(extraction.due_date || "", CLAIM_LIMITS.due_date), invoice_hash: invoiceHash, payout_seen: values.payout_seen?.Chain ? { Chain: { chain: clip(values.payout_seen.Chain.chain, CLAIM_LIMITS.chain), address: clip(values.payout_seen.Chain.address, CLAIM_LIMITS.address) } } : values.payout_seen,
+      attestation_ref: attestationRef(receipt), flags: [...claimFlags(extraction, text, registered), ...(fuzzy ? ["vendor_ambiguous"] : []), ...chatFlags(vendorId)].slice(0, CLAIM_LIMITS.flags).map((f) => clip(f, CLAIM_LIMITS.flag)), order_ref: (extraction.order_ref || "").trim() || null,
+      vendor_tax_id: clip((extraction.vendor_tax_id || "").trim(), CLAIM_LIMITS.tax_id), buyer_tax_id: clip((extraction.buyer_tax_id || "").trim(), CLAIM_LIMITS.tax_id), withholding_seen: toUnits(values.withholding),
     };
     await afterRead({ file: file.name, invoiceHash, extraction, receipt, attestation, claim }, vendors);
   } catch (e) {
@@ -1259,13 +1259,21 @@ function chatFlags(vendorId) {
   const it = inboxCurrent;
   return it?.vendor && it.vendor !== vendorId ? ["chat_vendor_mismatch"] : [];
 }
-function matchVendor(ex, vendors) {
+// Same as app/src/agent.ts matchVendorWith: an exact id or name, else the tax id, else one name containment, flagged
+// vendor_ambiguous ("consultant" would otherwise claim "Senior Consultant Services"). Unknown vendors are still submitted.
+const CLAIM_LIMITS = { vendor_id: 64, invoice_number: 128, due_date: 32, invoice_hash: 128, attestation_ref: 512, flag: 64, flags: 16, tax_id: 64, order_ref: 128, chain: 32, address: 256 };
+const clip = (s, n) => { const t = String(s ?? ""); return t.length <= n ? t : t.slice(0, n); };
+function matchVendorWith(ex, vendors) {
   const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const guess = norm(ex.vendor_id_guess || ex.vendor_name);
-  for (const [id, v] of vendors) if (norm(id) === guess || norm(v.name) === guess) return id;
-  for (const [id, v] of vendors) if (guess.includes(norm(id)) || norm(v.name).includes(guess) || guess.includes(norm(v.name))) return id;
-  return ex.vendor_id_guess || "unknown"; // unknown vendors are still submitted: the contract records the block
+  for (const [id, v] of vendors) if (norm(id) === guess || norm(v.name) === guess) return { id, fuzzy: false };
+  const tax = norm(ex.vendor_tax_id || "");
+  if (tax) for (const [id, v] of vendors) if (v.tax_id && norm(v.tax_id) === tax) return { id, fuzzy: false };
+  const hits = vendors.filter(([id, v]) => guess.length >= 4 && (guess.includes(norm(id)) || norm(v.name).includes(guess) || guess.includes(norm(v.name))));
+  if (hits.length === 1) return { id: hits[0][0], fuzzy: true };
+  return { id: clip(ex.vendor_id_guess || "unknown", CLAIM_LIMITS.vendor_id), fuzzy: false };
 }
+const matchVendor = (ex, vendors) => matchVendorWith(ex, vendors).id;
 const payoutText = (p) => p?.Near ? `NEAR ${p.Near.account}` : p?.Chain ? `${p.Chain.chain} ${p.Chain.address}` : "?";
 function showExtraction(ex) {
   const rows = [["vendor", `${ex.vendor_name}${ex.vendor_tax_id ? ` (${ex.vendor_tax_id})` : ""}`], ["bill to", ex.buyer_tax_id || "no tax id printed"], ["invoice", ex.invoice_number], ["amount", `${ex.amount} ${ex.currency}${ex.subtotal ? ` (subtotal ${ex.subtotal}, tax ${ex.tax_amount || "0"})` : ""}${ex.withholding ? `, withholding shown ${ex.withholding}` : ""}`], ["due", ex.due_date], ["pay to", payoutText(ex.payout_seen)], ["confidence", ex.confidence]];
@@ -1425,7 +1433,7 @@ $("#syncBalance").addEventListener("click", async () => {
 });
 function renderAttention() {
   const canApprove = canAct("approve") && !(state.roles?.[3]);
-  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote reject</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
+  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote reject</button>` : dao() && p.dao_proposal_id === null && canAct("approve") ? `<span class="muted">no proposal yet (the day's quota, no NEAR for the bond, or a payout to confirm)</span> <button type="button" class="btn-ghost small act" data-act="openProposal" data-id="${p.id}">Open proposal</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
   $("#attnDaoRow").hidden = !(dao() && !!settings.ownerKey && held().some((p) => p.dao_proposal_id !== null));
   $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
   $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
@@ -1441,13 +1449,13 @@ document.addEventListener("click", async (e) => {
       if (act === "voteReject") { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id }, gasTgas: 100 }); } catch {} }
       await loadTreasury(); return;
     }
-    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner", confirmPayout: "owner", orderBound: "owner" }[act];
+    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner", confirmPayout: "owner", orderBound: "owner", openProposal: "approve" }[act];
     if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
-    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", setWithhold: "update_vendor", removeOp: "remove_operator", confirmPayout: "confirm_vendor_payout", orderBound: "set_order_bound" }[act];
+    const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", setWithhold: "update_vendor", removeOp: "remove_operator", confirmPayout: "confirm_vendor_payout", orderBound: "set_order_bound", openProposal: "open_dao_proposal_for" }[act];
     let tax = null, bps = null;
     if (act === "setTax") { tax = prompt("Identifier this vendor prints on its invoices (VAT number, EIN, CNPJ, or a supplier code you assign). Leave empty to stop checking it.", b.dataset.tax || ""); if (tax === null) return; }
     if (act === "setWithhold") { const w = prompt("Withholding tax to keep back on this vendor's invoices, in percent (for example 20). As set by your accountant. 0 for none.", String((Number(b.dataset.w) || 0) / 100)); if (w === null) return; bps = Math.round(Number(w.replace(",", ".") || "0") * 100); if (!Number.isFinite(bps) || bps < 0 || bps > 5000) throw new Error("a percentage between 0 and 50"); }
-    const args = act === "confirmPayout" ? { vendor_id: b.dataset.id } : act === "orderBound" ? { vendor_id: b.dataset.id, bound: false } : act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
+    const args = act === "openProposal" ? { id } : act === "confirmPayout" ? { vendor_id: b.dataset.id } : act === "orderBound" ? { vendor_id: b.dataset.id, bound: false } : act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
     await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
     await loadTreasury();
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
@@ -1720,7 +1728,7 @@ $("#whRemit").addEventListener("click", async () => {
   } catch (e) { $("#whErr").textContent = e.message; $("#whErr").hidden = false; }
 });
 $("#sAcctSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { const v = $("#sAcct").value.trim(); await ownerCall("set_settlement_account", { account: v || null }); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
-$("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
+$("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { if (!$("#lDay").value.trim() || Number($("#lDay").value.replace(",", ".")) === 0) { if (!confirm("No daily cap: the agent could pay, every day, up to five invoices under the threshold for every vendor. Save without a daily cap?")) return; } await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
 // ---------- governance: a Sputnik DAO for the company, from the console ----------
 async function nearBalance(id) { const r = await rpc("query", { request_type: "view_account", finality: "optimistic", account_id: id }); return BigInt(r.amount); }

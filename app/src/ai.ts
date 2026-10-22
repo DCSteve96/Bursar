@@ -244,7 +244,8 @@ export function readInvoiceOffline(text: string): Extraction {
  */
 export function readingFlags(ex: Extraction, text: string): string[] {
   const flags: string[] = [];
-  const amount = Number(ex.amount || "0");
+  // the amount the claim will carry, not the model's decimal: that is what gets paid and what the text must contain
+  const amount = Number(claimValues(ex).amount || "0");
   // every number in the text; "money" is the ones written with cents, which is how invoices print amounts
   const nums = (text.match(/\d[\d.,]*\d|\d/g) ?? []).map((n) => parseMoney(n)).filter((n) => Number.isFinite(n));
   const money = (text.match(/\d[\d.,]*[.,]\d{2}(?![\d.,])/g) ?? []).map((n) => parseMoney(n)).filter((n) => Number.isFinite(n));
@@ -314,6 +315,12 @@ export function claimFlags(ex: Extraction, text: string, registeredPayout?: Payo
     return true;
   });
   return [...new Set([...model, ...readingFlags(ex, text)])];
+}
+/** The contract bounds every claim field; the client clips what the model wrote so a long line records a refusal instead of failing the call. */
+export const CLAIM_LIMITS = { vendor_id: 64, invoice_number: 128, due_date: 32, invoice_hash: 128, attestation_ref: 512, flag: 64, flags: 16, tax_id: 64, order_ref: 128, chain: 32, address: 256 };
+export function clip(s: string | null | undefined, n: number): string {
+  const t = String(s ?? "");
+  return t.length <= n ? t : t.slice(0, n);
 }
 /** Why a payout read from the invoice cannot go to the contract as it is (an abbreviated or garbled NEAR account would not even deserialize), or null. */
 export function payoutProblem(p: Payout | null | undefined): string | null {
