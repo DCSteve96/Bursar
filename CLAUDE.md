@@ -17,7 +17,8 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 5. **Niente segreti nella repo.** Chiavi solo in `~/.near-credentials` o in variabili d'ambiente. `.env.*` è in `.gitignore`. Se Stefano incolla una chiave in chat, va considerata compromessa e ruotata.
 6. **Niente mainnet senza conferma esplicita di Stefano**, e niente transazioni firmate con le sue chiavi senza che lo chieda lui per quella specifica azione.
 7. **Git**: commit e push li fa Claude Code solo se Stefano lo ha autorizzato in questa repo. In dubbio, chiedi. Messaggi di commit in inglese, brevi, al presente.
-8. **Submission**: una sola, non modificabile. Mai inviare il POST a `nearhackathon.com/api/applications` senza che Stefano abbia confermato il payload completo stampato a schermo.
+8. **Mercato internazionale.** Bursar parla a piccole aziende ovunque, non all'Italia: testi, esempi, placeholder, roadmap, post e `idea` della submission in chiave internazionale. Le funzioni di un paese (ritenuta, fatturazione elettronica) restano configurabili e in secondo piano, mai in primo.
+9. **Submission**: una sola, non modificabile. Mai inviare il POST a `nearhackathon.com/api/applications` senza che Stefano abbia confermato il payload completo stampato a schermo.
 
 ## Stile dei testi (post, README, messaggi)
 
