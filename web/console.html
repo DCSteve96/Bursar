@@ -578,6 +578,10 @@
           <div style="flex:1;min-width:260px;max-width:72ch"><b>Approve from your phone.</b> <span class="muted" style="font-size:14px">Connect your own Telegram as approver: every invoice that reaches the inbox is forwarded to you with the PDF and two buttons. Approve means the agent reads it in the enclave and the contract decides within your limits; Reject declines it. What the contract holds comes back here, to be approved with your wallet. No key leaves this browser. The agent must run with the inbox token (Keys, below): <span class="mono">bursar agent</span>. <i class="help" tabindex="0" data-help="Only the Telegram user who presses Start with your code can decide; in a group, nobody else's buttons count. With several invoices waiting, reply to the one you mean or use its buttons. Telegram never holds a key: an approved invoice goes through request_payment with the agent's key, a method that can only ask the contract, and the contract applies the same caps, thresholds and holds as always.">?</i></span></div>
           <button id="tgApprover" type="button" class="btn-ghost">Connect your Telegram as approver</button>
         </div>
+        <div id="tgApproverOut" hidden style="margin-top:14px">
+          <div class="kv"><span class="k">link</span><span class="v"><a id="tgApproverLink" href="#" target="_blank" rel="noopener"></a></span><span class="k">or send</span><span class="v mono" id="tgApproverCmd"></span></div>
+          <div class="actions" style="margin-top:12px;align-items:center"><a id="tgApproverOpen" class="btn btn-signal" href="#" target="_blank" rel="noopener">Open in Telegram</a><button id="tgApproverCopy" type="button" class="btn-ghost">Copy link</button><span class="muted" style="font-size:13px">Open it on the phone that will approve and press Start. The code works once and for a day.</span></div>
+        </div>
       </div>
       <div class="grid cols-3" style="align-items:end">
         <label><span>Who is this chat for <i class="help" tabindex="0" data-help="This is a list of your vendors. Pick the one this chat belongs to: its invoices are expected from there, and an invoice from that chat that names another vendor is held for a person. No vendor: a chat of your own team, where any vendor's invoice can arrive.">?</i></span><select id="tgFor"><option value="">No vendor (our own chat, any invoice)</option></select></label>
@@ -1957,22 +1961,26 @@ async function inboxAfterDecision(id, p, hash) {
     loadInbox();
   } catch {}
 }
+$("#tgApproverCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#tgApproverLink").href); $("#tgApproverCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#tgApproverCopy").textContent = "Copy link"; }, 1500); });
 $("#tgCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#tgLink").href); $("#tgCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#tgCopy").textContent = "Copy link"; }, 1500); });
 /** A pairing link: for a vendor's chat (or the company's own), or for the owner's chat as approver. */
 async function tgPair(b, approver) {
-  $("#tgErr").hidden = true; $("#tgOut").hidden = true; b.disabled = true;
+  $("#tgErr").hidden = true; $("#tgOut").hidden = true; $("#tgApproverOut").hidden = true; b.disabled = true;
   try {
     if (!settings.treasury) throw new Error("no treasury selected");
     if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
     const company = state.company?.name || settings.label || settings.treasury, vendorId = approver ? "" : $("#tgFor").value.trim(), who = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
     const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId, approver }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
-    $("#tgLink").href = j.link; $("#tgLink").textContent = j.link; $("#tgCmd").textContent = `/start ${j.code}  to @${j.bot}`;
-    const msg = approver ? `Approve ${company}'s invoices from Telegram: open the link and press Start.` : `${who ? who + ", send" : "Send"} your invoices for ${company} here as PDF. Open the link, press Start, then just send the file: the bot confirms and tells you the outcome.`;
-    $("#tgShare").href = `https://t.me/share/url?url=${encodeURIComponent(j.link)}&text=${encodeURIComponent(msg)}`;
-    $("#tgShare").textContent = approver ? "Open in Telegram" : "Send via Telegram";
-    if (approver) $("#tgShare").href = j.link;
-    $("#tgOut").hidden = false;
+    if (approver) {
+      $("#tgApproverLink").href = j.link; $("#tgApproverLink").textContent = j.link; $("#tgApproverCmd").textContent = `/start ${j.code}  to @${j.bot}`; $("#tgApproverOpen").href = j.link;
+      $("#tgApproverOut").hidden = false;
+    } else {
+      $("#tgLink").href = j.link; $("#tgLink").textContent = j.link; $("#tgCmd").textContent = `/start ${j.code}  to @${j.bot}`;
+      const msg = `${who ? who + ", send" : "Send"} your invoices for ${company} here as PDF. Open the link, press Start, then just send the file: the bot confirms and tells you the outcome.`;
+      $("#tgShare").href = `https://t.me/share/url?url=${encodeURIComponent(j.link)}&text=${encodeURIComponent(msg)}`;
+      $("#tgOut").hidden = false;
+    }
     loadInbox();
   } catch (e) { $("#tgErr").textContent = e.message; $("#tgErr").hidden = false; }
   finally { b.disabled = false; }
