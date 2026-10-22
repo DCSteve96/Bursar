@@ -585,6 +585,7 @@
       </div>
       <div class="grid cols-3" style="align-items:end">
         <label><span>Who is this chat for <i class="help" tabindex="0" data-help="This is a list of your vendors. Pick the one this chat belongs to: its invoices are expected from there, and an invoice from that chat that names another vendor is held for a person. No vendor: a chat of your own team, where any vendor's invoice can arrive.">?</i></span><select id="tgFor"><option value="">No vendor (our own chat, any invoice)</option></select></label>
+        <label><span>Trusted vendor <i class="help" tabindex="0" data-help="Its invoices go to the contract without a question on Telegram: the approver only gets a notice. The contract still applies every rule (registered payout, caps, budgets, orders, duplicates, flags), so the usual exceptions are still held for a person. For vendors you would have approved anyway.">?</i></span><span style="display:inline-flex;align-items:center;gap:8px;height:44px"><input id="tgAuto" type="checkbox" style="width:auto"> <span class="muted" style="font-size:14px">accept without asking</span></span></label>
         <label><span>&nbsp;</span><button id="tgConnect" type="button" class="btn-signal">Connect a Telegram chat</button></label>
         <span class="muted" style="font-size:14px;padding-bottom:12px" id="tgStatus"></span>
       </div>
@@ -595,7 +596,7 @@
       <div id="tgErr" class="err" hidden></div>
       <div id="tgChatsWrap" hidden style="margin-top:20px">
         <div class="eyebrow muted" style="margin-bottom:8px">Connected chats</div>
-        <div class="wrap"><table id="tgChats"><thead><tr><th>chat</th><th>for</th><th>since</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="wrap"><table id="tgChats"><thead><tr><th>chat</th><th>for</th><th>trusted</th><th>since</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
     </div>
     <div class="grid cols-2" style="margin-top:24px">
@@ -1886,7 +1887,7 @@ async function loadInbox() {
     const vmap = Object.fromEntries(state.vendors), groups = {};
     for (const it of inboxItems.slice().reverse()) (groups[it.vendor || ""] ??= []).push(it);
     const keys = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : (vmap[a]?.name || a).localeCompare(vmap[b]?.name || b)));
-    const stateOf = (it) => it.status === "approved" ? `<span class="pill Approval">approved on Telegram</span><div class="muted" style="font-size:12px">by ${esc(it.approved_by || "the approver")}: press Read to send it to the contract</div>` : it.status === "reading" ? `<span class="pill Queued">the agent is reading it</span>` : `<span class="muted">waiting${j.approvers ? " for Telegram or Read" : ""}</span>`;
+    const stateOf = (it) => it.status === "approved" ? `<span class="pill Approval">approved on Telegram</span><div class="muted" style="font-size:12px">${/^trusted vendor/.test(it.approved_by || "") ? "trusted vendor, accepted without asking" : `by ${esc(it.approved_by || "the approver")}`}: press Read to send it to the contract, or let the agent</div>` : it.status === "reading" ? `<span class="pill Queued">the agent is reading it</span>` : `<span class="muted">waiting${j.approvers ? " for Telegram or Read" : ""}</span>`;
     const row = (it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}${it.caption ? "<br>" : ""}${stateOf(it)}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}"${it.status === "reading" ? " disabled" : ""}>Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`;
     $("#inboxGroups").innerHTML = keys.map((k) => { const v = vmap[k]; const name = k ? (v?.name || k) : "The whole company"; return `<details class="vgroup" open><summary>
       <span><span class="k">${k ? "vendor" : "chats"}</span><span class="n"><b>${k ? flagImg(v?.country) : ""}${esc(name)}</b>${k && !v ? ` <span class="muted">(no longer a vendor)</span>` : ""}${k && v && v.active === false ? ` <span class="muted">(inactive)</span>` : ""}</span></span>
@@ -1909,14 +1910,15 @@ function fillTgFor() {
 function renderChats(list) {
   const wrap = $("#tgChatsWrap"); wrap.hidden = !list.length; if (!list.length) return;
   const vmap = Object.fromEntries(state.vendors);
-  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td>${c.approver ? `<b>approver</b><div class="muted" style="font-size:12px">decides from Telegram; holds come back here</div>` : `<select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">No vendor: our own chat</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select>`}</td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
+  $("#tgChats tbody").innerHTML = list.map((c) => `<tr><td>${esc(c.title || c.label || "chat")}<div class="mono muted" style="font-size:12px">${esc(String(c.chat))}</div></td><td>${c.approver ? `<b>approver</b><div class="muted" style="font-size:12px">decides from Telegram; holds come back here</div>` : `<select class="small chatFor" data-chat="${esc(String(c.chat))}" style="min-width:160px"><option value="">No vendor: our own chat</option>${state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}"${id === c.vendor ? " selected" : ""}>${esc(v.name)}</option>`).join("")}${c.vendor && !vmap[c.vendor] ? `<option value="${esc(c.vendor)}" selected>${esc(c.vendor)} (no longer a vendor)</option>` : ""}</select>`}</td><td>${c.approver || !c.vendor ? `<span class="muted">-</span>` : `<input type="checkbox" class="chatAuto" data-chat="${esc(String(c.chat))}" style="width:auto"${c.auto ? " checked" : ""} title="accept this vendor's invoices without asking">`}</td><td class="mono">${c.since ? esc(new Date(c.since).toLocaleDateString("en-GB")) : "-"}</td><td class="acts"><button type="button" class="btn-ghost small chatOff" data-chat="${esc(String(c.chat))}">Disconnect</button></td></tr>`).join("");
   enhanceSelectsIn($("#tgChats"));
 }
 $("#tgChats").addEventListener("change", async (e) => {
-  const sel = e.target.closest("select.chatFor"); if (!sel) return;
-  const vendorId = sel.value, name = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
+  const sel = e.target.closest("select.chatFor, input.chatAuto"); if (!sel) return;
+  const row = sel.closest("tr"), pick = row.querySelector("select.chatFor"), auto = row.querySelector("input.chatAuto");
+  const vendorId = pick ? pick.value : "", name = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
   $("#tgErr").hidden = true; sel.disabled = true;
-  try { const r = await fetch(`${RELAY}/inbox/chat`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, chat: isNaN(Number(sel.dataset.chat)) ? sel.dataset.chat : Number(sel.dataset.chat), vendor: vendorId, for: name }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
+  try { const r = await fetch(`${RELAY}/inbox/chat`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, chat: isNaN(Number(sel.dataset.chat)) ? sel.dataset.chat : Number(sel.dataset.chat), vendor: vendorId, for: name, auto: !!(auto && auto.checked && vendorId) }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
   catch (err) { $("#tgErr").textContent = err.message; $("#tgErr").hidden = false; }
   finally { sel.disabled = false; loadInbox(); }
 });
@@ -1970,7 +1972,7 @@ async function tgPair(b, approver) {
     if (!settings.treasury) throw new Error("no treasury selected");
     if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
     const company = state.company?.name || settings.label || settings.treasury, vendorId = approver ? "" : $("#tgFor").value.trim(), who = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
-    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId, approver }) });
+    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId, approver, auto: !approver && !!vendorId && $("#tgAuto").checked }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
     if (approver) {
       $("#tgApproverLink").href = j.link; $("#tgApproverLink").textContent = j.link; $("#tgApproverCmd").textContent = `/start ${j.code}  to @${j.bot}`; $("#tgApproverOpen").href = j.link;

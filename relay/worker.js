@@ -124,8 +124,9 @@ async function tellApprovers(env, rec, it, text) {
 /** A new invoice: every approver gets it with the PDF attached (Telegram re-sends its own file, nothing is uploaded) and two buttons. */
 async function askApprovers(env, rec, it, link) {
   it.asked = {};
-  const text = `New invoice from ${it.from}${it.chat_title ? ` (${it.chat_title})` : ""}${it.vendor ? `, expected from ${link.label || it.vendor}` : ""}.\n${it.name}, ${Math.max(1, Math.round(it.size / 1024))} KB${it.caption ? `\nNote: ${it.caption}` : ""}\n\nApprove: Bursar reads it in the enclave and the treasury contract decides within your limits. Reject: it is declined.`;
-  const reply_markup = { inline_keyboard: [[{ text: "Approve", callback_data: `a:${it.id}` }, { text: "Reject", callback_data: `r:${it.id}` }]] };
+  const auto = it.status === "approved";
+  const text = `New invoice from ${it.from}${it.chat_title ? ` (${it.chat_title})` : ""}${it.vendor ? `, expected from ${link.label || it.vendor}` : ""}.\n${it.name}, ${Math.max(1, Math.round(it.size / 1024))} KB${it.caption ? `\nNote: ${it.caption}` : ""}\n\n${auto ? "Accepted without asking: this chat is a trusted vendor. Bursar reads it in the enclave and the treasury contract decides within your limits; the outcome follows here." : "Approve: Bursar reads it in the enclave and the treasury contract decides within your limits. Reject: it is declined."}`;
+  const reply_markup = auto ? undefined : { inline_keyboard: [[{ text: "Approve", callback_data: `a:${it.id}` }, { text: "Reject", callback_data: `r:${it.id}` }]] };
   for (const chat of Object.keys(rec.approvers || {})) {
     try {
       const sent = String(chat) === String(it.chat)
@@ -193,9 +194,10 @@ async function onUpdate(env, update) {
       await Promise.all([kvPut(env, `treasury:${pair.treasury}`, rec), kvPut(env, `tg:${chat}`, { treasury: pair.treasury, label: "", vendor: "", approver: true, user: m.from?.id ?? chat }), env.INBOX.delete(`pair:${code.toUpperCase()}`)]);
       return say(`You approve invoices for ${rec.label || pair.treasury} from here. Every invoice that reaches the inbox is forwarded to you with Approve and Reject; when several wait, reply to the one you mean. Approve means Bursar reads it in the enclave and the treasury contract decides within the limits you set: nothing here can move funds past them, and an invoice the contract holds is approved in the console, with your wallet. PDFs you send here land in the inbox too.`);
     }
-    rec.chatInfo[chat] = { label: pair.for || "", vendor: pair.vendor || "", title, since: Date.now() };
-    await Promise.all([kvPut(env, `treasury:${pair.treasury}`, rec), kvPut(env, `tg:${chat}`, { treasury: pair.treasury, label: pair.for || "", vendor: pair.vendor || "" }), env.INBOX.delete(`pair:${code.toUpperCase()}`)]);
-    return say(`Connected to ${rec.label || pair.treasury}${pair.vendor ? ` for the vendor ${pair.for || pair.vendor}: invoices from here are expected from that vendor, any other name is held for a person` : pair.for ? ` as ${pair.for}` : ""}. Send invoices here as PDF: they land in the company's inbox, a person reads them in the console, and the treasury contract decides. Nothing is paid from this chat.`);
+    const auto = !!(pair.auto && pair.vendor);
+    rec.chatInfo[chat] = { label: pair.for || "", vendor: pair.vendor || "", title, since: Date.now(), auto };
+    await Promise.all([kvPut(env, `treasury:${pair.treasury}`, rec), kvPut(env, `tg:${chat}`, { treasury: pair.treasury, label: pair.for || "", vendor: pair.vendor || "", auto }), env.INBOX.delete(`pair:${code.toUpperCase()}`)]);
+    return say(`Connected to ${rec.label || pair.treasury}${pair.vendor ? ` for the vendor ${pair.for || pair.vendor}: invoices from here are expected from that vendor, any other name is held for a person` : pair.for ? ` as ${pair.for}` : ""}. Send invoices here as PDF: ${auto ? "they go straight to the treasury contract, which decides within the company's limits, and the outcome comes back here" : "they land in the company's inbox, a person reads them in the console, and the treasury contract decides"}. Nothing is paid from this chat.`);
   }
   if (/^\/privacy\b/.test(text)) return say(`Bursar keeps, for each invoice, the sender's Telegram name, the chat, the file name and Telegram's file reference; the PDF stays on Telegram until a person reads it. Entries are deleted once the invoice is decided. The bot holds no keys and pays nothing. Full notice: ${CONSOLE(env).replace(/\/console$/, "")}/privacy`);
   if (/^\/help\b/.test(text)) return say("Bursar inbox. A company connects this chat from its console; PDF invoices posted here reach the company, a person reads them and the treasury contract decides. An approver connected from the console gets each invoice with Approve and Reject. Nothing is paid from this chat. /privacy for what is kept.");
@@ -223,12 +225,14 @@ async function onUpdate(env, update) {
   const rec = (await kvGet(env, `treasury:${link.treasury}`)) || { chats: [] };
   const items = (await kvGet(env, `inbox:${link.treasury}`)) || [];
   const from = m.from ? personName(m.from) : (m.chat.title || "channel");
-  const it = { id: `${m.message_id}-${chat}`, message_id: m.message_id, file_id: doc.file_id, name, size: doc.file_size || 0, from, chat, chat_title: link.label || m.chat.title || null, vendor: link.vendor || "", caption: m.caption || "", date: (m.date || Math.floor(Date.now() / 1000)) * 1000, status: "waiting" };
+  // a trusted vendor's chat: no question to the approver, the invoice is queued as accepted and the contract still decides
+  const auto = !!(link.auto && link.vendor);
+  const it = { id: `${m.message_id}-${chat}`, message_id: m.message_id, file_id: doc.file_id, name, size: doc.file_size || 0, from, chat, chat_title: link.label || m.chat.title || null, vendor: link.vendor || "", caption: m.caption || "", date: (m.date || Math.floor(Date.now() / 1000)) * 1000, status: auto ? "approved" : "waiting", ...(auto ? { approved_by: "trusted vendor (no question asked)", approved_at: Date.now() } : {}) };
   await askApprovers(env, rec, it, link);
   items.push(it);
   while (items.length > INBOX_MAX) items.shift();
   await kvPut(env, `inbox:${link.treasury}`, items);
-  await say(link.approver ? `Received ${name}. Approve or reject it above.` : `Received ${name}. It waits in the inbox; a person will read it and the contract will decide.`);
+  await say(link.approver ? `Received ${name}. Approve or reject it above.` : auto ? `Received ${name}. Accepted: the treasury contract decides next, and the outcome comes back here.` : `Received ${name}. It waits in the inbox; a person will read it and the contract will decide.`);
 }
 
 async function inbox(request, env, url, headers) {
@@ -257,7 +261,7 @@ async function inbox(request, env, url, headers) {
     if (!rec) await kvPut(env, `treasury:${treasury}`, { token: body.token, chats: [], label: body.label || "" });
     else if (body.label && body.label !== rec.label) { rec.label = body.label; await kvPut(env, `treasury:${treasury}`, rec); }
     const code = newCode();
-    await kvPut(env, `pair:${code}`, { treasury, token: body.token, label: body.label || "", for: String(body.for || "").slice(0, 60), vendor: String(body.vendor || "").slice(0, 64), approver: !!body.approver }, 86400);
+    await kvPut(env, `pair:${code}`, { treasury, token: body.token, label: body.label || "", for: String(body.for || "").slice(0, 60), vendor: String(body.vendor || "").slice(0, 64), approver: !!body.approver, auto: !!body.auto }, 86400);
     const bot = await botName(env);
     return json(200, { code, bot, link: `https://t.me/${bot}?start=${code}` }, headers);
   }
@@ -265,7 +269,7 @@ async function inbox(request, env, url, headers) {
   if (!rec) return json(401, { error: "bad or missing inbox token" }, headers);
   if (request.method === "GET" && p === "/inbox/list") {
     const items = (await kvGet(env, `inbox:${treasury}`)) || [];
-    const chatList = rec.chats.map((c) => ({ chat: c, ...(rec.chatInfo?.[c] || { label: "", vendor: "", title: "", since: 0 }), approver: isApprover(rec, c) }));
+    const chatList = rec.chats.map((c) => ({ chat: c, auto: false, ...(rec.chatInfo?.[c] || { label: "", vendor: "", title: "", since: 0 }), approver: isApprover(rec, c) }));
     return json(200, { items: items.map(stripItem), chats: rec.chats.length, approvers: Object.keys(rec.approvers || {}).length, chatList, bot: await botName(env) }, headers);
   }
   // Change what a connected chat is for, or disconnect it. Items already in the inbox keep the vendor they arrived with.
@@ -278,10 +282,10 @@ async function inbox(request, env, url, headers) {
       return json(200, { ok: true }, headers);
     }
     if (isApprover(rec, chat)) return json(400, { error: "an approver's chat is not a vendor's chat; disconnect it instead" }, headers);
-    const vendor = String(body.vendor || "").slice(0, 64), label = String(body.for || "").slice(0, 60);
-    rec.chatInfo = rec.chatInfo || {}; rec.chatInfo[chat] = { ...(rec.chatInfo[chat] || { title: "", since: Date.now() }), label, vendor };
+    const vendor = String(body.vendor || "").slice(0, 64), label = String(body.for || "").slice(0, 60), auto = !!(body.auto && vendor);
+    rec.chatInfo = rec.chatInfo || {}; rec.chatInfo[chat] = { ...(rec.chatInfo[chat] || { title: "", since: Date.now() }), label, vendor, auto };
     const link = (await kvGet(env, `tg:${chat}`)) || { treasury };
-    await Promise.all([kvPut(env, `treasury:${treasury}`, rec), kvPut(env, `tg:${chat}`, { ...link, label, vendor })]);
+    await Promise.all([kvPut(env, `treasury:${treasury}`, rec), kvPut(env, `tg:${chat}`, { ...link, label, vendor, auto })]);
     return json(200, { ok: true }, headers);
   }
   if (request.method === "GET" && p === "/inbox/file") {
