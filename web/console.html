@@ -216,10 +216,10 @@
     <h3>Your company</h3>
     <p class="muted">Written on your contract, shown to vendors and in reports. You can change it later in Settings.</p>
     <label><span>Company name</span><input id="wName" placeholder="Northwind Studio Srl" autocomplete="organization"></label>
-    <label><span>What the company does</span><input id="wDesc" placeholder="Design studio, Milano" autocomplete="off"></label>
+    <label><span>What the company does</span><input id="wDesc" placeholder="Design studio, Berlin" autocomplete="off"></label>
     <div class="grid cols-2">
       <label><span>Country</span><span class="cty" id="wCty"><select id="wCountry"></select></span></label>
-      <label><span>Your tax id <span class="muted">(optional)</span> <i class="help" tabindex="0" data-help="VAT number, EIN, or whatever your invoices are addressed to. When set, an invoice not addressed to it waits for a person. Leave it empty if unsure.">?</i></span><input id="wTax" placeholder="IT01234567890" autocomplete="off"></label>
+      <label><span>Your tax id <span class="muted">(optional)</span> <i class="help" tabindex="0" data-help="VAT number, EIN, or whatever your invoices are addressed to. When set, an invoice not addressed to it waits for a person. Leave it empty if unsure.">?</i></span><input id="wTax" placeholder="DE123456789" autocomplete="off"></label>
     </div>
     <div id="wizErr1" class="err" hidden></div>
     <div class="actions"><button type="button" class="btn-signal" id="wNext">Continue</button><button type="button" class="btn-ghost" id="wCancel">Not now</button></div>
@@ -603,10 +603,10 @@
         <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Company <i class="help" tabindex="0" data-help="The company's name and a line about it, stored in the contract. The name shows in the sidebar, in invites and in the explorer.">?</i></div>
         <div class="grid">
           <label><span>Name</span><input id="cName" placeholder="Northwind Studio Srl" autocomplete="off"></label>
-          <label><span>Description</span><input id="cDesc" placeholder="Design studio, Milano" autocomplete="off"></label>
+          <label><span>Description</span><input id="cDesc" placeholder="Design studio, Berlin" autocomplete="off"></label>
           <div class="grid cols-2">
             <label><span>Country <i class="help" tabindex="0" data-help="Where the company is based. Informational.">?</i></span><span class="cty" id="cCty"><select id="cCountry"></select></span></label>
-            <label><span>Your tax id <i class="help" tabindex="0" data-help="Optional. Your VAT number, EIN, CNPJ or equivalent. When set, every invoice must be addressed to it: one addressed to another company waits for a person instead of being paid. Vendors print it next to your name under Bill to.">?</i></span><input id="cTax" placeholder="IT01234567890" autocomplete="off"></label>
+            <label><span>Your tax id <i class="help" tabindex="0" data-help="Optional. Your VAT number, EIN, CNPJ or equivalent. When set, every invoice must be addressed to it: one addressed to another company waits for a person instead of being paid. Vendors print it next to your name under Bill to.">?</i></span><input id="cTax" placeholder="DE123456789" autocomplete="off"></label>
           </div>
         </div>
         <div class="actions" style="margin-top:16px"><button id="cSave" type="button" class="btn-inverse">Save company</button></div>

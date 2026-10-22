@@ -237,23 +237,31 @@ Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI
 - Proposta dal contratto: `add_proposal {proposal: {description, kind: {FunctionCall: {receiver_id, actions: [{method_name, args: base64, deposit: "0", gas: "50000000000000"}]}}}}`. Approvazione: `act_proposal {id, action: "VoteApprove"}` (300 TGas). Versione testnet 2.0.0; dal main più recente serve anche il campo `proposal` in `act_proposal`.
 - Trezu (trezu.app) è la UI su Sputnik v2, **solo mainnet**; factory mainnet `sputnik-dao.near`.
 
-## 6. Cosa resta (ordine consigliato)
+## 6. Piano fino al 14 novembre (deciso il 22 ottobre)
 
-1. **Setup con account di Stefano** su testnet: fatto con un account usa e getta (2.2), da ripetere con il suo solo se vuole che il README punti a un account suo.
-2. **NEAR AI Cloud con chiave vera**: `read` sulle 4 fatture e `verify` sui receipt veri fatti (2.4). Resta `npm run agent -- --once` senza `--offline` su un ambiente testnet nuovo; sistemare il prompt finché l'estrazione è giusta; poi `npm run dev verify <id>` su un receipt vero e correggere `verify.ts` se il formato reale differisce. Se un check fallisce per un motivo di formato va capito, non allentato.
-3. **Mainnet**: `setup --root <account>.near --mainnet` (usa USDC vero `17208628...`, niente faucet; serve storage_deposit del treasury sul contratto USDC, da aggiungere a setup se manca), fondi: 50-100 USDC e circa 12 NEAR. Un indirizzo Base di Stefano come fornitore "DesignCo". Provare l'executor: quote, `settle`, `mark_settled`. Proposta sopra soglia vista e approvata in Trezu.
-4. **Contratto** (fatto il 20 ottobre: `dao_proposal_id`, cancel su rifiuto DAO, rollback dei transfer, wasm 303 KB). Resta: replay RTMR3 nel verifier, eventuale `storage_deposit` automatico per i fornitori NEAR.
-5. **Dashboard** statica fatta (`web/index.html`); da provare su un contratto vero e, se piace, pubblicare su GitHub Pages.
-6. **Video demo** (2-3 minuti): le 4 fatture, l'approvazione in Trezu, il pagamento su Base, il blocco della frode, l'MCP da Claude. Post su X.
-7. **README finale** con indirizzi mainnet, e **submission** via form o API dopo conferma del payload.
+Le milestone future non sono un campo della submission (campi: projectName, leadName, email, size, tracks, nearAddress, projectUrl, demoUrl, idea 20-2000 caratteri, consent). Vanno comunque nel README ("What comes next") e in due righe dell'`idea`, perche' i giudici umani sono investitori. Mercato di riferimento: internazionale, non l'Italia (decisione di Stefano del 22 ottobre: niente riferimenti al mercato italiano nel piano, nei testi e nella roadmap; le fatture di esempio restano fittizie e neutre).
+
+Settimana 1 (1-7 novembre)
+1. Mainnet con un pagamento vero cross-chain: tesoreria mainnet con USDC vero, un fornitore con indirizzo Base, executor che salda via NEAR Intents (unico pezzo mai provato dal vivo). Serve l'account mainnet di Stefano, 12 NEAR, 50-100 USDC, un indirizzo Base suo. 2 giorni, rischio su deposit address / EXACT_OUTPUT.
+2. Approvazione massiva in console e "approve all" su Telegram (3.2). 1 giorno.
+3. PWA: console installabile, icona, notifiche. 1-2 giorni.
+4. Repo pubblica: HANDOFF, ARCHITETTURA e CLAUDE.md interni sostituiti da versioni inglesi senza riferimenti privati; README con la riga sulla data di inizio. Mezza giornata.
+
+Settimana 2 (8-14 novembre)
+5. Inbox email: i fornitori mandano la fattura a un indirizzo della tesoreria (Cloudflare Email Routing verso lo stesso worker), stessa Inbox, stessi bottoni Telegram. 1-2 giorni.
+6. Video demo 2-3 minuti e post su X (obbligatorio): fattura su Telegram, approvazione dal telefono, frode bloccata, pagamento su Base. 1 giorno.
+7. Prova da giudice AI: eseguire il README da zero in un ambiente pulito (Claude Code e Codex lo faranno), correggere ogni passo che inciampa. 1 giorno.
+8. Submission il 13, non l'ultimo giorno: payload stampato, conferma di Stefano, un solo POST.
+
+Fuori dal 14: app nativa (Capacitor), agente ospitato opt-in, integrazioni partner oltre Intents e Sputnik. Roadmap da scrivere nel README e nell'idea: pilot with a handful of small companies abroad on mainnet, email and PWA in, a phone app with Face ID, then the hosted agent as an opt-in.
 
 ## 7. Cosa serve da Stefano
 
 - Account NEAR mainnet per il premio e account testnet suo.
 - Chiave NEAR AI Cloud con un piccolo top-up.
 - Conferma del nome.
-- Risposta del Discord NEAR sul lavoro preparatorio (o decisione di ripartire dal 1° novembre).
 - Account X da cui pubblicare il post demo (nuovo, separato da Epoch).
+- Un indirizzo Base suo per il fornitore di prova su mainnet.
 - Per le sessioni cloud di Claude Code: nelle impostazioni dell'ambiente, rete con dominii consentiti `rpc.testnet.near.org`, `rpc.mainnet.near.org`, `helper.nearprotocol.com`, `cloud-api.near.ai`, `1click.chaindefuser.com`, `pccs.phala.network` (collateral Intel per `verify`), `docs.near.ai`; e `NEAR_AI_API_KEY` come variabile d'ambiente segreta, mai in chat.
 
 ### 2.17 Registro, login con wallet, explorer, docs (20 ottobre, stessa sessione)
