@@ -4,7 +4,7 @@ Leggi questo file per intero prima di toccare qualsiasi cosa. Poi leggi `HANDOFF
 
 ## Cos'è
 
-Bursar è un tesoriere AI per piccole aziende: legge fatture PDF in un TEE (NEAR AI Cloud), chiede a un contratto NEAR di pagarle, e il contratto decide dentro limiti che l'AI non può cambiare. Progetto per il NEAR HACKATHON (1-14 novembre 2026). Tracce: `realworld`, `business`, `privacy`, `security`.
+Bursar è un tesoriere AI per aziende di ogni dimensione, piccole e grandi: legge fatture PDF in un TEE (NEAR AI Cloud), chiede a un contratto NEAR di pagarle, e il contratto decide dentro limiti che l'AI non può cambiare. Progetto per il NEAR HACKATHON (1-14 novembre 2026). Tracce: `realworld`, `business`, `privacy`, `security`.
 
 Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb executor moves the money.**
 
@@ -17,7 +17,7 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 5. **Niente segreti nella repo.** Chiavi solo in `~/.near-credentials` o in variabili d'ambiente. `.env.*` è in `.gitignore`. Se Stefano incolla una chiave in chat, va considerata compromessa e ruotata.
 6. **Niente mainnet senza conferma esplicita di Stefano**, e niente transazioni firmate con le sue chiavi senza che lo chieda lui per quella specifica azione.
 7. **Git**: commit e push li fa Claude Code solo se Stefano lo ha autorizzato in questa repo. In dubbio, chiedi. Messaggi di commit in inglese, brevi, al presente.
-8. **Mercato internazionale.** Bursar parla a piccole aziende ovunque, non all'Italia: testi, esempi, placeholder, roadmap, post e `idea` della submission in chiave internazionale. Le funzioni di un paese (ritenuta, fatturazione elettronica) restano configurabili e in secondo piano, mai in primo.
+8. **Mercato internazionale, aziende di ogni dimensione.** Bursar parla a piccole e grandi aziende ovunque, non all'Italia: testi, esempi, placeholder, roadmap, post e `idea` della submission in chiave internazionale. Le funzioni di un paese (ritenuta, fatturazione elettronica) restano configurabili e in secondo piano, mai in primo.
 9. **Submission**: una sola, non modificabile. Mai inviare il POST a `nearhackathon.com/api/applications` senza che Stefano abbia confermato il payload completo stampato a schermo.
 
 ## Stile dei testi (post, README, messaggi)
