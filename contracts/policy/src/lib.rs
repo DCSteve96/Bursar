@@ -18,7 +18,7 @@
 //! - an Intents deposit address, after the executor proves the recipient equals the vendor's recorded payout (Settled), or
 //! - the owner (withdraw).
 
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::{IterableMap, LookupSet};
 use near_sdk::{
@@ -1635,6 +1635,61 @@ impl Bursar {
         }
     }
 
+    // ----- upgrade: the owner replaces the code, no treasury key needed -----
+
+    /// Deploy a new build of this contract. The owner signs it from the console with the wallet; a treasury created
+    /// from a browser has no full-access key anywhere, so this is the only way its code moves. The state is kept:
+    /// every build so far reads the previous layout (new data lives in raw storage keys, see `set_vault`).
+    pub fn upgrade(&mut self, code: Base64VecU8) -> Promise {
+        self.assert_owner();
+        require!(code.0.len() > 1024, "that is not a contract");
+        self.emit("upgrade", &code.0.len().to_string());
+        // deploy, then let the new code bring the state to its own layout in the same batch
+        Promise::new(env::current_account_id())
+            .deploy_contract(code.0)
+            .function_call(String::from("migrate"), Vec::new(), NearToken::from_yoctonear(0), Gas::from_tgas(100))
+    }
+
+    /// Bring the stored state to this build's layout. Idempotent: a state already in this layout is returned as it is;
+    /// the October 20 layout (vendors without tax ids and withholding, payments without `withheld`, company without
+    /// tax id, no `withheld_due`) is rewritten entry by entry. Called by `upgrade` right after the deploy.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let raw = env::storage_read(b"STATE").unwrap_or_else(|| crate::fail("no state to migrate"));
+        if let Ok(current) = near_sdk::borsh::from_slice::<Bursar>(&raw) {
+            return current;
+        }
+        let mut old: legacy::Bursar = near_sdk::borsh::from_slice(&raw).unwrap_or_else(|_| crate::fail("unknown state layout"));
+        // vendors and payments change shape: take every entry out with the old shape, put it back with the new one
+        let vendor_keys: Vec<String> = old.vendors.iter().map(|(k, _)| k.clone()).collect();
+        let vendors: Vec<(String, legacy::Vendor)> = vendor_keys.into_iter().map(|k| { let v = old.vendors.remove(&k).unwrap(); (k, v) }).collect();
+        old.vendors.flush();
+        let payment_keys: Vec<u64> = old.payments.iter().map(|(k, _)| *k).collect();
+        let payments: Vec<(u64, legacy::Payment)> = payment_keys.into_iter().map(|k| { let p = old.payments.remove(&k).unwrap(); (k, p) }).collect();
+        old.payments.flush();
+        let legacy::Bursar { owner, agent, executor, dao, dao_bond, usdc, limits, invoice_index, orders, operators, company, next_order_id, next_id, balance, spent_today, day, paused, vendors: old_vendors, payments: old_payments } = old;
+        std::mem::forget(old_vendors);
+        std::mem::forget(old_payments);
+        let mut new = Bursar {
+            owner, agent, executor, dao, dao_bond, usdc, limits,
+            vendors: IterableMap::new(b"v"),
+            payments: IterableMap::new(b"p"),
+            invoice_index, orders, operators,
+            company: company.map(|c| Company { name: c.name, description: c.description, country: None, tax_id: None }),
+            next_order_id, next_id, balance, spent_today, day, paused,
+            withheld_due: 0,
+        };
+        for (k, v) in vendors {
+            new.vendors.insert(k, Vendor { name: v.name, payout: v.payout, monthly_budget: v.monthly_budget, spent_this_month: v.spent_this_month, month: v.month, active: v.active, tax_id: None, country: None, withholding_bps: 0 });
+        }
+        for (k, p) in payments {
+            new.payments.insert(k, Payment { id: p.id, vendor_id: p.vendor_id, invoice_number: p.invoice_number, amount: p.amount, status: p.status, reason: p.reason, invoice_hash: p.invoice_hash, attestation_ref: p.attestation_ref, flags: p.flags, created_at: p.created_at, updated_at: p.updated_at, quote_id: p.quote_id, deposit_address: p.deposit_address, dest_tx: p.dest_tx, dao_proposal_id: p.dao_proposal_id, order_id: p.order_id, withheld: 0 });
+        }
+        new.emit("migrated", "october-20-layout");
+        new
+    }
+
     // ----- vault: the owner's secrets, encrypted in the browser, kept here so any browser can get them back -----
 
     /// Store an opaque blob for the owner (the console keeps its secrets here, encrypted with a key only the
@@ -1677,6 +1732,69 @@ impl Bursar {
             }
         }
         out
+    }
+}
+
+/// The stored layouts of the October 20 build, read once by `migrate` and never written again.
+mod legacy {
+    use super::*;
+    #[near(serializers = [borsh])]
+    #[derive(Clone)]
+    pub struct Vendor {
+        pub name: String,
+        pub payout: Payout,
+        pub monthly_budget: u128,
+        pub spent_this_month: u128,
+        pub month: u32,
+        pub active: bool,
+    }
+    #[near(serializers = [borsh])]
+    #[derive(Clone)]
+    pub struct Payment {
+        pub id: u64,
+        pub vendor_id: String,
+        pub invoice_number: String,
+        pub amount: u128,
+        pub status: Status,
+        pub reason: Option<String>,
+        pub invoice_hash: String,
+        pub attestation_ref: String,
+        pub flags: Vec<String>,
+        pub created_at: u64,
+        pub updated_at: u64,
+        pub quote_id: Option<String>,
+        pub deposit_address: Option<String>,
+        pub dest_tx: Option<String>,
+        pub dao_proposal_id: Option<u64>,
+        pub order_id: Option<u64>,
+    }
+    #[near(serializers = [borsh])]
+    #[derive(Clone)]
+    pub struct Company {
+        pub name: String,
+        pub description: String,
+    }
+    #[near(serializers = [borsh])]
+    pub struct Bursar {
+        pub owner: AccountId,
+        pub agent: AccountId,
+        pub executor: AccountId,
+        pub dao: Option<AccountId>,
+        pub dao_bond: NearToken,
+        pub usdc: AccountId,
+        pub limits: Limits,
+        pub vendors: IterableMap<String, Vendor>,
+        pub payments: IterableMap<u64, Payment>,
+        pub invoice_index: LookupSet<String>,
+        pub orders: IterableMap<u64, Order>,
+        pub operators: IterableMap<AccountId, Role>,
+        pub company: Option<Company>,
+        pub next_order_id: u64,
+        pub next_id: u64,
+        pub balance: u128,
+        pub spent_today: u128,
+        pub day: u64,
+        pub paused: bool,
     }
 }
 
@@ -2489,6 +2607,61 @@ mod tests {
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, 3);
         assert_eq!(c.list_payments(Some(4), None).len(), 0);
+    }
+
+    #[test]
+    fn migrate_reads_the_october_20_layout_and_is_idempotent() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut old = legacy::Bursar {
+            owner: accounts(0), agent: accounts(1), executor: accounts(2), dao: None, dao_bond: NearToken::from_near(1), usdc: accounts(4),
+            limits: Limits { per_payment_cap: 5_000_000_000, daily_cap: 20_000_000_000, approval_threshold: 2_000_000_000, require_orders: false },
+            vendors: IterableMap::new(b"v"), payments: IterableMap::new(b"p"), invoice_index: LookupSet::new(b"i"), orders: IterableMap::new(b"o"), operators: IterableMap::new(b"r"),
+            company: Some(legacy::Company { name: "Northwind".into(), description: "demo".into() }), next_order_id: 1, next_id: 3, balance: 4_720_000_000, spent_today: 0, day: 0, paused: false,
+        };
+        old.vendors.insert("hosting".into(), legacy::Vendor { name: "Acme".into(), payout: near(accounts(5)), monthly_budget: 0, spent_this_month: 480_000_000, month: 202610, active: true });
+        old.vendors.insert("design".into(), legacy::Vendor { name: "DesignCo".into(), payout: Payout::Chain { chain: "base".into(), address: "0xabc".into() }, monthly_budget: 0, spent_this_month: 0, month: 202610, active: true });
+        for id in 1..3u64 { old.payments.insert(id, legacy::Payment { id, vendor_id: "hosting".into(), invoice_number: format!("AH-{id}"), amount: 480_000_000, status: Status::Paid, reason: None, invoice_hash: "h".into(), attestation_ref: "a".into(), flags: vec![], created_at: 1, updated_at: 1, quote_id: None, deposit_address: None, dest_tx: None, dao_proposal_id: None, order_id: None }); }
+        old.invoice_index.insert("hosting|ah-1".into());
+        // the mock writes cached entries only on flush
+        old.vendors.flush(); old.payments.flush();
+        env::state_write(&old);
+        std::mem::forget(old);
+        testing_env!(as_self().build());
+        let c = Bursar::migrate();
+        assert_eq!(c.list_vendors().len(), 2);
+        assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 480_000_000);
+        assert_eq!(c.get_vendor("hosting".into()).unwrap().withholding_bps, 0);
+        assert_eq!(c.list_payments(Some(0), None).len(), 2);
+        assert_eq!(c.get_payment(2).unwrap().invoice_number, "AH-2");
+        assert_eq!(c.get_company().unwrap().name, "Northwind");
+        assert_eq!(c.get_stats().balance.0, 4_720_000_000);
+        assert_eq!(c.get_stats().withheld_due.0, 0);
+        assert_eq!(c.get_stats().payments, 2);
+        let mut c = c;
+        c.vendors.flush(); c.payments.flush();
+        env::state_write(&c);
+        std::mem::forget(c);
+        // a second run finds the current layout and changes nothing
+        let c2 = Bursar::migrate();
+        assert_eq!(c2.list_payments(Some(0), None).len(), 2);
+        assert_eq!(c2.list_vendors().len(), 2);
+        // the old duplicate key is still honoured
+        testing_env!(ctx(accounts(1)).build());
+        let mut c2 = c2;
+        let id = c2.request_payment(claim("hosting", "AH-1", 100_000_000, near(accounts(5))));
+        assert_eq!(c2.get_payment(id).unwrap().reason.as_deref(), Some("duplicate_invoice"));
+    }
+
+    #[test]
+    fn audit_only_the_owner_upgrades() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.upgrade(Base64VecU8(vec![0u8; 2048])); }));
+        assert!(r.is_err());
+        testing_env!(ctx(accounts(0)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.upgrade(Base64VecU8(vec![0u8; 10])); }));
+        assert!(r.is_err(), "not a contract");
+        let _ = c.upgrade(Base64VecU8(vec![0u8; 2048]));
     }
 
     #[test]
