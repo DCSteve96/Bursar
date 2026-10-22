@@ -241,7 +241,7 @@ npm run dev verify 1                             # the receipt behind payment 1<
 </main>
 </div>
 
-<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional.</footer>
+<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional. <a href="privacy" style="color:inherit">Privacy</a></footer>
 <script>
 const links = [...document.querySelectorAll("#toc a")];
 const obs = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) for (const a of links) a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); }, { rootMargin: "-20% 0px -70% 0px" });

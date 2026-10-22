@@ -196,6 +196,8 @@ async function onUpdate(env, update) {
     await Promise.all([kvPut(env, `treasury:${pair.treasury}`, rec), kvPut(env, `tg:${chat}`, { treasury: pair.treasury, label: pair.for || "", vendor: pair.vendor || "" }), env.INBOX.delete(`pair:${code.toUpperCase()}`)]);
     return say(`Connected to ${rec.label || pair.treasury}${pair.vendor ? ` for the vendor ${pair.for || pair.vendor}: invoices from here are expected from that vendor, any other name is held for a person` : pair.for ? ` as ${pair.for}` : ""}. Send invoices here as PDF: they land in the company's inbox, a person reads them in the console, and the treasury contract decides. Nothing is paid from this chat.`);
   }
+  if (/^\/privacy\b/.test(text)) return say(`Bursar keeps, for each invoice, the sender's Telegram name, the chat, the file name and Telegram's file reference; the PDF stays on Telegram until a person reads it. Entries are deleted once the invoice is decided. The bot holds no keys and pays nothing. Full notice: ${CONSOLE(env).replace(/\/console$/, "")}/privacy`);
+  if (/^\/help\b/.test(text)) return say("Bursar inbox. A company connects this chat from its console; PDF invoices posted here reach the company, a person reads them and the treasury contract decides. An approver connected from the console gets each invoice with Approve and Reject. Nothing is paid from this chat. /privacy for what is kept.");
   const link = await kvGet(env, `tg:${chat}`);
   const doc = m.document;
   // an approver writing yes or no: the invoice they replied to, or the only one waiting

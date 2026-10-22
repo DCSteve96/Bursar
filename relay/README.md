@@ -47,5 +47,35 @@ A vendor never sees the console: generate a link for them in Settings and send i
 
 The owner connects their own chat as approver (console, Settings, "Connect your Telegram as approver": a pairing with `approver: true`). From then on every invoice that reaches the inbox is sent to that chat with the PDF attached (Telegram re-sends its own file by reference; the Worker uploads nothing) and two inline buttons, Approve and Reject. Only the Telegram user who pressed Start with the code can decide, in a group too; a text "yes" or "no" counts as well, replying to the invoice message when several wait. Approve marks the item `approved`; the agent (`bursar agent` with `BURSAR_RELAY` and `BURSAR_INBOX_TOKEN`) polls `/inbox/list`, takes the item (`/inbox/take`, which parks it as `reading` for ten minutes), downloads the PDF, reads it in the enclave, calls `request_payment` with its own key, and reports with `/inbox/outcome`. The Worker then writes the outcome under the approver's message, with the contract's reason and, for a held invoice, a link to the console's Attention view, and tells the chat the invoice came from only "paid", "under review" or "declined". Reject drops the item and tells that chat "declined". A decision taken in the console reports through the same `/inbox/outcome`, so the approver's message gets its outcome too. No key is involved on the Worker: an approval is a flag in KV, the agent's key can only ask the contract, and a hold is approved in the console with the owner's wallet.
 
+The bot answers `/help` and `/privacy` (Telegram asks every bot to reply to `/privacy` with its notice; the full one is `web/privacy.html`, linked from the site footer). BotFather texts are in the README of this folder, under "Bot profile".
+
 Routes: `POST /tg/webhook` (Telegram only, checked by the secret header), `GET /tg/setup`, `POST /inbox/pair` (with `vendor`, the vendor id the chat is for, and `for`, its name; or `approver: true`), `POST /inbox/chat` (change the vendor of a connected chat, or `remove` it), and with the treasury's inbox token as a Bearer header `GET /inbox/list` (items carry `status`: waiting, approved, reading), `GET /inbox/file`, `POST /inbox/discard`, `POST /inbox/take`, `POST /inbox/outcome` (`id`, `status`, `reason`, `vendor`, `invoice_number`, `amount`, `tx_url`, or `status: "error"` with a `message`, which puts the item back to waiting), `POST /inbox/notify`. A company that brings its own NEAR AI Cloud key deploys this Worker on its own Cloudflare account, so nothing of its passes through Bursar.
 
+
+## Bot profile
+
+What to paste in @BotFather for the public bot (`/setabouttext`, `/setdescription`, `/setdescriptionpic` with `web/brand/bot-description.png`, `/setcommands`):
+
+About (shown on the profile, 120 characters):
+
+```
+Invoice inbox and approvals for Bursar treasuries. PDFs in, the contract decides. Nothing is paid from this chat.
+```
+
+Description (shown before Start):
+
+```
+Bursar is a treasurer for small companies: the AI reads invoices in a secure enclave and a NEAR smart contract decides, within limits the AI cannot change.
+
+This bot is the inbox. A company connects a chat from its console; vendors send their invoices here as PDF; the owner approves or rejects from the phone; the bot reports the outcome.
+
+Nothing is paid from this chat and the bot holds no keys. Start from the link the company gives you. /privacy for what is kept.
+```
+
+Commands:
+
+```
+start - Connect this chat with the code from the console
+help - What this bot does
+privacy - What the bot keeps and what it never sees
+```
