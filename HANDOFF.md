@@ -248,7 +248,7 @@ Settimana 1 (1-7 novembre)
 4. Repo pubblica: HANDOFF, ARCHITETTURA e CLAUDE.md interni sostituiti da versioni inglesi senza riferimenti privati; README con la riga sulla data di inizio. Mezza giornata.
 
 Settimana 2 (8-14 novembre)
-5. Inbox email: i fornitori mandano la fattura a un indirizzo della tesoreria (Cloudflare Email Routing verso lo stesso worker), stessa Inbox, stessi bottoni Telegram. 1-2 giorni.
+5. (Email spostata nelle milestone: il prototipo arriva con Telegram, decisione del 22 ottobre.)
 6. Video demo 2-3 minuti e post su X (obbligatorio): fattura su Telegram, approvazione dal telefono, frode bloccata, pagamento su Base. 1 giorno.
 7. Prova da giudice AI: eseguire il README da zero in un ambiente pulito (Claude Code e Codex lo faranno), correggere ogni passo che inciampa. 1 giorno.
 8. Submission il 13, non l'ultimo giorno: payload stampato, conferma di Stefano, un solo POST.
@@ -258,11 +258,11 @@ Fuori dal 14: app nativa (Capacitor), agente ospitato opt-in, integrazioni partn
 Bozza del campo `idea` per la submission (da aggiornare a novembre con i numeri finali; limite 2000 caratteri):
 
 ```
-Bursar is an AI treasurer for companies of any size. Vendors send invoices as PDF, by Telegram or email. An AI reads them inside a trusted execution environment (NEAR AI Cloud) and asks the company's own NEAR smart contract to pay. The contract decides within limits the AI cannot change: an allowlist of vendors with registered payouts, per-payment and daily caps, monthly budgets, purchase orders, an approval threshold, duplicate and tax id checks. It pays in USDC on NEAR, or on Base, Arbitrum, Solana and Sui through NEAR Intents. Anything unusual waits for a person, or for a Sputnik DAO council. The AI never picks an address, so the new bank details fraud is blocked by construction. Every reading carries the enclave's signed receipt, which anyone can verify. Non custodial: funds stay in the company's contract, with the company's keys.
+Bursar is an AI treasurer for companies of any size. Vendors send invoices as PDF through a Telegram bot. An AI reads them inside a trusted execution environment (NEAR AI Cloud) and asks the company's own NEAR smart contract to pay. The contract decides within limits the AI cannot change: an allowlist of vendors with registered payouts, per-payment and daily caps, monthly budgets, purchase orders, an approval threshold, duplicate and tax id checks. It pays in USDC on NEAR, or on Base, Arbitrum, Solana and Sui through NEAR Intents. Anything unusual waits for a person, or for a Sputnik DAO council. The AI never picks an address, so the new bank details fraud is blocked by construction. Every reading carries the enclave's signed receipt, which anyone can verify. Non custodial: funds stay in the company's contract, with the company's keys.
 
 Built: the policy contract (53 unit tests, two independent audit rounds), the web console (wallet sign-in, roles, DAO, encrypted vault), a Telegram inbox with approvals from the phone, an MCP server for AI assistants, a public registry and explorer, a load test on 1030 invoices from ten invented companies.
 
-What comes next. Nov-Dec 2026: mainnet pilot with a handful of companies, email inbox, installable phone app, bulk approvals. Q1 2027: approval chains and spending policies per department for larger companies, exports for accountants and auditors, structured e-invoices (Peppol, CFDI, Factur-X, GST). Q2 2027: ERP connectors (NetSuite, SAP, QuickBooks, Xero), native app with Face ID, multi-treasury groups, a hosted agent as an opt-in. The principle does not move: the AI reads, the contract decides, a dumb executor moves the money.
+What comes next. Nov-Dec 2026: mainnet pilot with a handful of companies, email inbox (vendors mail the invoice to the treasury's own address, same inbox, same approvals), installable phone app, bulk approvals. Q1 2027: approval chains and spending policies per department for larger companies, exports for accountants and auditors, structured e-invoices (Peppol, CFDI, Factur-X, GST). Q2 2027: ERP connectors (NetSuite, SAP, QuickBooks, Xero), native app with Face ID, multi-treasury groups, a hosted agent as an opt-in. The principle does not move: the AI reads, the contract decides, a dumb executor moves the money.
 ```
 
 ## 7. Cosa serve da Stefano
