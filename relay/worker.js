@@ -43,7 +43,7 @@ async function underLimits(env, ip) {
 const TG = (env) => `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
 const INBOX_MAX = 50;
 const TAKE_TTL = 10 * 60 * 1000; // an approved invoice the agent took but never reported is offered again after this
-const CONSOLE = (env) => (env.CONSOLE_URL || "https://bursar.network/console.html").replace(/\/$/, "");
+const CONSOLE = (env) => (env.CONSOLE_URL || "https://bursar.network/console").replace(/\/$/, "");
 const kvGet = async (env, k) => { const v = await env.INBOX.get(k); return v ? JSON.parse(v) : null; };
 const kvPut = (env, k, v, ttl) => env.INBOX.put(k, JSON.stringify(v), ttl ? { expirationTtl: ttl } : undefined);
 async function tg(env, method, body) {

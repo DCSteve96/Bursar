@@ -37,7 +37,7 @@ Setup, once:
 2. Secrets on the Worker: `TELEGRAM_BOT_TOKEN` (the token) and `TELEGRAM_WEBHOOK_SECRET` (any long random string, for example `openssl rand -hex 24`). With wrangler: `npx wrangler secret put TELEGRAM_BOT_TOKEN`, same for the other. In the dashboard: Settings, Variables and Secrets.
 3. A KV namespace bound as `INBOX`: `npx wrangler kv namespace create INBOX`, paste the id into `wrangler.toml`, redeploy. In the dashboard: Storage, KV, create one, then Settings, Bindings, add a KV binding named `INBOX`.
 4. Tell Telegram where the Worker is: open `https://bursar-relay.<you>.workers.dev/tg/setup?secret=<TELEGRAM_WEBHOOK_SECRET>` in a browser once. See `{"ok":true,"webhook":"...","bot":"<username>"}`. Run it again after updating a Worker deployed before the approvals existed: it registers the button presses (`callback_query`) with Telegram.
-5. Optional: the `CONSOLE_URL` variable (default `https://bursar.network/console.html`), where the "open the console" links in the bot's messages point.
+5. Optional: the `CONSOLE_URL` variable (default `https://bursar.network/console`), where the "open the console" links in the bot's messages point.
 
 Then, in the console: Settings, "Connect a Telegram chat", open the link, press Start. Send a PDF to the chat. See it in Inbox.
 
