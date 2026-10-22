@@ -146,6 +146,7 @@ async function decide(env, treasury, id, approve, who) {
     it.status = "approved"; it.approved_by = who; it.approved_at = Date.now();
     await kvPut(env, `inbox:${treasury}`, items);
     await tellApprovers(env, rec, it, `Approved by ${who}. Bursar reads it in the enclave and the contract decides; the outcome follows here.`);
+    if (!isApprover(rec, it.chat)) await tg(env, "sendMessage", { chat_id: it.chat, text: `${it.name}: accepted by the company, being processed.` }).catch(() => {});
     return "Approved. The outcome follows here.";
   }
   await kvPut(env, `inbox:${treasury}`, items.filter((x) => x.id !== id));
