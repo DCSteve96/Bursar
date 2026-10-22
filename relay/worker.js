@@ -43,6 +43,8 @@ async function underLimits(env, ip) {
 const TG = (env) => `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
 const INBOX_MAX = 50;
 const TAKE_TTL = 10 * 60 * 1000; // an approved invoice the agent took but never reported is offered again after this
+const FOLLOW_TTL = 60 * 86400; // seconds a held or queued invoice stays known by payment id, for the outcome that comes later
+const FINAL = new Set(["Paid", "Blocked", "Cancelled", "Settled", "rejected", "discarded", "error"]);
 const CONSOLE = (env) => (env.CONSOLE_URL || "https://bursar.network/console").replace(/\/$/, "");
 const kvGet = async (env, k) => { const v = await env.INBOX.get(k); return v ? JSON.parse(v) : null; };
 const kvPut = (env, k, v, ttl) => env.INBOX.put(k, JSON.stringify(v), ttl ? { expirationTtl: ttl } : undefined);
@@ -316,17 +318,28 @@ async function inbox(request, env, url, headers) {
   }
   // The outcome of an invoice, from the agent or the console: the item leaves the inbox, the approvers read the decision
   // with the contract's reason, the chat it came from reads only the outcome.
+  // With `id`, the first decision on an inbox item; with `payment_id` alone, a later one on a payment the relay remembers
+  // (held, then approved or cancelled in the console; queued, then settled): same message thread, same chats.
   if (request.method === "POST" && p === "/inbox/outcome") {
     const items = (await kvGet(env, `inbox:${treasury}`)) || [];
-    const it = items.find((x) => x.id === body.id);
-    if (!it) return json(404, { error: "no such item" }, headers);
-    const o = { status: String(body.status || "decided").slice(0, 20), reason: body.reason ? String(body.reason).slice(0, 120) : null, vendor: String(body.vendor || "").slice(0, 80), invoice_number: String(body.invoice_number || "").slice(0, 80), amount: String(body.amount || "").slice(0, 40), tx_url: /^https:\/\/[\w./-]+$/.test(String(body.tx_url || "")) ? body.tx_url : "", message: String(body.message || "").slice(0, 300) };
-    // an invoice that could not be read goes back to waiting: a person reads it in the console
-    if (o.status === "error") { it.status = "waiting"; delete it.taken; await kvPut(env, `inbox:${treasury}`, items); }
-    else await kvPut(env, `inbox:${treasury}`, items.filter((x) => x.id !== body.id));
+    const pid = body.payment_id != null ? String(body.payment_id).slice(0, 20) : "";
+    const followKey = pid ? `pay:${treasury}:${pid}` : "";
+    let it = body.id ? items.find((x) => x.id === body.id) : null;
+    const later = !it && followKey ? await kvGet(env, followKey) : null;
+    if (!it && !later) return json(404, { error: "no such item" }, headers);
+    const o = { status: String(body.status || "decided").slice(0, 20), reason: body.reason ? String(body.reason).slice(0, 120) : null, vendor: String(body.vendor || later?.vendor || "").slice(0, 80), invoice_number: String(body.invoice_number || later?.invoice_number || "").slice(0, 80), amount: String(body.amount || later?.amount || "").slice(0, 40), tx_url: /^https:\/\/[\w./-]+$/.test(String(body.tx_url || "")) ? body.tx_url : "", message: String(body.message || "").slice(0, 300) };
+    if (it) {
+      // an invoice that could not be read goes back to waiting: a person reads it in the console
+      if (o.status === "error") { it.status = "waiting"; delete it.taken; await kvPut(env, `inbox:${treasury}`, items); }
+      else await kvPut(env, `inbox:${treasury}`, items.filter((x) => x.id !== body.id));
+    } else it = later;
     await tellApprovers(env, rec, it, approverText(env, treasury, it, o));
     const v = vendorText(it, o);
     if (v && !isApprover(rec, it.chat)) await tg(env, "sendMessage", { chat_id: it.chat, text: v, disable_web_page_preview: true }).catch(() => {});
+    if (followKey) {
+      if (FINAL.has(o.status)) { if (later) await env.INBOX.delete(followKey); }
+      else await kvPut(env, followKey, { id: it.id, name: it.name, chat: it.chat, asked: it.asked || {}, vendor: o.vendor, invoice_number: o.invoice_number, amount: o.amount }, FOLLOW_TTL);
+    }
     return json(200, { ok: true }, headers);
   }
   // Free text to the chat an invoice came from (body.chat), so one vendor never sees another's decisions; without a chat, to every connected chat.

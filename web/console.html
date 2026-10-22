@@ -1473,8 +1473,9 @@ document.addEventListener("click", async (e) => {
     if (act === "setTax") { tax = prompt("Identifier this vendor prints on its invoices (VAT number, EIN, CNPJ, or a supplier code you assign). Leave empty to stop checking it.", b.dataset.tax || ""); if (tax === null) return; }
     if (act === "setWithhold") { const w = prompt("Withholding tax to keep back on this vendor's invoices, in percent (for example 20). As set by your accountant. 0 for none.", String((Number(b.dataset.w) || 0) / 100)); if (w === null) return; bps = Math.round(Number(w.replace(",", ".") || "0") * 100); if (!Number.isFinite(bps) || bps < 0 || bps > 5000) throw new Error("a percentage between 0 and 50"); }
     const args = act === "openProposal" ? { id } : act === "confirmPayout" ? { vendor_id: b.dataset.id } : act === "orderBound" ? { vendor_id: b.dataset.id, bound: false } : act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
-    await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
+    const done = await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
     await loadTreasury();
+    if (act === "approve" || act === "cancel") inboxFollowUp(id, done?.hash);
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
   finally { b.disabled = false; }
 });
@@ -1956,7 +1957,7 @@ async function inboxAfterDecision(id, p, hash) {
   if (!item) return; // a dropped file: nobody on Telegram is waiting for this one
   try {
     const vendor = p ? (Object.fromEntries(state.vendors)[p.vendor_id]?.name || p.vendor_id) : "";
-    const body = { treasury: settings.treasury, id: item.id, status: p?.status ?? "decided", reason: p?.reason ?? null, vendor, invoice_number: p?.invoice_number ?? "", amount: p ? usdc(p.amount) : "", tx_url: `${EXPLORER[settings.network]}/txns/${hash}` };
+    const body = { treasury: settings.treasury, id: item.id, payment_id: id, status: p?.status ?? "decided", reason: p?.reason ?? null, vendor, invoice_number: p?.invoice_number ?? "", amount: p ? usdc(p.amount) : "", tx_url: `${EXPLORER[settings.network]}/txns/${hash}` };
     // the relay tells the approvers with the contract's reason, and the chat the invoice came from the outcome only
     const r = await fetch(`${RELAY}/inbox/outcome`, { method: "POST", headers: h, body: JSON.stringify(body) });
     if (!r.ok) await fetch(`${RELAY}/inbox/discard`, { method: "POST", headers: h, body: JSON.stringify({ treasury: settings.treasury, id: item.id }) });
@@ -1964,6 +1965,18 @@ async function inboxAfterDecision(id, p, hash) {
   } catch {}
 }
 $("#tgApproverCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#tgApproverLink").href); $("#tgApproverCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#tgApproverCopy").textContent = "Copy link"; }, 1500); });
+/** A later decision on a payment (approved or cancelled from Attention, or as the owner): the relay remembers held invoices by payment id and tells the same chats. Best effort. */
+async function inboxFollowUp(id, hash) {
+  if (!settings.inboxToken || !settings.treasury) return;
+  try {
+    let p = null;
+    for (let i = 0; i < 4 && !p; i++) { p = await view(settings.treasury, "get_payment", { id }); if (!p) await new Promise((r) => setTimeout(r, 1500)); }
+    if (!p) return;
+    const vendor = Object.fromEntries(state.vendors)[p.vendor_id]?.name || p.vendor_id;
+    const body = { treasury: settings.treasury, payment_id: id, status: p.status, reason: p.reason ?? null, vendor, invoice_number: p.invoice_number, amount: usdc(p.amount), ...(hash ? { tx_url: `${EXPLORER[settings.network]}/txns/${hash}` } : {}) };
+    await fetch(`${RELAY}/inbox/outcome`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch {}
+}
 $("#tgCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#tgLink").href); $("#tgCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#tgCopy").textContent = "Copy link"; }, 1500); });
 /** A pairing link: for a vendor's chat (or the company's own), or for the owner's chat as approver. */
 async function tgPair(b, approver) {
@@ -2231,6 +2244,7 @@ $("#approve").addEventListener("click", async () => {
     if (!canAct("approve")) throw new Error("this needs the owner key, or an operator allowed to approve");
     const { hash } = await functionCall({ ...actor(), receiverId: settings.treasury, method: "approve_payment", args: { id: lastDecision }, gasTgas: 100 });
     await showDecision(lastDecision, hash, settings.ownerKey ? "approved by the owner" : `approved by ${settings.operator}`);
+    inboxFollowUp(lastDecision, hash);
     loadTreasury();
   } catch (e) { $("#submitErr").textContent = e.message; $("#submitErr").hidden = false; }
   finally { btn.disabled = false; btn.textContent = "Approve as the owner"; }

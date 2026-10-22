@@ -192,7 +192,7 @@ async function telegramTick(opts: { offline?: boolean; direct?: boolean }) {
       const vendorName = (await view<[string, Vendor][]>("list_vendors").catch(() => [] as [string, Vendor][])).find(([id]) => id === r.claim.vendor_id)?.[1].name || r.claim.vendor_id;
       console.log(`[agent] telegram ${it.name} -> payment #${r.paymentId} ${p?.status}${p?.reason ? " (" + p.reason + ")" : ""}`);
       telegramTries.delete(it.id);
-      await relay("/inbox/outcome", { method: "POST", body: JSON.stringify({ treasury: config.treasury, id: it.id, status: p?.status ?? "decided", reason: p?.reason ?? null, vendor: vendorName, invoice_number: r.claim.invoice_number, amount: fmtUsdc(r.claim.amount), tx_url: `${config.explorer}/txns/${r.txHash}` }) });
+      await relay("/inbox/outcome", { method: "POST", body: JSON.stringify({ treasury: config.treasury, id: it.id, payment_id: r.paymentId, status: p?.status ?? "decided", reason: p?.reason ?? null, vendor: vendorName, invoice_number: r.claim.invoice_number, amount: fmtUsdc(r.claim.amount), tx_url: `${config.explorer}/txns/${r.txHash}` }) });
     } catch (e) {
       const msg = (e as Error).message;
       console.error(`[agent] telegram ${it.name} failed (${job?.tries ?? 0}/3): ${msg}`);
