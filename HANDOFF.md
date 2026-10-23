@@ -241,18 +241,15 @@ Stefano ha mostrato un gestionale di esempio (barra laterale, panoramica con KPI
 
 Le milestone future non sono un campo della submission (campi: projectName, leadName, email, size, tracks, nearAddress, projectUrl, demoUrl, idea 20-2000 caratteri, consent). Vanno comunque nel README ("What comes next") e in due righe dell'`idea`, perche' i giudici umani sono investitori. Mercato di riferimento: internazionale, non l'Italia (decisione di Stefano del 22 ottobre: niente riferimenti al mercato italiano nel piano, nei testi e nella roadmap; le fatture di esempio restano fittizie e neutre).
 
-Settimana 1 (1-7 novembre)
-1. Mainnet con un pagamento vero cross-chain: tesoreria mainnet con USDC vero, un fornitore con indirizzo Base, executor che salda via NEAR Intents (unico pezzo mai provato dal vivo). Serve l'account mainnet di Stefano, 12 NEAR, 50-100 USDC, un indirizzo Base suo. 2 giorni, rischio su deposit address / EXACT_OUTPUT.
-2. Approvazione massiva in console e "approve all" su Telegram (3.2). 1 giorno.
-3. PWA: console installabile, icona, notifiche. 1-2 giorni.
-4. Repo pubblica: HANDOFF, ARCHITETTURA e CLAUDE.md interni sostituiti da versioni inglesi senza riferimenti privati; README con la riga sulla data di inizio; licenza source available per tutto tranne contracts/policy (vedi Abbonamento in 3.2). Mezza giornata.
-
-Settimana 2 (8-14 novembre)
-5. NEAR Business: spostato nelle milestone (Stefano, 22 ottobre: si prova solo chiedendo la demo, non entro il 14). Verificato su docs.business.near.com: tesorerie multisig confidenziali su shard privato, bilanci nel contratto near.com, ponte via Intents, nessuna API/SDK/testnet documentati. Quando si fara': NEAR Business come cassaforte, Bursar come conto operativo; pagamento USDC da NEAR Business verso la tesoreria Bursar, arriva come ft_transfer, "Sync balance" lo mette a libro (9f); README con passo do X, see Y e screenshot; Overview con la riga "Top up from NEAR Business". La sezione README "Where it sits next to NEAR Business" resta com'e' (posizionamento, "not built yet").
-   (Email spostata nelle milestone: il prototipo arriva con Telegram, decisione del 22 ottobre.)
-6. Video demo 2-3 minuti e post su X (obbligatorio): fattura su Telegram, approvazione dal telefono, frode bloccata, pagamento su Base. 1 giorno.
-7. Prova da giudice AI: eseguire il README da zero in un ambiente pulito (Claude Code e Codex lo faranno), correggere ogni passo che inciampa. 1 giorno.
-8. Submission il 13, non l'ultimo giorno: payload stampato, conferma di Stefano, un solo POST.
+Calendario (rivisto il 23 ottobre; il mainnet per primo perche' e' l'unica cosa che puo' slittare)
+- Fino al 31 ottobre, preparazione. Stefano: worker.js aggiornato in dashboard e prova con Fra chiusa; account mainnet con ~12 NEAR e 50-100 USDC, un indirizzo Base suo, chiave NEAR AI con credito, account X, tutto in un gestore password; BotFather (descrizione, immagine, comandi); conferma licenza (proposta: BUSL 1.1 su tutto, contracts/policy MIT) e nome. Claude: previsione di cassa e flag dallo storico solo se Stefano dice di partire.
+- 1-3 novembre, mainnet: tesoreria su mainnet con conferma esplicita, fornitore con payout su Base, un pagamento vero via Intents (deposit address, EXACT_OUTPUT, storage_deposit da verificare dal vivo). Stefano firma col wallet quando serve.
+- 4-6 novembre, prodotto: approvazione massiva in console e "approve all" su Telegram; PWA. Stefano prova da telefono e Mac.
+- 7-8 novembre, repo: HANDOFF, ARCHITETTURA e CLAUDE.md sostituiti da versioni inglesi pulite; licenza; README con What comes next, riga sulla data di inizio, companies of any size, roadmap; test. Stefano rende pubblica la repo.
+- 9-10 novembre, video: sceneggiatura e testo del post (Claude); registrazione 2-3 minuti e post su X con "built at NEAR HACKATHON" (Stefano): PDF in Telegram, pagato senza toccare nulla, frode bloccata, approvazione dal telefono, transazione su Base.
+- 11-12 novembre, prova da giudice: README eseguito da zero in ambiente pulito (Claude), e una volta sul Mac seguendo solo il README (Stefano); rilettura di HACKATHON.md; idea aggiornata con i numeri finali.
+- 13 novembre, submission: payload stampato, conferma di Stefano, un solo POST. Il 14 resta libero per gli imprevisti.
+NEAR Business ed email: nelle milestone (vedi 3.2), non entro il 14.
 
 Fuori dal 14: app nativa (Capacitor), agente ospitato opt-in, integrazioni partner oltre Intents e Sputnik. Target: aziende di ogni dimensione, piccole e grandi (Stefano, 22 ottobre); le milestone per le grandi sono catene di approvazione e policy per reparto, export per revisori, e-invoice strutturate, connettori ERP, gruppi multi-tesoreria.
 
