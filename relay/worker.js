@@ -384,14 +384,8 @@ async function inbox(request, env, url, headers) {
     }
     return json(200, { ok: true }, headers);
   }
-  // Free text to the chat an invoice came from (body.chat), so one vendor never sees another's decisions; without a chat, to every connected chat.
-  if (request.method === "POST" && p === "/inbox/notify") {
-    const text = String(body.text || "").slice(0, 1000);
-    if (!text) return json(400, { error: "text is required" }, headers);
-    const targets = body.chat != null ? rec.chats.filter((c) => String(c) === String(body.chat)) : rec.chats;
-    await Promise.all(targets.map((c) => tg(env, "sendMessage", { chat_id: c, text, disable_web_page_preview: true }).catch(() => {})));
-    return json(200, { ok: true, chats: targets.length }, headers);
-  }
+  // There is no free-text route: everything the chats receive is composed here from a decision or an outcome,
+  // so a leaked inbox token cannot turn the bot into a messenger for anyone.
   return json(404, { error: "not found" }, headers);
 }
 

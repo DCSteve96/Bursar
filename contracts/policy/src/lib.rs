@@ -92,6 +92,20 @@ const VENDOR_ORDERS_PREFIX: &[u8] = b"vo";
 const ORDER_BOUND_PREFIX: &[u8] = b"vb";
 const VENDOR_DAY_PREFIX: &[u8] = b"vd";
 const HASH_INDEX_PREFIX: &[u8] = b"ih";
+/// Written once the per-vendor order index covers every vendor (new contracts, and migrated ones): a missing
+/// index then means "no orders", and nothing ever scans the whole orders map again.
+const ORDERS_INDEXED_KEY: &[u8] = b"orders_indexed";
+/// Liquid NEAR a counted caller (the agent) must leave on the account: below it, its requests are refused so
+/// a stolen key cannot write the account out of its storage stake.
+const NEAR_FLOOR: u128 = 1_500_000_000_000_000_000_000_000;
+/// Gas `upgrade` keeps back from what it attaches to `migrate`: the deploy action's fees (about 14 MGas per byte of code),
+/// the function call's own fees and the end of the current execution. 15 TGas was a few TGas short at 471 KB; 40 leaves room.
+const UPGRADE_RESERVE: u64 = 40_000_000_000_000;
+/// Stored holds and autopays keep this much of the agent's receipt reference and flags; the transaction has the rest.
+const STORED_REF: usize = 192;
+const STORED_FLAGS: usize = 8;
+/// Withholding read on the invoice may differ from the accountant's rate by rounding: one USDC at most.
+const WITHHOLDING_ROUNDING: u128 = 1_000_000;
 /// Invoices one vendor can get paid without a person in one day: a bill split in many small invoices still meets a human.
 const AUTOPAY_PER_VENDOR_PER_DAY: u32 = 5;
 const GAS_FT_VIEW: Gas = Gas::from_tgas(5);
@@ -410,6 +424,7 @@ impl Bursar {
         approval_threshold: U128,
     ) -> Self {
         log!("{}", USDC_DECIMALS_HINT);
+        env::storage_write(ORDERS_INDEXED_KEY, b"1");
         Self {
             owner,
             agent,
@@ -463,6 +478,7 @@ impl Bursar {
                 withholding_bps,
             },
         );
+        env::storage_write(&Self::key(VENDOR_ORDERS_PREFIX, vendor_id.as_bytes()), &near_sdk::borsh::to_vec(&Vec::<u64>::new()).unwrap());
         self.emit("vendor_added", &vendor_id);
     }
 
@@ -470,6 +486,10 @@ impl Bursar {
     pub fn update_vendor(&mut self, vendor_id: String, payout: Option<Payout>, monthly_budget: Option<U128>, active: Option<bool>, tax_id: Option<String>, country: Option<String>, withholding_bps: Option<u32>) {
         self.assert_can(|r| r.manage_vendors, "manage vendors");
         let mut v = self.vendors.get(&vendor_id).cloned().unwrap_or_else(|| crate::fail("unknown vendor"));
+        // reactivation, the tax id and the withholding rate are the owner's: an operator may only switch a vendor off
+        if env::predecessor_account_id() != self.owner {
+            require!(active != Some(true) && tax_id.is_none() && withholding_bps.is_none(), "only the owner reactivates a vendor or changes its tax id or withholding");
+        }
         if let Some(c) = country {
             v.country = if c.trim().is_empty() { None } else { Some(c.trim().to_ascii_uppercase()) };
         }
@@ -621,10 +641,15 @@ impl Bursar {
             self.dao_bond = b;
         }
         if let Some(a) = agent {
+            require!(a != self.owner && !self.operators.contains_key(&a), "the agent cannot be the owner or an operator");
             self.agent = a;
         }
         if let Some(e) = executor {
+            require!(e != self.owner && !self.operators.contains_key(&e), "the executor cannot be the owner or an operator");
             self.executor = e;
+        }
+        if let Some(d) = dao.as_ref() {
+            require!(*d != self.agent && *d != self.executor && !self.operators.contains_key(d), "the dao cannot be the agent, the executor or an operator");
         }
         if dao.is_some() {
             self.dao = dao;
@@ -716,6 +741,10 @@ impl Bursar {
         require!(!self.paused, "paused");
         // quotas per caller: a flooding agent key does not lock an operator out
         let counted = caller != self.owner;
+        // a key that is not the owner's cannot write the account out of its storage stake
+        if counted {
+            require!(self.liquid_near() >= NEAR_FLOOR, "the treasury account is low on NEAR for storage: the owner tops it up");
+        }
         let quota = |k: &[u8]| Self::key(k, caller.as_bytes());
         if counted {
             self.bump_daily(&quota(REQUESTS_TODAY_KEY), REQUESTS_PER_DAY, "daily quota of requests reached: this key is sending too many claims, the owner should look at it");
@@ -760,8 +789,8 @@ impl Bursar {
                     self.bump_daily(&quota(BLOCKED_TODAY_KEY), BLOCKED_PER_DAY, "daily quota of refused requests reached: this key is sending bad claims, the owner should look at it");
                     // a refusal is recorded small: the reason, not the agent's payload
                     p.flags.truncate(2);
-                    p.attestation_ref.truncate(64);
-                    p.invoice_hash.truncate(64);
+                    Self::clip(&mut p.attestation_ref, 64);
+                    Self::clip(&mut p.invoice_hash, 64);
                 }
                 p.reason = Some(reason.clone());
                 self.payments.insert(id, p);
@@ -773,14 +802,18 @@ impl Bursar {
                 self.reserve(&claim.vendor_id, amount);
                 // the payout this claim was checked against: the money goes there or nowhere
                 self.set_payout_snapshot(id, &claim.payout_seen);
-                let key = Self::invoice_key(&claim.vendor_id, &claim.invoice_number);
-                self.invoice_index.insert(key);
+                if !Self::norm_id(&claim.invoice_number).is_empty() {
+                    self.invoice_index.insert(Self::invoice_key(&claim.vendor_id, &claim.invoice_number));
+                }
                 self.set_hash_seen(&claim.invoice_hash, true);
                 // What the company agreed to buy: consume the matching order, or note that there is none.
                 let (order_id, covered) = self.consume_order(&claim);
                 p.order_id = order_id;
                 let (holds, withheld) = self.holds(&claim, covered);
                 p.withheld = withheld;
+                // what is stored stays small: the transaction carries the agent's whole claim
+                p.flags.truncate(STORED_FLAGS);
+                Self::clip(&mut p.attestation_ref, STORED_REF);
                 if !holds.is_empty() {
                     if counted {
                         self.bump_daily(&quota(HOLDS_TODAY_KEY), HOLDS_PER_DAY, "daily quota of holds reached");
@@ -864,6 +897,7 @@ impl Bursar {
             }
             Err(_) => {
                 self.release_reservation(&p);
+                self.forget_payment_keys(id);
                 p.status = Status::Blocked;
                 p.reason = Some("dao_proposal_failed".into());
                 p.updated_at = env::block_timestamp();
@@ -899,6 +933,7 @@ impl Bursar {
         }
         if matches!(view.status.as_str(), "Rejected" | "Removed" | "Expired" | "Failed" | "Moved") {
             self.release_reservation(&p);
+            self.forget_payment_keys(id);
             p.status = Status::Cancelled;
             p.reason = Some(format!("dao_{}", view.status.to_lowercase()));
             p.updated_at = env::block_timestamp();
@@ -966,7 +1001,7 @@ impl Bursar {
         let settlement = self.get_settlement_account().unwrap_or_else(|| crate::fail("no settlement account set: the owner registers the Intents deposit account first"));
         require!(deposit_address == settlement || deposit_address.as_str().ends_with(&format!(".{settlement}")), "deposit address is not the registered settlement account");
         let net = p.amount - p.withheld;
-        require!(net <= self.spendable(), "insufficient balance");
+        require!(p.amount <= self.spendable(), "insufficient balance");
         require!(self.in_flight() == 0, "a transfer is in flight: ask again in a few seconds");
         self.balance -= net;
         self.withheld_due += p.withheld;
@@ -995,8 +1030,9 @@ impl Bursar {
     }
 
     /// Intents did not deliver and refunded the USDC to this account with a plain transfer (the quote expired, the
-    /// route failed). The executor or the owner puts the payment back in the queue; the refund itself is counted
-    /// with `sync_balance`. Only once the deposit transfer's callback has run.
+    /// route failed). The executor or the owner reports it; the contract checks the token holds the refund, takes it
+    /// back on the books, and holds the payment for a person to send again or cancel. Only once the deposit transfer's
+    /// callback has run.
     pub fn mark_settlement_failed(&mut self, id: u64) -> Promise {
         let caller = env::predecessor_account_id();
         require!(caller == self.executor || caller == self.owner, "only the executor or the owner");
@@ -1018,17 +1054,44 @@ impl Bursar {
         require!(p.status == Status::Settling, "not settling");
         let net = p.amount - p.withheld;
         require!(held >= self.balance.saturating_add(net), "the refund has not arrived: the token holds less than the books plus this payment");
-        // the refund is on the account: count it, and only now can the payment be settled again
+        // the refund is on the account: the books take back exactly this payment's net (anything else on the token is
+        // a deposit, for sync_balance), and a person decides whether it is sent again: on chain a refund and a deposit
+        // look the same, so the executor alone must not be able to pay an invoice twice
         let old = self.balance;
-        self.balance = held;
+        self.balance = self.balance.saturating_add(net);
         self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
-        p.status = Status::Queued;
+        p.status = Status::Approval;
+        p.reason = Some("settlement_failed".into());
         p.quote_id = None;
         p.deposit_address = None;
         p.updated_at = env::block_timestamp();
         self.payments.insert(id, p);
         self.emit("settlement_failed", &format!("{id}:{old}:{held}"));
         true
+    }
+
+    /// A settlement nobody can finish through the executor (it vanished, or the refund was already counted by
+    /// `sync_balance`): the owner records what happened. Delivered: the payment is Settled. Not delivered: it is
+    /// Cancelled, its reservations released, the withholding booked at settle undone; the USDC itself is wherever
+    /// the token says, which `sync_balance` reads.
+    pub fn close_settlement(&mut self, id: u64, delivered: bool) {
+        self.assert_owner();
+        let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
+        require!(p.status == Status::Settling, "not settling");
+        require!(self.in_flight() == 0, "the transfer to the deposit address has not landed yet");
+        if delivered {
+            p.status = Status::Settled;
+            p.dest_tx = Some("closed by the owner".into());
+        } else {
+            self.release_reservation(&p);
+            self.withheld_due = self.withheld_due.saturating_sub(p.withheld);
+            p.status = Status::Cancelled;
+            p.reason = Some("settlement_closed".into());
+        }
+        self.forget_payment_keys(id);
+        p.updated_at = env::block_timestamp();
+        self.payments.insert(id, p);
+        self.emit(if delivered { "payment_settled" } else { "payment_cancelled" }, &id.to_string());
     }
 
     // ----- token deposits (NEP-141 receiver) -----
@@ -1086,7 +1149,7 @@ impl Bursar {
     pub fn list_payments(&self, from: Option<u64>, limit: Option<u64>) -> Vec<Payment> {
         // ids are dense: walk them instead of scanning the map from the start
         let from = from.unwrap_or(0);
-        let limit = limit.unwrap_or(50).min(500);
+        let limit = limit.unwrap_or(50).min(200);
         (from.saturating_add(1)..self.next_id).filter_map(|id| self.payments.get(&id).cloned()).take(limit as usize).collect()
     }
 
@@ -1094,8 +1157,8 @@ impl Bursar {
         self.vendors.get(&vendor_id).cloned()
     }
 
-    pub fn list_vendors(&self) -> Vec<(String, Vendor)> {
-        self.vendors.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    pub fn list_vendors(&self, from: Option<u64>, limit: Option<u64>) -> Vec<(String, Vendor)> {
+        self.vendors.iter().skip(from.unwrap_or(0) as usize).take(limit.unwrap_or(500).min(500) as usize).map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
     /// What the raw-storage marks say about a vendor: its payout waits for the owner's confirmation; its invoices need an order.
@@ -1200,7 +1263,7 @@ impl Bursar {
         let mut withheld = 0;
         if bps > 0 {
             withheld = expected;
-            if seen > 0 && seen.abs_diff(expected) > amount / 100 {
+            if seen > 0 && seen.abs_diff(expected) > (amount / 100).min(WITHHOLDING_ROUNDING) {
                 holds.push("withholding_mismatch");
             }
         } else if seen > 0 {
@@ -1224,8 +1287,8 @@ impl Bursar {
         if c.invoice_number.trim().is_empty() && c.invoice_hash.trim().is_empty() {
             return Err("no_invoice_identity".into());
         }
-        if self.invoice_index.contains(&Self::invoice_key(&c.vendor_id, &c.invoice_number))
-            || self.invoice_index.contains(&Self::old_invoice_key(&c.vendor_id, &c.invoice_number))
+        let numbered = !Self::norm_id(&c.invoice_number).is_empty();
+        if (numbered && (self.invoice_index.contains(&Self::invoice_key(&c.vendor_id, &c.invoice_number)) || self.invoice_index.contains(&Self::old_invoice_key(&c.vendor_id, &c.invoice_number))))
             || self.hash_seen(&c.invoice_hash)
         {
             return Err("duplicate_invoice".into());
@@ -1262,7 +1325,8 @@ impl Bursar {
             Payout::Near { account } => {
                 // the withheld share stays in the treasury, earmarked for the state; the vendor gets the net
                 let net = p.amount - p.withheld;
-                require!(net <= self.spendable(), "insufficient balance");
+                // the gross: the net leaves, the withheld share stays and must be there too
+                require!(p.amount <= self.spendable(), "insufficient balance");
                 self.balance -= net;
                 self.withheld_due += p.withheld;
                 p.status = Status::Paid;
@@ -1334,15 +1398,17 @@ impl Bursar {
         if self.day == p.created_at / DAY_NS {
             self.spent_today = self.spent_today.saturating_sub(p.amount);
         }
-        self.invoice_index.remove(&Self::invoice_key(&p.vendor_id, &p.invoice_number));
-        self.invoice_index.remove(&Self::old_invoice_key(&p.vendor_id, &p.invoice_number));
+        if !Self::norm_id(&p.invoice_number).is_empty() {
+            self.invoice_index.remove(&Self::invoice_key(&p.vendor_id, &p.invoice_number));
+            self.invoice_index.remove(&Self::old_invoice_key(&p.vendor_id, &p.invoice_number));
+        }
         self.set_hash_seen(&p.invoice_hash, false);
         if let Some(oid) = p.order_id {
             if let Some(mut o) = self.orders.get(&oid).cloned() {
                 match &mut o.kind {
                     OrderKind::Single { remaining } => *remaining += p.amount,
                     OrderKind::Recurring { last_period, period_days, .. } => {
-                        if *last_period == Some(Self::period_key(*period_days)) {
+                        if *last_period == Some(Self::period_key_at(*period_days, p.created_at)) {
                             *last_period = None;
                         }
                     }
@@ -1370,6 +1436,7 @@ impl Bursar {
     fn vendor_order_ids(&self, vendor_id: &str) -> Vec<u64> {
         match env::storage_read(&Self::key(VENDOR_ORDERS_PREFIX, vendor_id.as_bytes())) {
             Some(b) => near_sdk::borsh::from_slice::<Vec<u64>>(&b).unwrap_or_default(),
+            None if env::storage_has_key(ORDERS_INDEXED_KEY) => Vec::new(),
             None => self.orders.iter().filter(|(_, o)| o.vendor_id == vendor_id && o.active).map(|(id, _)| *id).collect(),
         }
     }
@@ -1395,13 +1462,21 @@ impl Bursar {
         let reference = c.order_ref.as_deref().map(|r| r.trim().to_lowercase()).unwrap_or_default();
         let candidates: Vec<Order> = self.vendor_open_orders(&c.vendor_id);
         if !reference.is_empty() {
+            let mut named = false;
             for mut o in candidates.iter().cloned() {
                 if let OrderKind::Single { remaining } = &mut o.kind {
-                    if o.reference.to_lowercase() == reference && *remaining >= amount {
-                        *remaining -= amount;
-                        return Some(o);
+                    if o.reference.to_lowercase() == reference {
+                        named = true;
+                        if *remaining >= amount {
+                            *remaining -= amount;
+                            return Some(o);
+                        }
                     }
                 }
+            }
+            // the invoice names an order that cannot cover it: a standing order does not quietly take its place
+            if named {
+                return None;
             }
         }
         for mut o in candidates.into_iter() {
@@ -1429,10 +1504,14 @@ impl Bursar {
 
     /// Calendar month for monthly orders, epoch-aligned periods otherwise.
     fn period_key(period_days: u32) -> u64 {
+        Self::period_key_at(period_days, env::block_timestamp())
+    }
+
+    fn period_key_at(period_days: u32, ts: u64) -> u64 {
         if (28..=31).contains(&period_days) {
-            Self::month_key() as u64
+            Self::month_key_at(ts) as u64
         } else {
-            env::block_timestamp() / (DAY_NS * period_days as u64)
+            ts / (DAY_NS * period_days as u64)
         }
     }
 
@@ -1488,10 +1567,26 @@ impl Bursar {
         env::storage_write(key, &b);
     }
 
+    /// NEAR above the storage stake.
+    fn liquid_near(&self) -> u128 {
+        let staked = env::storage_usage() as u128 * env::storage_byte_cost().as_yoctonear();
+        env::account_balance().as_yoctonear().saturating_sub(staked)
+    }
+
     /// Liquid NEAR above the storage stake covers the DAO bond plus headroom.
     fn can_pay_bond(&self) -> bool {
-        let staked = env::storage_usage() as u128 * env::storage_byte_cost().as_yoctonear();
-        env::account_balance().as_yoctonear().saturating_sub(staked) >= self.dao_bond.as_yoctonear().saturating_add(NEAR_HEADROOM)
+        self.liquid_near() >= self.dao_bond.as_yoctonear().saturating_add(NEAR_HEADROOM)
+    }
+
+    /// Cut a string to at most `n` bytes on a character boundary.
+    fn clip(s: &mut String, n: usize) {
+        if s.len() > n {
+            let mut cut = n;
+            while !s.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            s.truncate(cut);
+        }
     }
 
     fn key(prefix: &[u8], rest: &[u8]) -> Vec<u8> {
@@ -1647,7 +1742,7 @@ impl Bursar {
         // deploy, then let the new code bring the state to its own layout in the same batch
         Promise::new(env::current_account_id())
             .deploy_contract(code.0)
-            .function_call(String::from("migrate"), Vec::new(), NearToken::from_yoctonear(0), Gas::from_tgas(100))
+            .function_call(String::from("migrate"), Vec::new(), NearToken::from_yoctonear(0), Gas::from_gas(env::prepaid_gas().as_gas().saturating_sub(env::used_gas().as_gas()).saturating_sub(UPGRADE_RESERVE)))
     }
 
     /// Bring the stored state to this build's layout. Idempotent: a state already in this layout is returned as it is;
@@ -1657,7 +1752,8 @@ impl Bursar {
     #[init(ignore_state)]
     pub fn migrate() -> Self {
         let raw = env::storage_read(b"STATE").unwrap_or_else(|| crate::fail("no state to migrate"));
-        if let Ok(current) = near_sdk::borsh::from_slice::<Bursar>(&raw) {
+        if let Ok(mut current) = near_sdk::borsh::from_slice::<Bursar>(&raw) {
+            current.index_once();
             return current;
         }
         let mut old: legacy::Bursar = near_sdk::borsh::from_slice(&raw).unwrap_or_else(|_| crate::fail("unknown state layout"));
@@ -1687,7 +1783,35 @@ impl Bursar {
             new.payments.insert(k, Payment { id: p.id, vendor_id: p.vendor_id, invoice_number: p.invoice_number, amount: p.amount, status: p.status, reason: p.reason, invoice_hash: p.invoice_hash, attestation_ref: p.attestation_ref, flags: p.flags, created_at: p.created_at, updated_at: p.updated_at, quote_id: p.quote_id, deposit_address: p.deposit_address, dest_tx: p.dest_tx, dao_proposal_id: p.dao_proposal_id, order_id: p.order_id, withheld: 0 });
         }
         new.emit("migrated", "october-20-layout");
+        new.index_once();
         new
+    }
+
+    /// Contracts from before the per-vendor order index and the normalized invoice keys: build both once.
+    fn index_once(&mut self) {
+        if env::storage_has_key(ORDERS_INDEXED_KEY) {
+            return;
+        }
+        let mut by_vendor: std::collections::BTreeMap<String, Vec<u64>> = std::collections::BTreeMap::new();
+        for (k, _) in self.vendors.iter() {
+            by_vendor.entry(k.clone()).or_default();
+        }
+        for (id, o) in self.orders.iter() {
+            if o.active {
+                by_vendor.entry(o.vendor_id.clone()).or_default().push(*id);
+            }
+        }
+        for (vendor, ids) in by_vendor {
+            env::storage_write(&Self::key(VENDOR_ORDERS_PREFIX, vendor.as_bytes()), &near_sdk::borsh::to_vec(&ids).unwrap());
+        }
+        let live: Vec<(String, String)> = self.payments.iter().filter(|(_, p)| matches!(p.status, Status::Paid | Status::Settled | Status::Queued | Status::Approval | Status::Settling)).map(|(_, p)| (p.vendor_id.clone(), p.invoice_number.clone())).collect();
+        for (vendor, number) in live {
+            if !Self::norm_id(&number).is_empty() {
+                self.invoice_index.insert(Self::invoice_key(&vendor, &number));
+            }
+        }
+        env::storage_write(ORDERS_INDEXED_KEY, b"1");
+        self.emit("indexed", "");
     }
 
     // ----- vault: the owner's secrets, encrypted in the browser, kept here so any browser can get them back -----
@@ -2302,16 +2426,232 @@ mod tests {
         testing_env!(ctx(accounts(2)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q2".into(), deposit(), pay.clone()); }));
         assert!(r.is_err(), "still settling: cannot be paid twice");
-        // the refund lands (plain transfer): now the token says so, the payment is queued again and the balance counted
+        // the refund lands (plain transfer): now the token says so; the books take this payment's net back, and a
+        // person decides whether it goes out again: on chain a refund and a deposit look the same
         testing_env!(as_self().build());
         assert!(c.on_settlement_failed(id, Ok(U128(50_000_000_000))));
-        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Approval);
+        assert_eq!(p.reason.as_deref(), Some("settlement_failed"));
         assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q2".into(), deposit(), pay.clone()); }));
+        assert!(r.is_err(), "the executor alone cannot send it again");
         testing_env!(ctx(accounts(0)).build());
         c.cancel_payment(id);
         testing_env!(ctx(accounts(1)).build());
         let again = c.request_payment(claim("design", "1107", 1_250_000_000, pay));
         assert_eq!(c.get_payment(again).unwrap().status, Status::Queued, "the invoice is free again");
+    }
+
+    #[test]
+    fn audit3_approval_and_settle_check_the_gross() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_vendor("consultant".into(), "Studio".into(), near(accounts(5)), U128(0), None, None, Some(2000));
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("consultant", "C-1", 3_000_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Approval);
+        testing_env!(ctx(accounts(0)).build());
+        let _ = c.withdraw(U128(47_500_000_000));
+        assert_eq!(c.get_stats().balance.0, 2_500_000_000);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.approve_payment(id)));
+        assert!(r.is_err(), "gross 3000 > spendable 2500");
+        let s = c.get_stats();
+        assert!(s.withheld_due.0 <= s.balance.0);
+    }
+
+    #[test]
+    fn audit3_cancelling_last_periods_hold_does_not_free_this_period() {
+        let mut c = no_dao();
+        c.add_recurring_order("hosting".into(), "server, monthly".into(), U128(3_000_000_000), 30, None);
+        testing_env!(ctx(accounts(1)).build());
+        let a = c.request_payment(claim("hosting", "OCT", 2_500_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(a).unwrap().reason.as_deref(), Some("over_threshold"));
+        let nov = T0 + 35 * DAY_NS;
+        testing_env!(ctx(accounts(1)).block_timestamp(nov).build());
+        let b = c.request_payment(claim("hosting", "NOV1", 400_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(b).unwrap().status, Status::Paid);
+        testing_env!(ctx(accounts(0)).block_timestamp(nov).build());
+        c.cancel_payment(a);
+        testing_env!(ctx(accounts(1)).block_timestamp(nov).build());
+        let d = c.request_payment(claim("hosting", "NOV2", 400_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(d).unwrap().reason.as_deref(), Some("no_order"));
+    }
+
+    #[test]
+    fn audit3_two_refunds_are_both_taken_back_and_a_deposit_is_not_a_refund() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_settlement_account(Some(intents()));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let a = c.request_payment(claim("design", "A", 1_250_000_000, pay.clone()));
+        let b = c.request_payment(claim("design", "B", 1_000_000_000, pay.clone()));
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.settle(a, "qa".into(), deposit(), pay.clone());
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(a), U128(1_250_000_000), Ok(())));
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.settle(b, "qb".into(), deposit(), pay.clone());
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(b), U128(1_000_000_000), Ok(())));
+        // both refunded: the token holds everything again; each callback takes back its own net only
+        assert!(c.on_settlement_failed(a, Ok(U128(50_000_000_000))));
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 1_000_000_000);
+        assert!(c.on_settlement_failed(b, Ok(U128(50_000_000_000))), "B's refund is on the account too");
+        assert_eq!(c.get_payment(b).unwrap().status, Status::Approval);
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000);
+        // a plain deposit while a settlement is delivering passes the token check, but the executor still cannot resend
+        testing_env!(ctx(accounts(0)).build());
+        c.approve_payment(a);
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Queued);
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.settle(a, "qa2".into(), deposit(), pay.clone());
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(a), U128(1_250_000_000), Ok(())));
+        assert!(c.on_settlement_failed(a, Ok(U128(50_000_000_000 + 2_000_000_000))), "a 2,000 deposit passes for the refund");
+        assert_eq!(c.get_payment(a).unwrap().status, Status::Approval, "but a person decides, not the executor");
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(a, "qa3".into(), deposit(), pay.clone()); }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn audit3_owner_closes_a_settlement_nobody_can_finish() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_settlement_account(Some(intents()));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.settle(id, "q1".into(), deposit(), pay.clone());
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
+        // the refund was counted by a sync first: the token check can never pass again
+        assert_eq!(c.on_sync_balance(Ok(U128(50_000_000_000))).0, 50_000_000_000);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.on_settlement_failed(id, Ok(U128(50_000_000_000)))));
+        assert!(r.is_err());
+        testing_env!(ctx(accounts(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.close_settlement(id, false)));
+        assert!(r.is_err(), "owner only");
+        testing_env!(ctx(accounts(0)).build());
+        c.close_settlement(id, false);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Cancelled);
+        assert_eq!(c.get_stats().balance.0, 50_000_000_000, "the books were already right");
+        testing_env!(ctx(accounts(1)).build());
+        let again = c.request_payment(claim("design", "1107", 1_250_000_000, pay));
+        assert_eq!(c.get_payment(again).unwrap().status, Status::Queued, "the invoice number is free again");
+    }
+
+    #[test]
+    fn audit3_roles_stay_separate() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: false });
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_roles(Some(accounts(3)), None, None, None)));
+        assert!(r.is_err(), "an approver cannot become the agent");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_roles(None, Some(accounts(0)), None, None)));
+        assert!(r.is_err(), "the owner cannot be the executor");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_roles(None, None, Some(accounts(1)), None)));
+        assert!(r.is_err(), "the agent cannot be the dao");
+        c.set_roles(Some(accounts(4)), None, None, None);
+        assert_eq!(c.get_roles().1, accounts(4));
+    }
+
+    #[test]
+    fn audit3_an_invoice_over_its_purchase_order_is_not_covered_by_the_standing_order() {
+        let mut c = no_dao();
+        let po = c.add_order("hosting".into(), "PO-7".into(), "one-off".into(), U128(100_000_000), None);
+        let so = c.add_recurring_order("hosting".into(), "monthly server".into(), U128(1_000_000_000), 30, None);
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(with_ref(claim("hosting", "X1", 500_000_000, near(accounts(5))), "PO-7"));
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Approval);
+        assert_eq!(p.reason.as_deref(), Some("no_order"));
+        assert_eq!(c.get_order(po).unwrap().kind, OrderKind::Single { remaining: 100_000_000 });
+        // without a reference the standing order still covers a normal invoice
+        let id2 = c.request_payment(claim("hosting", "X2", 500_000_000, near(accounts(5))));
+        assert_eq!(c.get_payment(id2).unwrap().order_id, Some(so));
+    }
+
+    #[test]
+    fn audit3_an_operator_cannot_undo_the_owners_vendor_controls() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_operator(accounts(3), Role { approve: false, manage_vendors: true, manage_orders: false });
+        c.update_vendor("hosting".into(), None, Some(U128(1_000_000_000)), Some(false), Some("PT123".into()), None, Some(2000));
+        testing_env!(ctx(accounts(3)).build());
+        for (active, tax, bps) in [(Some(true), None, None), (None, Some("".to_string()), None), (None, None, Some(0))] {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.update_vendor("hosting".into(), None, None, active, tax.clone(), None, bps)));
+            assert!(r.is_err());
+        }
+        c.update_vendor("hosting".into(), None, Some(U128(0)), None, None, None, None); // the budget it may change
+        c.update_vendor("hosting".into(), None, None, Some(false), None, None, None); // and switch off
+        assert!(!c.get_vendor("hosting".into()).unwrap().active);
+    }
+
+    #[test]
+    fn audit3_numberless_invoices_are_told_apart_by_their_file() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let mut a = claim("hosting", "", 100_000_000, near(accounts(5))); a.invoice_hash = "file-one".into();
+        let mut b = claim("hosting", "", 100_000_000, near(accounts(5))); b.invoice_hash = "file-two".into();
+        let mut a2 = claim("hosting", "", 100_000_000, near(accounts(5))); a2.invoice_hash = "file-one".into();
+        let ia = c.request_payment(a);
+        assert_eq!(c.get_payment(ia).unwrap().status, Status::Paid);
+        let ib = c.request_payment(b);
+        assert_eq!(c.get_payment(ib).unwrap().status, Status::Paid, "a different file is a different invoice");
+        let ia2 = c.request_payment(a2);
+        assert_eq!(c.get_payment(ia2).unwrap().reason.as_deref(), Some("duplicate_invoice"), "the same file is the same invoice");
+    }
+
+    #[test]
+    fn audit3_a_held_claim_is_stored_small_too() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(1)).build());
+        let mut cl = claim("hosting", &"n".repeat(128), 1, near(accounts(5)));
+        cl.invoice_hash = "h".repeat(128); cl.attestation_ref = "a".repeat(512); cl.flags = vec!["f".repeat(64); 16];
+        let id = c.request_payment(cl);
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Approval);
+        assert_eq!(p.attestation_ref.len(), STORED_REF);
+        assert_eq!(p.flags.len(), STORED_FLAGS);
+    }
+
+    #[test]
+    fn audit3_dao_failure_and_rejection_drop_the_payment_keys() {
+        let mut c = setup();
+        let id = approval_payment(&mut c);
+        assert!(c.payment_dao(id).is_some() && c.payout_snapshot(id).is_some());
+        testing_env!(as_self().build());
+        c.on_dao_proposal(id, Err(PromiseError::Failed));
+        assert!(c.payment_dao(id).is_none() && c.payout_snapshot(id).is_none(), "a blocked payment keeps no raw keys");
+    }
+
+    #[test]
+    fn audit3_withholding_tolerance_is_rounding_not_a_percent() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.add_vendor("consultant".into(), "Studio".into(), near(accounts(5)), U128(0), None, None, Some(2000));
+        testing_env!(ctx(accounts(1)).build());
+        let mut cl = claim("consultant", "W1", 1_000_000_000, near(accounts(5))); cl.withholding_seen = U128(190_000_000); // 190 instead of 200 on a 1,000 invoice
+        let id = c.request_payment(cl);
+        assert!(c.get_payment(id).unwrap().reason.unwrap().contains("withholding_mismatch"), "ten USDC off is not rounding");
+        let mut cl = claim("consultant", "W2", 1_000_000_000, near(accounts(5))); cl.withholding_seen = U128(199_950_000);
+        let id = c.request_payment(cl);
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Paid, "five cents is rounding");
+    }
+
+    #[test]
+    fn audit3_order_index_covers_every_vendor_after_migrate() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        for i in 0..5 { let id = c.add_order("hosting".into(), format!("PO-{i}"), "".into(), U128(1_000_000), None); c.close_order(id); }
+        assert!(env::storage_has_key(&Bursar::key(VENDOR_ORDERS_PREFIX, b"design")), "a vendor that never had an order has an empty index");
+        assert!(c.vendor_order_ids("design").is_empty());
+        assert!(c.vendor_order_ids("nobody").is_empty(), "an unknown vendor scans nothing");
     }
 
     #[test]
@@ -2448,7 +2788,13 @@ mod tests {
     #[test]
     fn audit_no_dao_proposal_without_near_for_the_bond() {
         let mut c = setup(); // has a dao
-        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_near(1)).build());
+        // below the NEAR floor the agent is refused outright: a stolen key cannot write the account dry
+        let stake = env::storage_usage() as u128 * env::storage_byte_cost().as_yoctonear();
+        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_yoctonear(stake + NearToken::from_near(1).as_yoctonear())).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("hosting", "dry", 1, near(accounts(5))))));
+        assert!(r.is_err(), "the agent cannot spend the last NEAR");
+        // above the floor but below bond plus headroom: the hold is recorded, no proposal
+        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_yoctonear(stake + NearToken::from_millinear(1_600).as_yoctonear())).build());
         let mut cl = claim("hosting", "poor", 1, near(accounts(5))); cl.flags = vec!["x".into()];
         let id = c.request_payment(cl);
         let p = c.get_payment(id).unwrap();
@@ -2628,7 +2974,7 @@ mod tests {
         std::mem::forget(old);
         testing_env!(as_self().build());
         let c = Bursar::migrate();
-        assert_eq!(c.list_vendors().len(), 2);
+        assert_eq!(c.list_vendors(None, None).len(), 2);
         assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 480_000_000);
         assert_eq!(c.get_vendor("hosting".into()).unwrap().withholding_bps, 0);
         assert_eq!(c.list_payments(Some(0), None).len(), 2);
@@ -2644,7 +2990,7 @@ mod tests {
         // a second run finds the current layout and changes nothing
         let c2 = Bursar::migrate();
         assert_eq!(c2.list_payments(Some(0), None).len(), 2);
-        assert_eq!(c2.list_vendors().len(), 2);
+        assert_eq!(c2.list_vendors(None, None).len(), 2);
         // the old duplicate key is still honoured
         testing_env!(ctx(accounts(1)).build());
         let mut c2 = c2;

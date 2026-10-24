@@ -20,14 +20,16 @@ impl Contract {
         Self { token }
     }
 
-    /// Open faucet: registers `to` if needed and mints `amount` (6 decimals).
+    /// Open faucet: mints `amount` (6 decimals) to `to`; a new account needs the storage deposit attached (0.00125 NEAR).
     #[payable]
     pub fn mint(&mut self, to: AccountId, amount: U128) {
         // a faucet, not a money printer: one call mints at most a million tUSDC and the supply stays far from u128::MAX
         assert!(amount.0 <= 1_000_000_000_000, "at most 1,000,000 tUSDC per call");
         assert!(self.token.total_supply.saturating_add(amount.0) <= 1_000_000_000_000_000_000, "supply cap reached");
         if !self.token.accounts.contains_key(&to) {
-            self.token.internal_register_account(&to);
+            // whoever registers a new account pays its storage (0.00125 NEAR), not the token: a loop of mints to
+            // junk accounts cannot write the token out of its stake; the excess deposit is refunded
+            self.token.storage_deposit(Some(to.clone()), Some(true));
         }
         self.token.internal_deposit(&to, amount.0);
         near_contract_standards::fungible_token::events::FtMint { owner_id: &to, amount: amount, memo: Some("faucet") }.emit();

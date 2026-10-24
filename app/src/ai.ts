@@ -267,6 +267,8 @@ const CHAIN_ALIASES: Record<string, string> = { arbitrum: "arb", "arbitrum one":
  * a negative or missing withholding is zero; chain names are the short ones the contract knows. The extraction itself is
  * left as the model wrote it, because the receipt is verified against the signed response.
  */
+/** No invoice is worth a trillion USDC: a runaway number from the model is clipped here, and the contract blocks it as over the cap. */
+export const MAX_AMOUNT = 1e12;
 export function claimValues(ex: Extraction): { amount: string; withholding: string; payout_seen: Payout } {
   const fix = (decimal: string | undefined, printed: string | undefined): string => {
     const fromPrinted = printed && /\d/.test(printed) ? parseMoney(printed.replace(/[^\d.,]/g, "")) : NaN;
@@ -275,7 +277,7 @@ export function claimValues(ex: Extraction): { amount: string; withholding: stri
     const m = String(decimal ?? "").match(/^(\d{1,3})\.(\d{3})(\d{2})$/);
     if (!Number.isFinite(fromPrinted) && m) n = Number(`${m[1]}${m[2]}.${m[3]}`);
     if (!Number.isFinite(n) || n < 0) n = 0;
-    return n.toFixed(2);
+    return Math.min(n, MAX_AMOUNT).toFixed(2);
   };
   let payout = ex.payout_seen;
   if (payout && "Chain" in payout && payout.Chain) {
@@ -297,7 +299,7 @@ export function claimValues(ex: Extraction): { amount: string; withholding: stri
   } else if (deposit > 0 && amount > deposit && ex.deposit && !near(amount, deposit)) {
     // no subtotal to check against: trust the model's amount as what is due (it already subtracted the deposit when it filled the field)
   }
-  return { amount: Math.max(0, amount).toFixed(2), withholding, payout_seen: payout };
+  return { amount: Math.min(MAX_AMOUNT, Math.max(0, amount)).toFixed(2), withholding, payout_seen: payout };
 }
 const KNOWN_FLAGS = new Set(["new_payment_details", "urgency", "mismatched_contact", "handwritten_or_altered", "missing_invoice_number", "unreadable"]);
 /**
@@ -330,12 +332,16 @@ export function payoutProblem(p: Payout | null | undefined): string | null {
   return null;
 }
 /** "1.250,00", "1,250.00", "1250" all read as 1250. */
+/** Printed money to a number. Both separators: the last one is the decimal mark. One separator alone, once, followed by
+ *  exactly three digits ("1.250", "1,250"): a thousands separator, invoices print two decimals. Several of the same: thousands. */
 export function parseMoney(s: string): number {
   const t = s.replace(/\s/g, "");
   const lastDot = t.lastIndexOf("."), lastComma = t.lastIndexOf(",");
+  const dots = t.split(".").length - 1, commas = t.split(",").length - 1;
   let norm: string;
   if (lastDot >= 0 && lastComma >= 0) norm = lastDot > lastComma ? t.replace(/,/g, "") : t.replace(/\./g, "").replace(",", ".");
-  else if (lastComma >= 0) norm = t.length - lastComma === 3 ? t.replace(",", ".") : t.replace(/,/g, "");
+  else if (lastComma >= 0) norm = commas === 1 && t.length - lastComma !== 4 ? t.replace(",", ".") : t.replace(/,/g, "");
+  else if (lastDot >= 0) norm = dots === 1 && t.length - lastDot !== 4 ? t : t.replace(/\./g, "");
   else norm = t;
   return Number(norm);
 }

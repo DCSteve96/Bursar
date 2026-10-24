@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qpkVhM5/FSr/gEFFU0lLeI/PuQ3NoZJmmWtfo15rpRs=' 'sha256-cso1mXvxZ4f9rQDHmlZeBqHv9oGyg8Ds4t7zoLlRvrI=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar sign in</title>
 <meta name="description" content="Sign in to the Bursar console with your NEAR wallet (Meteor, HOT, Intear, Nightly and more) or an invite link. No password, no server. A wallet without a treasury gets one created on the spot.">
@@ -91,6 +92,12 @@
   <div id="kErr" class="err" hidden style="text-align:center"></div>
 </div></div>
 
+<script type="importmap">
+{"integrity":{
+ "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm":"sha384-HwLfgX1nkNYwI0ie5ymVPmxNsDF9AddN4Ji0dZOxVA1NWrArBQjSBUfuShgREZcu",
+ "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js":"sha384-6/w7TxP/swcyvhGY1DBpxyGn0r3JjrQefXf9ksiF7UFZHP0YHSr8fakC87KMZOPY"
+}}
+</script>
 <script type="module">
 import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm";
 import { NearConnector } from "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js";
@@ -168,7 +175,7 @@ async function openTreasury(treasury, label, owner) {
     const seed = crypto.getRandomValues(new Uint8Array(32)); const pub = ed25519.getPublicKey(seed);
     const pubStr = "ed25519:" + b58(pub), secretKey = "ed25519:" + b58(concat(seed, pub));
     const { wallet } = await connect().getConnectedWallet();
-    await wallet.signAndSendTransaction({ network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: [] } } } }] });
+    await wallet.signAndSendTransaction({ network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: ["add_vendor", "update_vendor", "confirm_vendor_payout", "set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "add_operator", "remove_operator", "mark_withholding_remitted", "set_paused", "reset_in_flight", "clear_dao"] } } } }] });
     let profiles = []; try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
     const known = profiles.find((p) => p.treasury === treasury) || {};
     const profile = { network, treasury, agent: known.agent || "", agentKey: known.agentKey || "", owner, ownerKey: secretKey, ownerKeyKind: "wallet", label: label || known.label || treasury, operator: "", operatorKey: "", operatorRole: "", payer: known.payer || "", payerKey: known.payerKey || "" };

@@ -57,6 +57,12 @@ pub struct Entry {
     pub registered_at: u64,
 }
 
+/// Written once the per-owner index covers every entry (new registries, or after `reindex` walked to the end):
+/// a missing index then means "no treasuries", and `of` never scans the whole registry.
+const INDEXED_KEY: &[u8] = b"indexed";
+/// Entries a stranger may list under one owner: a flood of junk entries naming a victim stops here.
+const MAX_PER_OWNER_BY_OTHERS: usize = 32;
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Registry {
@@ -67,6 +73,7 @@ pub struct Registry {
 impl Registry {
     #[init]
     pub fn new() -> Self {
+        env::storage_write(INDEXED_KEY, b"1");
         Self { entries: IterableMap::new(b"e") }
     }
 
@@ -78,6 +85,9 @@ impl Registry {
             require!(who == e.registrant || who == e.owner, "only the registrant or the owner can change an entry");
         } else {
             require!(env::attached_deposit() >= FEE, "attach 0.01 NEAR for the storage");
+        }
+        if who != owner && self.index_get(&owner).map_or(0, |l| l.len()) >= MAX_PER_OWNER_BY_OTHERS {
+            crate::fail("too many entries registered for this owner by others: the owner registers or claims the rest");
         }
         let registrant = self.entries.get(&treasury).map(|e| e.registrant.clone()).unwrap_or(who);
         self.put(treasury, Entry { owner, registrant, registered_at: env::block_timestamp_ms() });
@@ -100,8 +110,8 @@ impl Registry {
     pub fn on_claim(&mut self, treasury: AccountId, claimant: AccountId, #[callback_result] roles: Result<(AccountId, AccountId, AccountId, Option<AccountId>, AccountId), PromiseError>) -> bool {
         let owner = match roles { Ok(r) => r.0, Err(_) => crate::fail("the treasury did not answer get_roles") };
         require!(owner == claimant, "the treasury contract names another owner");
-        let registrant = self.entries.get(&treasury).map(|e| e.registrant.clone()).unwrap_or(claimant.clone());
-        self.put(treasury, Entry { owner, registrant, registered_at: env::block_timestamp_ms() });
+        // whoever registered it first, the verified owner is the registrant from now on: a squatter cannot flip it back
+        self.put(treasury, Entry { owner, registrant: claimant, registered_at: env::block_timestamp_ms() });
         true
     }
 
@@ -142,6 +152,10 @@ impl Registry {
         for (owner, treasury) in &page {
             self.index_add(owner, treasury);
         }
+        // a short page means the walk reached the end: from now on a missing index is an empty one
+        if page.len() < limit.unwrap_or(50).min(100) as usize {
+            env::storage_write(INDEXED_KEY, b"1");
+        }
         page.len() as u32
     }
 
@@ -177,6 +191,7 @@ impl Registry {
         // from the index; a registry from before the index falls back to the scan until `reindex` has run
         match self.index_get(&owner) {
             Some(list) => list.into_iter().filter(|t| self.entries.get(t).map_or(false, |e| e.owner == owner)).collect(),
+            None if env::storage_has_key(INDEXED_KEY) => Vec::new(),
             None => self.entries.iter().filter(|(_, e)| e.owner == owner).map(|(k, _)| k.clone()).collect(),
         }
     }
@@ -259,5 +274,35 @@ mod tests {
         ctx(accounts(0), NearToken::from_yoctonear(0));
         r.unregister("treasury.a.testnet".parse().unwrap());
         assert_eq!(r.count(), 0);
+    }
+
+    #[test]
+    fn a_claim_evicts_the_squatter() {
+        let mut r = Registry::new();
+        ctx(accounts(5), FEE);
+        r.register("treasury.b.testnet".parse().unwrap(), accounts(5));
+        testing_env!(VMContextBuilder::new().current_account_id(accounts(0)).predecessor_account_id(accounts(0)).build());
+        assert!(r.on_claim("treasury.b.testnet".parse().unwrap(), accounts(3), Ok((accounts(3), accounts(1), accounts(2), None, accounts(4)))));
+        assert_eq!(r.get("treasury.b.testnet".parse().unwrap()).unwrap().registrant, accounts(3), "the verified owner is the registrant now");
+        ctx(accounts(5), NearToken::from_yoctonear(0));
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.register("treasury.b.testnet".parse().unwrap(), accounts(5))));
+        assert!(res.is_err(), "the squatter cannot take the entry back");
+        assert_eq!(r.get("treasury.b.testnet".parse().unwrap()).unwrap().owner, accounts(3));
+    }
+
+    #[test]
+    fn strangers_cannot_pile_entries_on_an_owner() {
+        let mut r = Registry::new();
+        for i in 0..MAX_PER_OWNER_BY_OTHERS {
+            ctx(accounts(5), FEE);
+            r.register(format!("t{i}.testnet").parse().unwrap(), accounts(3));
+        }
+        ctx(accounts(5), FEE);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.register("more.testnet".parse().unwrap(), accounts(3))));
+        assert!(res.is_err(), "the 33rd by a stranger is refused");
+        ctx(accounts(3), FEE);
+        r.register("mine.testnet".parse().unwrap(), accounts(3));
+        assert_eq!(r.of(accounts(3)).len(), MAX_PER_OWNER_BY_OTHERS + 1, "the owner itself is not capped");
+        assert!(r.of(accounts(4)).is_empty(), "an owner with no entries costs one read, not a scan");
     }
 }

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-uctTqQpnBRoi/GUg69Fm5hRP8Ri2v2Twp/n/TWWpvvw=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -684,6 +685,16 @@
 </main>
 </div>
 
+<script type="importmap">
+{"integrity":{
+ "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs":"sha384-+0ti2moQlmLN7WZHE2RHIf5lV8hHxhxEalN0il3YZceG26fUPyOkR0hp9daxk1i7",
+ "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/secp256k1.js/+esm":"sha384-U8u7Yj9G2p1J2sbFLRMMbluQ+rI72TXThFbG2REFR0wJBJqj4a3TyH8E0c+T5Whj",
+ "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm":"sha384-HwLfgX1nkNYwI0ie5ymVPmxNsDF9AddN4Ji0dZOxVA1NWrArBQjSBUfuShgREZcu",
+ "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha3.js/+esm":"sha384-T/g+9URdccxfcSPtcsBEDZJuEySLerd0R/XQNfSqPX9DOZJBg+EOs7NkQsESyxhs",
+ "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha2.js/+esm":"sha384-wN/UYopFkl0XwJYRTsb6/85Lf2xkRGIzqXvTh/i8CHIm52TagX2mt5YAwZYIcqiD",
+ "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js":"sha384-6/w7TxP/swcyvhGY1DBpxyGn0r3JjrQefXf9ksiF7UFZHP0YHSr8fakC87KMZOPY"
+}}
+</script>
 <script type="module">
 import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
 import { secp256k1 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/secp256k1.js/+esm";
@@ -698,8 +709,11 @@ const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://n
 const AI_BASE = "https://cloud-api.near.ai/v1";
 const DEC = 6;
 const $ = (s) => document.querySelector(s);
+const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0); // anything rendered as a number is rendered as a number
 const q = new URLSearchParams(location.search);
-const rpcOverride = q.get("rpc");
+// an RPC or relay named in the URL points the page at someone else's server: only with an explicit yes
+const override = (name, label) => { const v = q.get(name); if (!v) return null; try { return confirm(`This link asks the console to use a different ${label}:\n${v}\n\nOnly accept this if you put it there yourself.`) ? v : null; } catch { return null; } };
+const rpcOverride = override("rpc", "NEAR RPC node");
 
 const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
 const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
@@ -753,7 +767,7 @@ $("#profile").addEventListener("change", () => {
 });
 // Bursar's reading relay (relay/worker.js) holds the NEAR AI Cloud key server-side and forwards the bytes untouched.
 // ?relay=https://... overrides it (local testing). Empty until one is deployed.
-const RELAY = (q.get("relay") || "https://bursar-relay.pupazzipunkapi.workers.dev").replace(/\/$/, "");
+const RELAY = (override("relay", "reading relay") || "https://bursar-relay.pupazzipunkapi.workers.dev").replace(/\/$/, "");
 const useOwnKey = () => settings.readMode === "own";
 const aiBase = () => useOwnKey() ? AI_BASE : `${RELAY}/v1`;
 const settings = {};
@@ -761,7 +775,7 @@ function loadSettings() {
   for (const f of FIELDS) { try { const v = localStorage.getItem("bursar." + f); if (v !== null) $("#" + f).value = v; } catch {} }
   // The reading model moved from GLM (a reasoning model, 20 to 60 s a page) to Qwen3-VL (3 s), both in NEAR's TEE.
   try { if (localStorage.getItem("bursar.model") === "z-ai/glm-5.3-flash") { localStorage.setItem("bursar.model", "Qwen/Qwen3-VL-30B-A3B-Instruct"); $("#model").value = "Qwen/Qwen3-VL-30B-A3B-Instruct"; } } catch {}
-  if (q.get("treasury")) $("#treasury").value = q.get("treasury");
+  if (q.get("treasury") && (profiles.some((p) => p.treasury === q.get("treasury")) || !profiles.length)) $("#treasury").value = q.get("treasury");
   if (q.get("network")) $("#network").value = q.get("network");
   if (q.get("agent")) $("#agent").value = q.get("agent");
   for (const f of FIELDS) settings[f] = $("#" + f).value.trim();
@@ -970,7 +984,9 @@ Fields:
 - confidence: 0 to 1
 Return only the JSON object.`;
 // Checks on the reading that do not trust the model (same as app/src/ai.ts readingFlags): each failure is a flag, and a flag holds the payment for a person.
-function parseMoney(str) { const t = str.replace(/\s/g, ""); const d = t.lastIndexOf("."), c = t.lastIndexOf(","); let n; if (d >= 0 && c >= 0) n = d > c ? t.replace(/,/g, "") : t.replace(/\./g, "").replace(",", "."); else if (c >= 0) n = t.length - c === 3 ? t.replace(",", ".") : t.replace(/,/g, ""); else n = t; return Number(n); }
+/** Same rules as app/src/ai.ts parseMoney: both separators, the last is the decimal mark; one separator followed by exactly three digits is thousands. */
+function parseMoney(str) { const t = str.replace(/\s/g, ""); const d = t.lastIndexOf("."), c = t.lastIndexOf(","); const dots = t.split(".").length - 1, commas = t.split(",").length - 1; let n; if (d >= 0 && c >= 0) n = d > c ? t.replace(/,/g, "") : t.replace(/\./g, "").replace(",", "."); else if (c >= 0) n = commas === 1 && t.length - c !== 4 ? t.replace(",", ".") : t.replace(/,/g, ""); else if (d >= 0) n = dots === 1 && t.length - d !== 4 ? t : t.replace(/\./g, ""); else n = t; return Number(n); }
+const MAX_AMOUNT = 1e12; // no invoice is worth a trillion USDC: a runaway number is clipped, the contract blocks it as over the cap
 const CHAIN_ALIASES = { arbitrum: "arb", "arbitrum one": "arb", arb: "arb", ethereum: "eth", eth: "eth", mainnet: "eth", solana: "sol", sol: "sol", sui: "sui", base: "base", near: "near" };
 /** Same as app/src/ai.ts claimValues: the amount as printed wins over the model's decimal conversion, negative withholding is zero, chain names are the short ones. */
 function claimValues(ex) {
@@ -980,7 +996,7 @@ function claimValues(ex) {
     const m = String(decimal ?? "").match(/^(\d{1,3})\.(\d{3})(\d{2})$/);
     if (!Number.isFinite(fromPrinted) && m) n = Number(`${m[1]}${m[2]}.${m[3]}`);
     if (!Number.isFinite(n) || n < 0) n = 0;
-    return n.toFixed(2);
+    return Math.min(n, MAX_AMOUNT).toFixed(2);
   };
   let payout = ex.payout_seen;
   if (payout?.Chain) { const key = String(payout.Chain.chain ?? "").toLowerCase().trim(); payout = { Chain: { chain: CHAIN_ALIASES[key] ?? key, address: String(payout.Chain.address ?? "").trim() } }; }
@@ -1000,7 +1016,7 @@ function claimValues(ex) {
   } else if (deposit > 0 && amount > deposit && ex.deposit && !near(amount, deposit)) {
     // no subtotal to check against: trust the model's amount as what is due (it already subtracted the deposit when it filled the field)
   }
-  return { amount: Math.max(0, amount).toFixed(2), withholding, payout_seen: payout };
+  return { amount: Math.min(MAX_AMOUNT, Math.max(0, amount)).toFixed(2), withholding, payout_seen: payout };
 }
 const KNOWN_FLAGS = new Set(["new_payment_details", "urgency", "mismatched_contact", "handwritten_or_altered", "missing_invoice_number", "unreadable"]);
 /** Same as app/src/ai.ts claimFlags: the model's flags kept to the known names, minus the ones its own reading contradicts ("new_payment_details" with the registered payout, "missing_invoice_number" with a number), plus the client checks. */
@@ -1021,7 +1037,7 @@ function payoutProblem(p) {
   return null;
 }
 function readingFlags(ex, text) {
-  const flags = []; const amount = Number(ex.amount || "0");
+  const flags = []; const amount = claimValues(ex).amount; // the same number the claim carries, not the model's loose decimal
   const nums = (text.match(/\d[\d.,]*\d|\d/g) ?? []).map(parseMoney).filter(Number.isFinite);
   const money = (text.match(/\d[\d.,]*[.,]\d{2}(?![\d.,])/g) ?? []).map(parseMoney).filter(Number.isFinite);
   if (!text.trim()) flags.push("no_text_layer");
@@ -1153,12 +1169,20 @@ async function verifyReceipt(rf) {
     if (quoteBytes && RELAY) {
       try {
         // The same verifier the CLI uses, bundled for the browser by jsDelivr; the collateral comes through the relay (PCCS has no CORS).
-        const qvl = await import("https://esm.sh/@phala/dcap-qvl@0.7.0?bundle"); // one bundle: jsDelivr splits it and the ASN.1 schema registry breaks
-        const collateral = await qvl.getCollateral(`${RELAY}/pccs`, quoteBytes);
-        const vr = qvl.verify(quoteBytes, collateral, Math.floor(Date.now() / 1000));
-        const good = vr.status === "UpToDate" || vr.status === "SWHardeningNeeded";
-        add("quote_tcb", good, `quote verified against Intel collateral: TCB ${vr.status}${vr.advisory_ids?.length ? ` (${vr.advisory_ids.join(", ")})` : ""}`);
-      } catch (e) { add("quote_tcb", null, `skipped: collateral check failed to run here (${String(e.message || e).slice(0, 80)}); the CLI checks it`); }
+        let qvl = null;
+        try { qvl = await import("https://esm.sh/@phala/dcap-qvl@0.7.0?bundle"); } catch (e) { add("quote_tcb", null, `skipped: the quote verifier could not load (${String(e.message || e).slice(0, 60)}); the CLI checks it`); } // one bundle: jsDelivr splits it and the ASN.1 schema registry breaks
+        if (qvl) {
+          // no collateral is no verdict (the relay or Intel's service was unreachable): skipped, said so; a quote that fails against the collateral is a failure
+          let collateral = null;
+          try { collateral = await qvl.getCollateral(`${RELAY}/pccs`, quoteBytes); }
+          catch (e) { add("quote_tcb", null, `skipped: Intel collateral could not be fetched through the relay (${String(e.message || e).slice(0, 60)}); the CLI checks it`); }
+          if (collateral) {
+            const vr = qvl.verify(quoteBytes, collateral, Math.floor(Date.now() / 1000));
+            const good = vr.status === "UpToDate" || vr.status === "SWHardeningNeeded";
+            add("quote_tcb", good, `quote verified against Intel collateral: TCB ${vr.status}${vr.advisory_ids?.length ? ` (${vr.advisory_ids.join(", ")})` : ""}`);
+          }
+        }
+      } catch (e) { add("quote_tcb", false, `the quote does not verify against Intel collateral (${String(e.message || e).slice(0, 80)})`); }
     } else add("quote_tcb", null, "skipped in the browser: the CLI checks the quote against Intel collateral");
   }
   try {
@@ -1356,18 +1380,19 @@ const REASON = {
   hold_quota_reached: "the agent already put its daily quota of invoices in front of a person; try again tomorrow or ask the owner",
   dao_bond_missing: "the treasury account has no NEAR left for the DAO proposal bond; the owner tops it up",
   no_invoice_identity: "no invoice number and no file hash: nothing to tell it apart from another invoice",
+  settlement_closed: "the owner closed a cross-chain settlement that was never confirmed; the amount went back to the balance",
 };
-const HOLD = { payout_unconfirmed: "an operator recorded this vendor's payout: the owner confirms it before anything is paid there", many_invoices: "this vendor already had its daily allowance of invoices paid without a person", over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what your accountant set for this vendor" };
+const HOLD = { settlement_failed: "the cross-chain delivery was refunded to the treasury: approve again to retry, or cancel", payout_unconfirmed: "an operator recorded this vendor's payout: the owner confirms it before anything is paid there", many_invoices: "this vendor already had its daily allowance of invoices paid without a person", over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the invoice carries flags", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what your accountant set for this vendor" };
 const holdText = (r) => (r || "over_threshold").split("+").map((x) => HOLD[x] ?? x).join(", ");
 function why(p) {
   const parts = [];
   if (p.status === "Blocked") parts.push(REASON[p.reason] ?? p.reason);
-  if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : p.reason) : "cancelled by the owner");
-  if (p.status === "Approval") parts.push(`${holdText(p.reason)}: ${p.dao_proposal_id === null ? "waiting for a human (the DAO council, or the owner or an approver when there is no DAO)" : `waiting for the council, Sputnik proposal ${p.dao_proposal_id}`}`);
+  if (p.status === "Cancelled") parts.push(p.reason ? (p.reason.startsWith("dao_") ? `DAO answered ${p.reason.slice(4)}` : REASON[p.reason] ?? p.reason) : "cancelled by the owner");
+  if (p.status === "Approval") parts.push(`${holdText(p.reason)}: ${p.dao_proposal_id === null ? "waiting for a human (the DAO council, or the owner or an approver when there is no DAO)" : `waiting for the council, Sputnik proposal ${num(p.dao_proposal_id)}`}`);
   if (p.status === "Queued") parts.push("cross-chain vendor: waiting for the executor (NEAR Intents)");
   if (p.status === "Settling") parts.push(`USDC sent to Intents deposit ${p.deposit_address}`);
   if (p.status === "Settled") parts.push(`delivered, destination tx ${p.dest_tx}`);
-  if (p.status === "Paid") parts.push(p.dao_proposal_id !== null ? `approved by the council (Sputnik proposal ${p.dao_proposal_id}), then paid on NEAR` : p.reason ? `held (${holdText(p.reason)}), approved by a person, then paid on NEAR` : "paid on NEAR in the same transaction");
+  if (p.status === "Paid") parts.push(p.dao_proposal_id !== null ? `approved by the council (Sputnik proposal ${num(p.dao_proposal_id)}), then paid on NEAR` : p.reason ? `held (${holdText(p.reason)}), approved by a person, then paid on NEAR` : "paid on NEAR in the same transaction");
   if (BigInt(p.withheld || "0") > 0n) parts.push(`${usdc(BigInt(p.amount) - BigInt(p.withheld))} to the vendor, ${usdc(p.withheld)} kept back for the state as your accountant set`);
   if (p.flags?.length) parts.push(`model flags: ${p.flags.join(", ")}`);
   return esc(parts.join(". "));
@@ -1427,8 +1452,8 @@ function renderOverview() {
   const spentMonth = payments.filter((p) => ["Paid", "Settling", "Settled", "Queued"].includes(p.status) && monthOf(p.created_at) === month).reduce((a, p) => a + BigInt(p.amount), 0n);
   const budgets = vendors.reduce((a, [, v]) => a + BigInt(v.monthly_budget), 0n);
   $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (BigInt(stats.withheld_due || "0") > 0n ? stat("withheld for the state", usdc(stats.withheld_due), "warn") : "") + (stats.paused ? stat("paused", "yes", "bad") : "");
-  $("#ovAttention").innerHTML = held().slice(-5).reverse().map((p) => `<li><span class="st wait">#${p.id}</span><span><b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}: ${esc(holdText(p.reason))}</span></li>`).join("") || `<li><span class="st ok">OK</span><span>nothing waits for you</span></li>`;
-  $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${p.id}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
+  $("#ovAttention").innerHTML = held().slice(-5).reverse().map((p) => `<li><span class="st wait">#${num(p.id)}</span><span><b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}: ${esc(holdText(p.reason))}</span></li>`).join("") || `<li><span class="st ok">OK</span><span>nothing waits for you</span></li>`;
+  $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${num(p.id)}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
   $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
   const n = held().length; $("#attnBadge").textContent = n; $("#attnBadge").hidden = n === 0;
   const flight = state.inFlight ? BigInt(state.inFlight) : 0n;
@@ -1450,10 +1475,10 @@ $("#syncBalance").addEventListener("click", async () => {
 });
 function renderAttention() {
   const canApprove = canAct("approve") && !(state.roles?.[3]);
-  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${p.dao_proposal_id}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${p.id}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${p.id}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${p.id}" data-proposal="${p.dao_proposal_id}">Vote reject</button>` : dao() && p.dao_proposal_id === null && canAct("approve") ? `<span class="muted">no proposal yet (the day's quota, no NEAR for the bond, or a payout to confirm)</span> <button type="button" class="btn-ghost small act" data-act="openProposal" data-id="${p.id}">Open proposal</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
+  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${num(p.dao_proposal_id)}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${num(p.id)}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${num(p.id)}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${num(p.id)}" data-proposal="${num(p.dao_proposal_id)}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${num(p.id)}" data-proposal="${num(p.dao_proposal_id)}">Vote reject</button>` : dao() && p.dao_proposal_id === null && canAct("approve") ? `<span class="muted">no proposal yet (the day's quota, no NEAR for the bond, or a payout to confirm)</span> <button type="button" class="btn-ghost small act" data-act="openProposal" data-id="${num(p.id)}">Open proposal</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
   $("#attnDaoRow").hidden = !(dao() && !!settings.ownerKey && held().some((p) => p.dao_proposal_id !== null));
-  $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
-  $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${p.id}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
+  $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
+  $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}${p.status === "Settling" && settings.ownerKey ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-ghost small act" data-act="closeDelivered" data-id="${num(p.id)}">Mark delivered</button> <button type="button" class="btn-ghost small act" data-act="closeFailed" data-id="${num(p.id)}">Not delivered</button></div>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button.act"); if (!b) return;
@@ -1466,7 +1491,16 @@ document.addEventListener("click", async (e) => {
       if (act === "voteReject") { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id }, gasTgas: 100 }); } catch {} }
       await loadTreasury(); return;
     }
-    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "manage_vendors", removeOp: "owner", confirmPayout: "owner", orderBound: "owner", openProposal: "approve" }[act];
+    if (act === "closeDelivered" || act === "closeFailed") {
+      // the executor never confirmed this settlement: the owner says what happened, after checking the destination chain
+      if (!settings.ownerKey) throw new Error("only the owner closes a settlement");
+      const delivered = act === "closeDelivered";
+      if (!confirm(delivered ? `Payment ${id}: mark it settled? Only if you saw the USDC arrive at the vendor's address.` : `Payment ${id}: mark it not delivered? The amount goes back to the balance; press Sync balance if the refund has not arrived yet.`)) return;
+      await ownerCall("close_settlement", { id, delivered }, 60);
+      await loadTreasury(); return;
+    }
+    // activating a vendor, its tax id and its withholding are the owner's: the contract refuses them from an operator
+    const perm = { approve: "approve", cancel: "approve", closeOrder: "manage_orders", deactivate: "manage_vendors", activate: "owner", setTax: "owner", setWithhold: "owner", removeOp: "owner", confirmPayout: "owner", orderBound: "owner", openProposal: "approve" }[act];
     if (perm === "owner" ? !settings.ownerKey : !canAct(perm)) throw new Error("this needs the owner key, or an operator allowed to " + perm.replace("_", " "));
     const method = { approve: "approve_payment", cancel: "cancel_payment", closeOrder: "close_order", deactivate: "update_vendor", activate: "update_vendor", setTax: "update_vendor", setWithhold: "update_vendor", removeOp: "remove_operator", confirmPayout: "confirm_vendor_payout", orderBound: "set_order_bound", openProposal: "open_dao_proposal_for" }[act];
     let tax = null, bps = null;
@@ -1487,7 +1521,7 @@ $("#attnSync").addEventListener("click", async () => {
   } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; } finally { b.disabled = false; }
 });
 function renderVendors() {
-  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td>${v.country ? `${flagImg(v.country)}${esc(countryName(v.country))}` : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}${state.vstate?.[id]?.[0] ? ` <span class="pill Approval" title="an operator recorded this payout; the owner confirms it before anything is paid there">payout to confirm</span>${settings.ownerKey ? ` <button type="button" class="btn-ghost small act" data-act="confirmPayout" data-id="${esc(id)}">Confirm</button>` : ""}` : ""}${state.vstate?.[id]?.[1] ? ` <span class="pill Queued" title="its invoices must match an order, even now that every order is closed">order-bound</span>${settings.ownerKey ? ` <button type="button" class="btn-ghost small act" data-act="orderBound" data-id="${esc(id)}">Lift</button>` : ""}` : ""}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${v.withholding_bps || 0}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
+  $("#vendorsTable tbody").innerHTML = state.vendors.map(([id, v]) => { const b = BigInt(v.monthly_budget), sp = BigInt(v.spent_this_month); const pct = b > 0n ? Number(sp * 100n / b) : 0; const n = state.orders.filter((o) => o.vendor_id === id && o.active).length; return `<tr><td class="mono">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${v.tax_id ? esc(v.tax_id) : `<span class="muted">not checked</span>`}</td><td>${v.country ? `${flagImg(v.country)}${esc(countryName(v.country))}` : `<span class="muted">-</span>`}</td><td>${v.withholding_bps ? `${(v.withholding_bps / 100).toFixed(v.withholding_bps % 100 ? 2 : 0)}%` : `<span class="muted">none</span>`}</td><td class="mono">${esc(payoutText(v.payout))}</td><td>${b > 0n ? usdc(b) : `<span class="muted">none</span>`}</td><td>${usdc(sp)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}</td><td>${n}</td><td>${v.active ? `<span class="pill Paid">active</span>` : `<span class="pill Cancelled">inactive</span>`}${state.vstate?.[id]?.[0] ? ` <span class="pill Approval" title="an operator recorded this payout; the owner confirms it before anything is paid there">payout to confirm</span>${settings.ownerKey ? ` <button type="button" class="btn-ghost small act" data-act="confirmPayout" data-id="${esc(id)}">Confirm</button>` : ""}` : ""}${state.vstate?.[id]?.[1] ? ` <span class="pill Queued" title="its invoices must match an order, even now that every order is closed">order-bound</span>${settings.ownerKey ? ` <button type="button" class="btn-ghost small act" data-act="orderBound" data-id="${esc(id)}">Lift</button>` : ""}` : ""}</td><td class="acts">${canAct("manage_vendors") ? `<button type="button" class="btn-ghost small act" data-act="setTax" data-id="${esc(id)}" data-tax="${esc(v.tax_id || "")}">Identifier</button> <button type="button" class="btn-ghost small act" data-act="setWithhold" data-id="${esc(id)}" data-w="${num(v.withholding_bps)}">Withholding</button> <button type="button" class="btn-ghost small act" data-act="${v.active ? "deactivate" : "activate"}" data-id="${esc(id)}">${v.active ? "Deactivate" : "Activate"}</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no vendors yet</td></tr>`;
   const opts = state.vendors.map(([id, v]) => `<option value="${esc(id)}" data-sub="${esc(id)}">${esc(v.name)}</option>`).join("");
   $("#oVendor").innerHTML = opts; $("#rVendor").innerHTML = opts;
 }
@@ -1553,7 +1587,7 @@ $("#vAdd").addEventListener("click", async () => {
   } catch (e) { $("#vErr").textContent = e.message; $("#vErr").hidden = false; }
 });
 function renderOrders() {
-  $("#ordersTable tbody").innerHTML = state.orders.slice().reverse().map((o) => { const single = o.kind.Single; const rec = o.kind.Recurring; return `<tr><td>${o.id}</td><td class="mono">${esc(o.vendor_id)}</td><td>${single ? "purchase order" : "standing order"}</td><td class="mono">${esc(o.reference) || "<span class=muted>by vendor</span>"}</td><td>${esc(o.description)}</td><td>${single ? `${usdc(single.remaining)} left` : `${usdc(rec.amount_per_period)} every ${rec.period_days} days${rec.last_period ? `, used this period` : ""}`}</td><td>${o.active ? (single && BigInt(single.remaining) === 0n ? `<span class="pill Queued">spent</span>` : `<span class="pill Paid">open</span>`) : `<span class="pill Cancelled">closed</span>`}</td><td class="acts">${canAct("manage_orders") && o.active ? `<button type="button" class="btn-ghost small act" data-act="closeOrder" data-id="${o.id}">Close</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no orders yet: invoices are bound by the caps alone</td></tr>`;
+  $("#ordersTable tbody").innerHTML = state.orders.slice().reverse().map((o) => { const single = o.kind.Single; const rec = o.kind.Recurring; return `<tr><td>${num(o.id)}</td><td class="mono">${esc(o.vendor_id)}</td><td>${single ? "purchase order" : "standing order"}</td><td class="mono">${esc(o.reference) || "<span class=muted>by vendor</span>"}</td><td>${esc(o.description)}</td><td>${single ? `${usdc(single.remaining)} left` : `${usdc(rec.amount_per_period)} every ${num(rec.period_days)} days${rec.last_period ? `, used this period` : ""}`}</td><td>${o.active ? (single && BigInt(single.remaining) === 0n ? `<span class="pill Queued">spent</span>` : `<span class="pill Paid">open</span>`) : `<span class="pill Cancelled">closed</span>`}</td><td class="acts">${canAct("manage_orders") && o.active ? `<button type="button" class="btn-ghost small act" data-act="closeOrder" data-id="${num(o.id)}">Close</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">no orders yet: invoices are bound by the caps alone</td></tr>`;
 }
 $("#oAdd").addEventListener("click", async () => {
   $("#oErr").hidden = true;
@@ -1667,7 +1701,7 @@ function downloadCsv() {
 }
 let xlsxLib = null;
 async function downloadXlsx() {
-  if (!xlsxLib) { await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.onload = res; sc.onerror = () => rej(new Error("could not load the spreadsheet library from cdnjs; the CSV works without it")); document.head.appendChild(sc); }); xlsxLib = window.XLSX; }
+  if (!xlsxLib) { await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.integrity = "sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"; sc.crossOrigin = "anonymous"; sc.onload = res; sc.onerror = () => rej(new Error("could not load the spreadsheet library from cdnjs; the CSV works without it")); document.head.appendChild(sc); }); xlsxLib = window.XLSX; }
   const X = xlsxLib, { rows, byVendor, months, withholding, stats, company } = reportRows();
   const wb = X.utils.book_new();
   const sheet = (name, aoa, widths) => { const ws = X.utils.aoa_to_sheet(aoa); ws["!cols"] = widths.map((w) => ({ wch: w })); X.utils.book_append_sheet(wb, ws, name); };
@@ -1690,7 +1724,7 @@ function renderByVendor() {
     <span><span class="k">gross paid</span><span class="n mono">${v.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
     <span class="hide-sm"><span class="k">withheld${v.rate ? ` ${v.rate}%` : ""}</span><span class="n mono">${v.withheld ? v.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "-"}</span></span>
     <span class="hide-sm"><span class="k">net to vendor</span><span class="n mono">${v.net.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span></summary>
-    <div class="wrap"><table><thead><tr><th>#</th><th>date</th><th>invoice</th><th>gross</th><th>withheld</th><th>net</th><th>status</th><th>order</th></tr></thead><tbody>${v.rows.map((r) => `<tr><td class="mono">${r.id}</td><td class="mono">${r.date}</td><td class="mono">${esc(r.invoice)}</td><td class="mono">${r.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td><td class="mono">${r.withheld ? r.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td class="mono">${r.spend ? r.net.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td><span class="pill ${esc(r.status)}">${esc(r.status)}</span>${r.reason ? `<span class="mono muted"> ${esc(r.reason)}</span>` : ""}</td><td class="mono">${r.order === "" ? `<span class="muted">-</span>` : r.order}</td></tr>`).join("")}</tbody></table></div></details>`).join("") || `<p class="muted">no payments yet</p>`;
+    <div class="wrap"><table><thead><tr><th>#</th><th>date</th><th>invoice</th><th>gross</th><th>withheld</th><th>net</th><th>status</th><th>order</th></tr></thead><tbody>${v.rows.map((r) => `<tr><td class="mono">${num(r.id)}</td><td class="mono">${r.date}</td><td class="mono">${esc(r.invoice)}</td><td class="mono">${r.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td><td class="mono">${r.withheld ? r.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td class="mono">${r.spend ? r.net.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td><span class="pill ${esc(r.status)}">${esc(r.status)}</span>${r.reason ? `<span class="mono muted"> ${esc(r.reason)}</span>` : ""}</td><td class="mono">${r.order === "" ? `<span class="muted">-</span>` : r.order}</td></tr>`).join("")}</tbody></table></div></details>`).join("") || `<p class="muted">no payments yet</p>`;
 }
 function renderCharts() {
   const { byVendor, months, rows } = reportRows();
@@ -1734,8 +1768,16 @@ function renderSettings() {
   }
   $("#opsTable tbody").innerHTML = operators.map(([a, r]) => `<tr><td class="mono">${esc(a)}</td><td>${r.approve ? "yes" : "no"}</td><td>${r.manage_vendors ? "yes" : "no"}</td><td>${r.manage_orders ? "yes" : "no"}</td><td class="acts">${settings.ownerKey ? `<button type="button" class="btn-ghost small act" data-act="removeOp" data-id="${esc(a)}">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no operators: only the owner acts</td></tr>`;
 }
+// The key a wallet owner keeps in this browser can call these and nothing else; the rest (ownership, withdrawals, roles, code) needs the wallet itself.
+const WALLET_KEY_METHODS = ["add_vendor", "update_vendor", "confirm_vendor_payout", "set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "add_operator", "remove_operator", "mark_withholding_remitted", "set_paused", "reset_in_flight", "clear_dao"];
 async function ownerCall(method, args, gasTgas = 30) {
   if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
+  if (settings.ownerKeyKind === "wallet" && !WALLET_KEY_METHODS.includes(method)) {
+    // the browser key cannot do this on purpose: the wallet signs it, and shows it to the owner first
+    const wallet = await ownerWallet(settings.owner);
+    const r = await wallet.signAndSendTransaction({ network: settings.network, signerId: settings.owner, receiverId: settings.treasury, actions: [{ type: "FunctionCall", params: { methodName: method, args, gas: String(TGAS(gasTgas)), deposit: "0" } }] });
+    return { hash: r?.transaction?.hash || r?.transaction_outcome?.id || "" };
+  }
   return functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method, args, gasTgas });
 }
 const onErr = (e) => { $("#sErr").textContent = e.message; $("#sErr").hidden = false; };
@@ -1861,6 +1903,11 @@ function acceptInvite() {
   try {
     const inv = JSON.parse(unb64url(m[1]));
     if (inv.v !== 1 || !inv.treasury || !inv.account || !inv.key) throw new Error("malformed invite");
+    if (!/^[a-z0-9._-]{2,64}$/.test(inv.treasury) || !/^[a-z0-9._-]{2,64}$/.test(inv.account) || !/^ed25519:[1-9A-HJ-NP-Za-km-z]{80,96}$/.test(inv.key)) throw new Error("malformed invite");
+    const role = Object.keys(inv.role || {}).filter((k) => inv.role[k]).join(", ") || "no permissions";
+    if (!confirm(`Accept this invite?\n\nTreasury: ${inv.treasury}\nYou would sign in as: ${inv.account}\nAllowed to: ${role}\n\nOnly accept invites from people you know.`)) { history.replaceState(null, "", location.pathname); location.hash = "#start"; return false; }
+    const mine = profiles.find((p) => p.treasury === inv.treasury);
+    if (mine && (mine.ownerKey || mine.agentKey || mine.payerKey)) throw new Error(`this browser already holds keys for ${inv.treasury}; open the invite in another browser or profile`);
     for (const f of PROFILE_FIELDS) $("#" + f).value = "";
     $("#network").value = inv.network || "testnet"; $("#treasury").value = inv.treasury; $("#label").value = `${inv.label} as ${inv.account.split(".")[0]}`;
     $("#operator").value = inv.account; $("#operatorKey").value = inv.key; $("#operatorRole").value = JSON.stringify(inv.role || {});
@@ -2060,7 +2107,7 @@ async function connectWalletKey(treasury, owner, label, onDone) {
   try {
     const wallet = await ownerWallet(owner);
     const key = newKey();
-    await wallet.signAndSendTransaction({ network: settings.network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: key.pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: [] } } } }] });
+    await wallet.signAndSendTransaction({ network: settings.network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: key.pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: WALLET_KEY_METHODS } } } }] });
     $("#owner").value = owner; $("#ownerKey").value = key.secretKey; $("#ownerKeyKind").value = "wallet"; $("#label").value = label;
     saveSettings();
     try { localStorage.removeItem("bursar.walletOwner"); } catch {}
@@ -2094,12 +2141,12 @@ async function createTreasury(company) {
     const wo = walletOwner();
     if (ob && wo && ob.owner !== wo.account) { ob = null; try { localStorage.removeItem("bursar.onboarding"); } catch {} }
     if (!ob) {
-      ob = { root: `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`, rootKey: newKey(), treasuryKey: newKey(), agentKey: newKey(), owner: walletOwner()?.account || "" };
+      ob = { root: `bursar-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`, rootKey: newKey(), agentKey: newKey(), owner: walletOwner()?.account || "" };
       try { localStorage.setItem("bursar.onboarding", JSON.stringify(ob)); } catch {}
     }
-    const { root, rootKey, treasuryKey, agentKey } = ob;
+    const { root, rootKey, agentKey } = ob;
     const owner = ob.owner || root; // a wallet account signed in at login.html, or the throwaway root itself
-    rootKey.pub = keyOf(rootKey.secretKey).pub; treasuryKey.pub = keyOf(treasuryKey.secretKey).pub; agentKey.pub = keyOf(agentKey.secretKey).pub;
+    rootKey.pub = keyOf(rootKey.secretKey).pub; agentKey.pub = keyOf(agentKey.secretKey).pub;
     const treasury = `treasury.${root}`, agent = `agent.${root}`;
     const send = (receiverId, actions) => sendTx({ signerId: root, secretKey: rootKey.secretKey, receiverId, actions });
     if (await accountExists(root)) step("account", "ok", `${root} already exists; resuming`);
@@ -2118,8 +2165,9 @@ async function createTreasury(company) {
       step("contract", "wait", `deploying to ${treasury}`);
       // The payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below).
       const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
-      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5)), A.addFullAccessKey(treasuryKey.pub), A.deployContract(wasm), A.functionCall("new", init, 50)]);
-      step("contract", "ok", `policy contract live at ${treasury}`, t1.hash);
+      // no access key on the treasury, ever: the contract alone governs the account, and the owner upgrades it through `upgrade`
+      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5)), A.deployContract(wasm), A.functionCall("new", init, 50)]);
+      step("contract", "ok", `policy contract live at ${treasury}, with no access key`, t1.hash);
     }
     if (company?.name) {
       const have = await view(treasury, "get_company").catch(() => null);
@@ -2181,7 +2229,7 @@ async function createTreasury(company) {
     for (const [k, v] of Object.entries(fields)) $("#" + k).value = v;
     saveSettings();
     $("#createdKv").innerHTML = [["owner", owner], ["treasury", treasury], ["agent", agent], ...(wallet ? [["payer", root]] : [])].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
-    const keys = { network: "testnet", label, owner: wallet ? { account_id: owner, note: "your wallet account: the wallet adds its own key to the browser" } : { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, ...(wallet ? { payer: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey, note: "funds invites and the DAO" } } : {}), treasury: { account_id: treasury, public_key: treasuryKey.pubStr, private_key: treasuryKey.secretKey }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
+    const keys = { network: "testnet", label, owner: wallet ? { account_id: owner, note: "your wallet account: the wallet adds its own key to the browser" } : { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey }, ...(wallet ? { payer: { account_id: root, public_key: rootKey.pubStr, private_key: rootKey.secretKey, note: "funds invites and the DAO" } } : {}), treasury: { account_id: treasury, note: "no access key: the contract alone governs this account; the owner changes it through its methods" }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" } };
     $("#dlKeys").href = URL.createObjectURL(new Blob([JSON.stringify(keys, null, 2)], { type: "application/json" })); $("#dlKeys").download = `${root}-keys.json`;
     $("#createdGo").hidden = wallet; $("#createdWallet").hidden = !wallet; $("#createdNote").hidden = !wallet; $("#createdKeysNote").hidden = wallet;
     if (wallet) $("#createdWallet").onclick = () => connectWalletKey(treasury, owner, label, () => wizPane("wizReading"));
@@ -2264,7 +2312,7 @@ async function showDecision(id, hash, signedBy) {
   $("#decReason").textContent = reason; $("#decReason").hidden = !reason;
   $("#decWhy").innerHTML = p ? why(p) : "";
   $("#approveRow").hidden = !(status === "Approval" && p?.dao_proposal_id === null && canAct("approve"));
-  $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, ${signedBy}`;
+  $("#decTx").innerHTML = `transaction <a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener">${esc(hash)}</a>, ${esc(signedBy)}`;
   $("#decision").hidden = false;
   inboxAfterDecision(id, p, hash);
 }
@@ -2276,25 +2324,31 @@ async function showDecision(id, hash, signedBy) {
 // Nothing here can be opened without that wallet; the contract stores an opaque string (set_vault, owner only).
 const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "inboxToken", "label", "aiKey", "readMode"];
 const vaultKeys = {}; // treasury -> CryptoKey, for this tab
-/** The AES key for this treasury: from this tab, from this session, or from a fresh wallet signature (getWallet is called only then). */
-async function vaultKey(getWallet) {
-  const t = settings.treasury;
-  if (vaultKeys[t]) return vaultKeys[t];
+/** The AES key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature (getWallet is called only then).
+ *  `salt` is the vault's own random salt (v2 blobs): the signed message is unique to this vault, so a signature obtained
+ *  elsewhere for the same treasury opens nothing. Vaults written before salts (v1) are still read without one. */
+async function vaultKey(getWallet, salt = "") {
+  const t = settings.treasury, ck = salt ? `${t}:${salt}` : t;
+  if (vaultKeys[ck]) return vaultKeys[ck];
   let raw = null;
-  try { const h = sessionStorage.getItem(`bursar.vaultKey.${t}`); if (h) raw = fromHex(h); } catch {}
+  try { const h = sessionStorage.getItem(`bursar.vaultKey.${ck}`); if (h) raw = fromHex(h); } catch {}
   if (!raw) {
     const wallet = typeof getWallet === "function" ? await getWallet() : getWallet;
-    const nonce = new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(`bursar vault nonce ${t}`)));
-    const message = `Bursar vault key for ${t}. Signing this derives the key that locks this company's secrets in its own contract. It moves nothing.`;
+    const nonce = new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(`bursar vault nonce ${t}${salt ? " " + salt : ""}`)));
+    const message = salt
+      ? `Bursar vault key for ${t}, vault ${salt}. Signing this derives the key that locks this company's secrets in its own contract. It moves nothing.`
+      : `Bursar vault key for ${t}. Signing this derives the key that locks this company's secrets in its own contract. It moves nothing.`;
     const r = await wallet.signMessage({ network: settings.network, message, nonce, recipient: t });
     const sig = typeof r?.signature === "string" ? unb64(r.signature) : r?.signature ? new Uint8Array(r.signature) : null;
     if (!sig?.length) throw new Error("the wallet returned no signature");
-    const all = new Uint8Array(16 + sig.length); all.set(te.encode("bursar-vault-v1:")); all.set(sig, 16);
+    const tag = te.encode(salt ? `bursar-vault-v2:${salt}:` : "bursar-vault-v1:");
+    const all = new Uint8Array(tag.length + sig.length); all.set(tag); all.set(sig, tag.length);
     raw = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
-    try { sessionStorage.setItem(`bursar.vaultKey.${t}`, toHex(raw)); } catch {}
+    try { sessionStorage.setItem(`bursar.vaultKey.${ck}`, toHex(raw)); } catch {}
   }
-  return (vaultKeys[t] = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]));
+  return (vaultKeys[ck] = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]));
 }
+const vaultSalt = (blob) => (typeof blob === "string" && blob.startsWith("v2:") ? blob.split(":")[1] : "");
 function vaultPlain() { return JSON.stringify(Object.fromEntries(VAULT_FIELDS.map((f) => [f, settings[f] || ""]))); }
 const vaultHasSecrets = () => !!(settings.agentKey || settings.inboxToken || settings.payerKey || settings.aiKey);
 let vaultOnChain; // undefined: not read yet; null: none; false: contract too old; string: the blob
@@ -2307,10 +2361,12 @@ async function readVault() {
 async function vaultSave(wallet) {
   if (!settings.treasury || !settings.owner || !settings.ownerKey) throw new Error("only the owner, signed in, can write the vault");
   if (settings.ownerKeyKind !== "wallet") throw new Error("the vault is locked by a wallet signature: sign in with the wallet to use it");
-  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)));
+  // a vault keeps its salt across saves (the session key stays valid); a first vault, or a v1 one, gets a fresh salt
+  const salt = vaultSalt(vaultOnChain) || toHex(crypto.getRandomValues(new Uint8Array(16)));
+  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)), salt);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, te.encode(JSON.stringify({ v: 1, owner: settings.owner, saved_at: new Date().toISOString(), data: JSON.parse(vaultPlain()) }))));
-  const blob = `v1:${b64(iv)}:${b64(ct)}`;
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, te.encode(JSON.stringify({ v: 2, owner: settings.owner, saved_at: new Date().toISOString(), data: JSON.parse(vaultPlain()) }))));
+  const blob = `v2:${salt}:${b64(iv)}:${b64(ct)}`;
   await ownerCall("set_vault", { blob }, 20);
   vaultOnChain = blob;
   try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at: new Date().toISOString(), plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))) })); } catch {}
@@ -2319,13 +2375,15 @@ async function vaultSave(wallet) {
 async function vaultUnlock(wallet) {
   const blob = vaultOnChain || await readVault();
   if (!blob) throw new Error("this contract holds no vault yet");
-  const [, ivB, ctB] = blob.split(":");
-  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)));
+  const parts = blob.split(":"), salt = vaultSalt(blob), [ivB, ctB] = parts.slice(-2);
+  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)), salt);
   let plain;
   try { plain = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(ivB) }, key, unb64(ctB)))); }
   catch { throw new Error("the vault did not open with this wallet's signature: it was locked by another wallet key"); }
   for (const f of VAULT_FIELDS) if (plain.data?.[f] && !settings[f]) $("#" + f).value = plain.data[f];
   saveSettings();
+  // a vault from before salts is rewritten with one (a second wallet signature, once)
+  if (!salt) vaultSave(wallet).catch((e) => console.warn("vault:", e.message));
   try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at: plain.saved_at, plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))) })); } catch {}
   renderVault();
   return plain;
@@ -2361,7 +2419,8 @@ $("#vaultUnlock").addEventListener("click", () => withVaultButton($("#vaultUnloc
 $("#vaultUnlockTop").addEventListener("click", () => withVaultButton($("#vaultUnlockTop"), $("#vaultBarErr"), () => vaultUnlock()));
 /** After a change that created a secret (Telegram token, agent key), write the vault when this tab can do so without a prompt. */
 function vaultAutoSave() {
-  let known = !!vaultKeys[settings.treasury]; try { known = known || !!sessionStorage.getItem(`bursar.vaultKey.${settings.treasury}`); } catch {}
+  const salt = vaultSalt(vaultOnChain), ck = salt ? `${settings.treasury}:${salt}` : settings.treasury;
+  let known = !!vaultKeys[ck]; try { known = known || !!sessionStorage.getItem(`bursar.vaultKey.${ck}`); } catch {}
   if (settings.ownerKeyKind !== "wallet" || !settings.ownerKey || !known || vaultOnChain === false) return;
   vaultSave().catch((e) => console.warn("vault:", e.message));
 }

@@ -20,6 +20,7 @@ export const config = {
   agentAccount: env("BURSAR_AGENT", "agent.bursar.testnet"),
   executorAccount: env("BURSAR_EXECUTOR", "executor.bursar.testnet"),
   relayerAccount: process.env.BURSAR_RELAYER ?? "",
+  owner: process.env.BURSAR_OWNER ?? "",
   relayerUrl: process.env.BURSAR_RELAYER_URL ?? "http://127.0.0.1:8787",
 
   // USDC NEP-141 contract. Mainnet: native Circle USDC. Testnet: any FT you deploy or usdc.fakes.testnet.

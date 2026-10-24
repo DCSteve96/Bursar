@@ -1,7 +1,7 @@
 // The agent: watches the inbox, reads each invoice privately, and asks the policy contract for a payment.
-// It holds one function-call key that can only call `request_payment`. It never sees vendor payout records,
-// never chooses an address, and never holds NEAR (gas goes through the relayer).
-import { readdir, readFile, mkdir, rename, writeFile } from "node:fs/promises";
+// It holds one function-call key that can only call `request_payment`. It never sees vendor payout records and
+// never chooses an address. Gas goes through the relayer; the agent account keeps a little NEAR only for `--direct`.
+import { readdir, readFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
@@ -11,8 +11,11 @@ import { config } from "./config.js";
 import { readInvoice, readInvoiceOffline, attestationRef, type Extraction, type AiReceipt, type AttestationReport, claimFlags, claimValues, payoutProblem, clip, CLAIM_LIMITS } from "./ai.js";
 import type { Payout } from "./near.js";
 import { requestPaymentViaRelayer, requestPaymentDirect, view, toUnits, fmtUsdc, type InvoiceClaim, type Payment, type Vendor } from "./near.js";
+import { verifyReceipt } from "./verify.js";
 
 const exec = promisify(execFile);
+// poppler gets a minute per file and 32 MB of output: a crafted PDF cannot hang the agent or fill its memory
+const EXEC = { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 };
 
 export interface AgentResult {
   file: string;
@@ -24,30 +27,29 @@ export interface AgentResult {
 }
 
 /** Rasterize a PDF to PNG pages with pdftoppm (poppler). Falls back to text only if poppler is missing. */
-/** 110 dpi is plenty for a born-digital PDF; a scan with no text layer gets 160, the model has only the pixels there. */
-async function rasterize(pdfPath: string, dpi = 110): Promise<Buffer[]> {
+/** 110 dpi is plenty for a born-digital PDF; a scan with no text layer gets 160, the model has only the pixels there.
+ *  The pages live in a folder named by the file's hash (two files with the same name never share one) and are removed after reading. */
+async function rasterize(pdfPath: string, hash: string, dpi = 110): Promise<Buffer[]> {
+  const out = join(config.state, "pages", hash.slice(0, 32));
   try {
-    const out = join(config.state, "pages", basename(pdfPath, ".pdf"));
+    await rm(out, { recursive: true, force: true });
     await mkdir(out, { recursive: true });
     // a scan is sent as JPEG: a noisy page as PNG is several times larger and the relay caps a request at 2 MB
-    await exec("pdftoppm", [...(dpi > 110 ? ["-jpeg", "-jpegopt", "quality=85"] : ["-png"]), "-r", String(dpi), "-f", "1", "-l", "2", pdfPath, join(out, "p")]);
+    await exec("pdftoppm", [...(dpi > 110 ? ["-jpeg", "-jpegopt", "quality=85"] : ["-png"]), "-r", String(dpi), "-f", "1", "-l", "2", pdfPath, join(out, "p")], EXEC);
     const files = (await readdir(out)).filter((f) => /\.(png|jpg)$/.test(f)).sort();
-    return Promise.all(files.map((f) => readFile(join(out, f))));
+    return await Promise.all(files.map((f) => readFile(join(out, f))));
   } catch {
     return [];
+  } finally {
+    await rm(out, { recursive: true, force: true }).catch(() => {});
   }
 }
 
+/** The text layer, from poppler only: no JavaScript PDF parser runs on an untrusted file here. */
 async function pdfText(pdfPath: string): Promise<string> {
   try {
-    const { stdout } = await exec("pdftotext", ["-layout", pdfPath, "-"]);
-    if (stdout.trim()) return stdout;
-  } catch {}
-  try {
-    const mod: any = await import("pdf-parse");
-    const pdfParse = mod.default ?? mod;
-    const data = await pdfParse(await readFile(pdfPath));
-    return String(data.text ?? "");
+    const { stdout } = await exec("pdftotext", ["-layout", pdfPath, "-"], EXEC);
+    return stdout;
   } catch {
     return "";
   }
@@ -91,12 +93,18 @@ export async function readInvoiceFile(pdfPath: string, opts: { offline?: boolean
   if (opts.offline || !config.aiApiKey) {
     return { file: basename(pdfPath), invoiceHash, text, extraction: readInvoiceOffline(text), ai: null, attestationRef: `offline:${invoiceHash.slice(0, 16)}` };
   }
-  const pages = await rasterize(pdfPath, text.trim() ? 110 : 160);
+  const pages = await rasterize(pdfPath, invoiceHash, text.trim() ? 110 : 160);
   const r = await readInvoice(pages, text.trim() ? text : undefined);
-  return { file: basename(pdfPath), invoiceHash, text, extraction: r.extraction, ai: { receipt: r.receipt, attestation: r.attestation }, attestationRef: attestationRef(r.receipt) };
+  const read: ReadResult = { file: basename(pdfPath), invoiceHash, text, extraction: r.extraction, ai: { receipt: r.receipt, attestation: r.attestation }, attestationRef: attestationRef(r.receipt) };
+  // The gateway's receipt is checked here, before anything is claimed on it: exact bytes, signature, nonce, quote report_data.
+  // Collateral and the chain are left to `bursar verify`: the first needs Intel's servers, the second a payment that does not exist yet.
+  const v = await verifyReceipt({ claim: { attestation_ref: read.attestationRef, invoice_hash: invoiceHash }, ai: read.ai, payment: null }, { collateral: false, chain: false });
+  const bad = v.checks.filter((c) => c.ok === false);
+  if (bad.length) throw new Error(`the TEE receipt did not verify: ${bad.map((c) => `${c.name}: ${c.detail}`).join("; ").slice(0, 300)}`);
+  return read;
 }
 
-function buildClaim(read: ReadResult, vendorId: string, registeredPayout: Payout | null = null, fuzzy = false): InvoiceClaim {
+function buildClaim(read: ReadResult, vendorId: string, registeredPayout: Payout | null = null, fuzzy = false, extraFlags: string[] = []): InvoiceClaim {
   const { extraction, invoiceHash } = read;
   const values = claimValues(extraction);
   const payout = values.payout_seen;
@@ -108,7 +116,7 @@ function buildClaim(read: ReadResult, vendorId: string, registeredPayout: Payout
     invoice_hash: invoiceHash,
     payout_seen: "Chain" in payout && payout.Chain ? { Chain: { chain: clip(payout.Chain.chain, CLAIM_LIMITS.chain), address: clip(payout.Chain.address, CLAIM_LIMITS.address) } } : payout,
     attestation_ref: clip(read.attestationRef, CLAIM_LIMITS.attestation_ref),
-    flags: [...claimFlags(extraction, read.text, registeredPayout), ...(fuzzy ? ["vendor_ambiguous"] : [])].slice(0, CLAIM_LIMITS.flags).map((f) => clip(f, CLAIM_LIMITS.flag)),
+    flags: [...claimFlags(extraction, read.text, registeredPayout), ...(fuzzy ? ["vendor_ambiguous"] : []), ...extraFlags].slice(0, CLAIM_LIMITS.flags).map((f) => clip(f, CLAIM_LIMITS.flag)),
     order_ref: extraction.order_ref?.trim() ? clip(extraction.order_ref.trim(), CLAIM_LIMITS.order_ref) : null,
     vendor_tax_id: clip((extraction.vendor_tax_id || "").trim(), CLAIM_LIMITS.tax_id),
     buyer_tax_id: clip((extraction.buyer_tax_id || "").trim(), CLAIM_LIMITS.tax_id),
@@ -130,13 +138,17 @@ export async function readOnly(pdfPath: string, opts: { offline?: boolean } = {}
   return { read, claim, receiptPath };
 }
 
-export async function processInvoice(pdfPath: string, opts: { offline?: boolean; direct?: boolean } = {}): Promise<AgentResult> {
+/** `expectedVendor`: the vendor id the invoice's channel is for (a vendor's Telegram chat). An invoice naming another vendor is
+ *  still submitted, flagged `chat_vendor_mismatch`, so the contract holds it for a person instead of paying the named vendor. */
+export async function processInvoice(pdfPath: string, opts: { offline?: boolean; direct?: boolean; expectedVendor?: string } = {}): Promise<AgentResult> {
   const read = await readInvoiceFile(pdfPath, opts);
   const { extraction } = read;
   const receipt = read.ai;
   const vendors = await view<[string, Vendor][]>("list_vendors");
   const { id: vendorId, fuzzy } = matchVendorWith(extraction, vendors);
-  const claim = buildClaim(read, vendorId, vendors.find(([id]) => id === vendorId)?.[1].payout ?? null, fuzzy);
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const mismatch = opts.expectedVendor && norm(opts.expectedVendor) !== norm(vendorId);
+  const claim = buildClaim(read, vendorId, vendors.find(([id]) => id === vendorId)?.[1].payout ?? null, fuzzy, mismatch ? ["chat_vendor_mismatch"] : []);
   // An abbreviated or garbled payout would not even deserialize in the contract: a person has to read this one.
   const problem = payoutProblem(claim.payout_seen);
   if (problem) throw new Error(`not submitted: ${problem}; a person has to read this invoice`);
@@ -187,7 +199,7 @@ async function telegramTick(opts: { offline?: boolean; direct?: boolean }) {
         telegramTries.set(it.id, job);
       }
       job.tries++;
-      const r = await processInvoice(job.path, opts);
+      const r = await processInvoice(job.path, { ...opts, expectedVendor: it.vendor || undefined });
       const p = r.payment;
       const vendorName = (await view<[string, Vendor][]>("list_vendors").catch(() => [] as [string, Vendor][])).find(([id]) => id === r.claim.vendor_id)?.[1].name || r.claim.vendor_id;
       console.log(`[agent] telegram ${it.name} -> payment #${r.paymentId} ${p?.status}${p?.reason ? " (" + p.reason + ")" : ""}`);
@@ -226,12 +238,21 @@ export async function watchInbox(opts: { offline?: boolean; direct?: boolean; on
         const n = (failures.get(f) ?? 0) + 1;
         failures.set(f, n);
         console.error(`[agent] ${f} failed (${n}/3):`, (e as Error).message);
-        if (n >= 3) { await mkdir(parked, { recursive: true }); await rename(p, join(parked, f)); failures.delete(f); console.error(`[agent] ${f} parked in inbox/failed`); }
+        if (n >= 3) {
+          failures.delete(f);
+          try { await mkdir(parked, { recursive: true }); await rename(p, join(parked, f)); console.error(`[agent] ${f} parked in inbox/failed`); }
+          catch (e2) { console.error(`[agent] could not park ${f}:`, (e2 as Error).message); }
+        }
       }
     }
   };
   await tick();
   if (opts.once) return;
-  setInterval(tick, 3000);
+  // one pass at a time: the next starts three seconds after the previous one ends, so a slow gateway never piles up ticks
+  const loop = async () => {
+    try { await tick(); } catch (e) { console.error("[agent] tick:", (e as Error).message); }
+    setTimeout(loop, 3000);
+  };
+  setTimeout(loop, 3000);
   console.log(`[agent] watching ${inbox}${relayOn() ? ` and the Telegram inbox on ${config.relay}` : ""}`);
 }

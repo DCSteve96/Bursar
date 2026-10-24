@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { processInvoice } from "./agent.js";
 import { view, call, fmtUsdc, txHash, type Payment, type Vendor } from "./near.js";
 import { config } from "./config.js";
@@ -19,7 +19,11 @@ export async function runMcp() {
     path: z.string().describe("Path to the invoice PDF"),
     offline: z.boolean().optional().describe("Skip NEAR AI and use the offline parser (demo invoices only)"),
   }, async ({ path, offline }) => {
-    const r = await processInvoice(resolve(path), { offline, direct: !config.relayerAccount && !process.env.BURSAR_RELAYER_URL });
+    // the assistant names files, not arbitrary paths: a PDF under the inbox folder or the working directory
+    const full = resolve(path);
+    const roots = [resolve(config.inbox), resolve(process.cwd())];
+    if (!/\.pdf$/i.test(full) || !roots.some((r) => full === r || full.startsWith(r + sep))) throw new Error(`submit_invoice takes a .pdf under ${roots.join(" or ")}`);
+    const r = await processInvoice(full, { offline, direct: !config.relayerAccount && !process.env.BURSAR_RELAYER_URL });
     return text({ paymentId: r.paymentId, status: r.payment?.status, reason: r.payment?.reason, amount: fmtUsdc(r.claim.amount), vendor: r.claim.vendor_id, flags: r.claim.flags, tx: r.txHash });
   });
 
@@ -91,8 +95,9 @@ export async function runMcp() {
     return text(await syncApprovals());
   });
 
-  server.tool("owner_cancel_payment", "Owner only: cancel a Queued or Approval payment. Requires the owner key in the local keystore.", { id: z.number() }, async ({ id }) => {
-    const r = await call(config.treasury, "cancel_payment", { id }, 30);
+  server.tool("owner_cancel_payment", "Owner only: cancel a Queued or Approval payment. Requires BURSAR_OWNER and the owner key in the local keystore.", { id: z.number() }, async ({ id }) => {
+    if (!config.owner) throw new Error("BURSAR_OWNER is not set");
+    const r = await call(config.owner, "cancel_payment", { id }, 30);
     return text({ tx: txHash(r) });
   });
 

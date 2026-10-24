@@ -158,7 +158,9 @@ export function fmtUsdc(units: string | number | bigint): string {
 }
 
 export function toUnits(amount: string | number): string {
-  const [w, f = ""] = String(amount).replace(/,/g, "").split(".");
+  const s = String(amount).replace(/,/g, "");
+  if (!/^\d{1,15}(\.\d+)?$/.test(s)) throw new Error(`not a USDC amount: ${String(amount).slice(0, 40)}`);
+  const [w, f = ""] = s.split(".");
   const frac = (f + "0".repeat(config.usdcDecimals)).slice(0, config.usdcDecimals);
   return (BigInt(w || "0") * BigInt(10) ** BigInt(config.usdcDecimals) + BigInt(frac)).toString();
 }
