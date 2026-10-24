@@ -33,7 +33,7 @@ Every company pays invoices. The two things that go wrong are boring and expensi
 ```mermaid
 flowchart LR
     V["Vendor sends a PDF<br>file drop, Telegram, MCP"] --> A
-    subgraph enclave["NEAR AI Cloud, trusted execution environment"]
+    subgraph enclave["NEAR AI Cloud, TEE"]
         A["The agent reads it<br>attestation before, signed receipt after"]
     end
     A -- "request_payment<br>one function-call key, no NEAR" --> C
