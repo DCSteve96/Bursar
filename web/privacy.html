@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar privacy notice</title>
+<meta name="description" content="What the Bursar Telegram bot and the Bursar console keep, where, for how long, and what they never see.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: var(--paper); color: var(--fg-light); color-scheme: light; }
+  .bar { color: var(--fg-dark); }
+  .doc { max-width: 76ch; margin: 0 auto; padding: 48px max(16px, env(safe-area-inset-left, 0px)) 96px; }
+  .doc h1 { font-size: clamp(32px, 5vw, 44px); letter-spacing: -0.02em; line-height: 1.05; margin: 0 0 12px; }
+  .doc h2 { font-size: 22px; letter-spacing: -0.01em; margin: 36px 0 8px; }
+  .doc p, .doc li { font-size: 16px; line-height: 1.6; }
+  .doc ul { padding-left: 22px; margin: 12px 0; }
+  .doc li { margin: 6px 0; }
+  .doc .eyebrow { color: var(--paid-light); }
+  .doc .lead { color: var(--mute-light); font-size: 18px; }
+  .doc code { font: 500 0.92em var(--mono); background: var(--bone); padding: 1px 5px; border-radius: 3px; }
+  .doc a { color: inherit; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="in">
+  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
+  <nav><a href="explorer">Explorer</a><a href="docs">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login" class="btn btn-ghost">Log in</a></nav>
+</div></header>
+
+<main class="doc">
+  <div class="eyebrow">[ PRIVACY ]</div>
+  <h1>What Bursar keeps, and what it never sees.</h1>
+  <p class="lead">This notice covers the Bursar Telegram bot and the Bursar console. Bursar is software, not a payment service: funds stay in each company's own NEAR contract, with the company's keys.</p>
+
+  <h2>The Telegram bot</h2>
+  <p>The bot is an inbox. A company connects a chat to its treasury from the console; from then on, PDF invoices posted in that chat are listed in the company's console, and the company's approver, when one is connected, receives them with Approve and Reject buttons.</p>
+  <p>For each invoice the bot keeps, on Cloudflare's key-value storage in the relay the company uses:</p>
+  <ul>
+    <li>the sender's Telegram name and username, the chat id and its title;</li>
+    <li>the file name, its size, the caption, the time it arrived;</li>
+    <li>Telegram's file reference (<code>file_id</code>): the PDF itself stays on Telegram's servers and is fetched only when a person presses Read, or when the company's own agent processes an invoice the approver accepted;</li>
+    <li>for an approver's chat, the Telegram user id of the person who connected it, so that nobody else can decide in that chat;</li>
+    <li>the state of the invoice (waiting, approved, being read) and the name of the person who approved or rejected it.</li>
+  </ul>
+  <p>An entry is deleted when the invoice is decided, discarded or rejected, and the inbox holds at most the last 50 entries per treasury. Messages the bot sends (received, approved, paid, held, declined) are ordinary Telegram messages and live in the chat. The bot reads text only to recognise <code>/start</code>, <code>/help</code>, <code>/privacy</code> and a yes or no from the approver; everything else is answered with a hint and not stored. Photos and non-PDF files are not read.</p>
+  <p>The bot holds no NEAR key and cannot move funds. Approving on Telegram marks the invoice for the company's own agent, which runs on the company's machine with a key limited to asking the contract; the contract decides within limits the company set.</p>
+
+  <h2>The reading</h2>
+  <p>When an invoice is read, its pages are sent, as images and text, to a model running inside NEAR AI Cloud's trusted execution environment. The hosted relay forwards the bytes without storing them and keeps daily counters per network address to limit abuse. The enclave returns the extracted fields and a signed receipt; the contract records only the vendor id, the invoice number, the amount, the due date, a hash of the file, the flags and the receipt reference. The PDF is never written on chain.</p>
+
+  <h2>The console</h2>
+  <p>The console is a web page. Keys, labels and the inbox token stay in the browser's local storage, or in a vault encrypted with a key only the owner's wallet can derive and stored on the company's own contract. The console talks to NEAR RPC nodes, to the relay and, when the company uses its own NEAR AI Cloud key, straight to the enclave. It sets no tracking cookies.</p>
+
+  <h2>Your rights</h2>
+  <p>Disconnect a chat from the console's Settings to stop the bot reading it; its inbox entries are deleted with the next decision or discard. What is on chain (the fields above) is public and permanent by the nature of the blockchain, which is why the PDF, the names and the bank details are not written there. Questions: open an issue on the <a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">repository</a>.</p>
+  <p class="lead">Last updated 22 October 2026.</p>
+</main>
+<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional. <a href="privacy" style="color:inherit">Privacy</a></footer>
+</body>
+</html>

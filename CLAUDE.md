@@ -4,7 +4,7 @@ Leggi questo file per intero prima di toccare qualsiasi cosa. Poi leggi `HANDOFF
 
 ## Cos'è
 
-Bursar è un tesoriere AI per piccole aziende: legge fatture PDF in un TEE (NEAR AI Cloud), chiede a un contratto NEAR di pagarle, e il contratto decide dentro limiti che l'AI non può cambiare. Progetto per il NEAR HACKATHON (1-14 novembre 2026). Tracce: `realworld`, `business`, `privacy`, `security`.
+Bursar è un tesoriere AI per aziende di ogni dimensione, piccole e grandi: legge fatture PDF in un TEE (NEAR AI Cloud), chiede a un contratto NEAR di pagarle, e il contratto decide dentro limiti che l'AI non può cambiare. Progetto per il NEAR HACKATHON (1-14 novembre 2026). Tracce: `realworld`, `business`, `privacy`, `security`.
 
 Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb executor moves the money.**
 
@@ -17,7 +17,8 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 5. **Niente segreti nella repo.** Chiavi solo in `~/.near-credentials` o in variabili d'ambiente. `.env.*` è in `.gitignore`. Se Stefano incolla una chiave in chat, va considerata compromessa e ruotata.
 6. **Niente mainnet senza conferma esplicita di Stefano**, e niente transazioni firmate con le sue chiavi senza che lo chieda lui per quella specifica azione.
 7. **Git**: commit e push li fa Claude Code solo se Stefano lo ha autorizzato in questa repo. In dubbio, chiedi. Messaggi di commit in inglese, brevi, al presente.
-8. **Submission**: una sola, non modificabile. Mai inviare il POST a `nearhackathon.com/api/applications` senza che Stefano abbia confermato il payload completo stampato a schermo.
+8. **Mercato internazionale, aziende di ogni dimensione.** Bursar parla a piccole e grandi aziende ovunque, non all'Italia: testi, esempi, placeholder, roadmap, post e `idea` della submission in chiave internazionale. Le funzioni di un paese (ritenuta, fatturazione elettronica) restano configurabili e in secondo piano, mai in primo.
+9. **Submission**: una sola, non modificabile. Mai inviare il POST a `nearhackathon.com/api/applications` senza che Stefano abbia confermato il payload completo stampato a schermo.
 
 ## Stile dei testi (post, README, messaggi)
 
@@ -29,21 +30,21 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 ## Struttura
 
 ```
-contracts/policy      contratto di policy, Rust, near-sdk 5 (21 unit test)
+contracts/policy      contratto di policy, Rust, near-sdk 5 (53 unit test); build-hashes.py genera web/contracts/builds.json, da rilanciare dopo ogni ricompilazione del wasm
 contracts/test-usdc   NEP-141 usa e getta per testnet, con mint aperto
-contracts/registry    registro pubblico delle tesorerie (explorer e login lo leggono, 4 unit test)
+contracts/registry    registro pubblico delle tesorerie (explorer e login lo leggono, 5 unit test)
 app/src/              TypeScript, near-api-js 7
   config.ts           tutta la configurazione da env; asset id USDC per chain (Intents)
   near.ts             helper NEAR, meta transaction (NEP-366)
   ai.ts               NEAR AI Cloud: attestazione prima, estrazione JSON, firma della risposta; parser offline per i PDF di esempio
-  agent.ts            watcher dell'inbox, PDF -> PNG (pdftoppm) e testo (pdftotext), claim -> request_payment
+  agent.ts            watcher dell'inbox (cartella e fatture approvate da Telegram via relay), PDF -> PNG (pdftoppm) e testo (pdftotext), claim -> request_payment
   relayer.ts          relayer NEP-366 che accetta solo request_payment dall'agente
   executor.ts         NEAR Intents 1-Click per i fornitori su altre chain (solo mainnet)
   mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
   setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
   cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
-web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), app.html (console: onboarding, lettura TEE, verifica, request_payment dal browser), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
-relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri)
+web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), console.html (la console: onboarding, lettura TEE, verifica, request_payment dal browser; app.html rimanda lì), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
+relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri), inbox Telegram e approvazioni da Telegram (bottoni, take/outcome per l'agente)
 invoices/             make_invoices.py e 9 PDF di esempio (5 e 6 per la console, 7 e 8 per i tax id, 9 per la ritenuta)
 ```
 

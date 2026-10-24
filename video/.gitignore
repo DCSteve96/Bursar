@@ -1,0 +1,7 @@
+node_modules
+out
+.agents
+.claude
+public/*.webm
+public/*.mp4
+public/*.mp3

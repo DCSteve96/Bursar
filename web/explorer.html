@@ -77,13 +77,21 @@ async function view(contract, method, args = {}) {
   if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
 }
+// A registry entry can point at any account. Only a contract whose code is a Bursar policy build is a treasury:
+// the code hash the RPC reports must be in contracts/builds.json (every build ever shipped, by date and commit).
+let KNOWN_BUILDS = null;
+async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
+async function codeHash(account) {
+  const r = await fetch(q.get("rpc") || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "view_account", finality: "final", account_id: account } }) });
+  const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
+}
 const usdc = (u) => { const n = BigInt(u); const d = 10n ** BigInt(DEC); return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(DEC, "0").slice(0, 2)} USDC`; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const ago = (ms) => { const s = Math.max(0, (Date.now() - ms) / 1000); if (s < 90) return "just now"; if (s < 5400) return `${Math.round(s / 60)} min ago`; if (s < 172800) return `${Math.round(s / 3600)} h ago`; return `${Math.round(s / 86400)} d ago`; };
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
 const ms = (ns) => Math.floor(Number(ns) / 1e6); // payments carry nanoseconds; the registry milliseconds
 const WHAT = { Paid: "under the caps, paid on NEAR in one transaction", Queued: "cross-chain vendor, waiting for the executor", Approval: "held for a person", Blocked: "", Cancelled: "cancelled after the DAO's answer", Settled: "delivered on the vendor's chain", Settling: "USDC on its way through NEAR Intents" };
-const REASON = { payout_changed: "the invoice asks for a different wallet than the one on record", duplicate_invoice: "same vendor and invoice number already accepted", unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner", transfer_failed: "token transfer failed, balance restored", dao_proposal_failed: "the DAO refused the proposal", over_payment_cap: "above the per-payment cap", over_daily_cap: "daily cap exceeded", over_monthly_budget: "monthly budget exceeded", insufficient_treasury: "not enough USDC in the treasury", over_threshold: "above the threshold", no_order: "no purchase order or standing order covers it", flagged: "the reading carries flags", identity_mismatch: "the vendor's tax id is not the recorded one", buyer_mismatch: "not addressed to the company's tax id", withholding_mismatch: "the withholding shown differs from what the accountant set" };
+const REASON = { payout_unconfirmed: "payout recorded by an operator, waiting for the owner", many_invoices: "daily allowance of invoices paid without a person used up", hold_quota_reached: "the agent's daily quota of holds is spent", dao_bond_missing: "no NEAR for the DAO bond", no_invoice_identity: "no invoice number and no file hash", payout_changed: "the invoice asks for a different wallet than the one on record", duplicate_invoice: "same vendor and invoice number already accepted", unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner", transfer_failed: "token transfer failed, balance restored", dao_proposal_failed: "the DAO refused the proposal", over_payment_cap: "above the per-payment cap", over_daily_cap: "daily cap exceeded", over_monthly_budget: "monthly budget exceeded", insufficient_treasury: "not enough USDC in the treasury", over_threshold: "above the threshold", no_order: "no purchase order or standing order covers it", flagged: "the reading carries flags", identity_mismatch: "the vendor's tax id is not the recorded one", buyer_mismatch: "not addressed to the company's tax id", withholding_mismatch: "the withholding shown differs from what the accountant set" };
 const held = (p) => p.status === "Approval";
 const whatOf = (p) => p.status === "Blocked" ? (REASON[p.reason] ?? p.reason) : p.status === "Approval" ? `held: ${(p.reason || "").split("+").map((r) => REASON[r.trim()] ?? r.trim()).filter(Boolean).join("; ") || "waiting for a person"}` : WHAT[p.status] ?? "";
 function setNet(n) {
@@ -105,11 +113,13 @@ async function load() {
     if (!reg) throw new Error(`no registry on ${network} yet: Bursar runs on testnet for the hackathon`);
     const entries = [];
     for (let from = 0; ; from += 100) { const page = await view(reg, "list", { from, limit: 100 }); entries.push(...page); if (page.length < 100) break; }
+    const builds = await knownBuilds(); let unknownCode = 0;
     const companies = (await Promise.all(entries.map(async ([treasury, e]) => {
       try {
-        const [roles, stats, payments] = await Promise.all([view(treasury, "get_roles"), view(treasury, "get_stats"), view(treasury, "list_payments", { from: 0, limit: 200 })]);
+        const [hash, roles, stats, payments] = await Promise.all([codeHash(treasury), view(treasury, "get_roles"), view(treasury, "get_stats"), view(treasury, "list_payments", { from: 0, limit: 200 })]);
+        if (!builds[hash]) { unknownCode++; return null; } // not a Bursar policy contract, whatever the registry says: dropped
         if (roles[0] !== e.owner) return null; // the registry entry does not match the contract: dropped
-        return { treasury, since: e.registered_at, stats, payments };
+        return { treasury, since: e.registered_at, stats, payments, build: builds[hash] };
       } catch { return null; }
     }))).filter(Boolean);
     const all = companies.flatMap((c) => c.payments.map((p) => ({ ...p, treasury: c.treasury, updated_at: ms(p.updated_at), created_at: ms(p.created_at) })));
@@ -133,7 +143,7 @@ async function load() {
       const lastP = c.payments[c.payments.length - 1];
       return `<tr><td class="mono id"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="s ${esc(lastP.status)}">${esc(lastP.status)}</span> <span class="mono">${usdc(lastP.amount)}</span>` : `<span class="muted">none yet</span>`}</td><td><a href="dashboard?network=${network}&treasury=${encodeURIComponent(c.treasury)}">dashboard</a></td></tr>`;
     }).join("") || `<tr><td colspan="6" class="muted">no companies registered yet</td></tr>`;
-    $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
+    $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts (code hash of a known Bursar build, owner as recorded)${unknownCode ? `, ${unknownCode} dropped: not a Bursar contract` : ""}. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
   } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; $("#deck").innerHTML = `<div class="dec muted">${esc(e.message)}</div>`; $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
 }
 setNet(network);

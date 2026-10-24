@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { processInvoice } from "./agent.js";
 import { view, call, fmtUsdc, txHash, type Payment, type Vendor } from "./near.js";
 import { config } from "./config.js";
@@ -19,7 +19,11 @@ export async function runMcp() {
     path: z.string().describe("Path to the invoice PDF"),
     offline: z.boolean().optional().describe("Skip NEAR AI and use the offline parser (demo invoices only)"),
   }, async ({ path, offline }) => {
-    const r = await processInvoice(resolve(path), { offline, direct: !config.relayerAccount && !process.env.BURSAR_RELAYER_URL });
+    // the assistant names files, not arbitrary paths: a PDF under the inbox folder or the working directory
+    const full = resolve(path);
+    const roots = [resolve(config.inbox), resolve(process.cwd())];
+    if (!/\.pdf$/i.test(full) || !roots.some((r) => full === r || full.startsWith(r + sep))) throw new Error(`submit_invoice takes a .pdf under ${roots.join(" or ")}`);
+    const r = await processInvoice(full, { offline, direct: !config.relayerAccount && !process.env.BURSAR_RELAYER_URL });
     return text({ paymentId: r.paymentId, status: r.payment?.status, reason: r.payment?.reason, amount: fmtUsdc(r.claim.amount), vendor: r.claim.vendor_id, flags: r.claim.flags, tx: r.txHash });
   });
 
@@ -40,7 +44,7 @@ export async function runMcp() {
     const why: Record<string, string> = {
       Paid: "The vendor is on NEAR, the amount is under every cap, so the contract paid it in the same transaction.",
       Queued: "Policy passed. The vendor is on another chain, so the executor will route USDC through NEAR Intents. The contract will only release funds to a quote whose recipient equals the vendor's recorded payout.",
-      Approval: `Policy passed the hard checks but a human decides: ${(p.reason ?? "over_threshold").split("+").map((r) => ({ over_threshold: "the amount is at or above the approval threshold", no_order: "no purchase order or standing order covers this invoice", flagged: "the invoice carries flags (from the model, or from the checks on its reading)", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what the company's accountant set for this vendor" } as Record<string, string>)[r] ?? r).join("; ")}. ${p.dao_proposal_id !== null ? `Sputnik DAO proposal ${p.dao_proposal_id} was opened by the contract; a council member approves it in Trezu.` : "The owner or an approver settles it with approve_payment, or cancels it."}`,
+      Approval: `Policy passed the hard checks but a human decides: ${(p.reason ?? "over_threshold").split("+").map((r) => ({ payout_unconfirmed: "an operator recorded the vendor's payout and the owner has not confirmed it", many_invoices: "the vendor already had its daily allowance of invoices paid without a person", over_threshold: "the amount is at or above the approval threshold", no_order: "no purchase order or standing order covers this invoice", flagged: "the invoice carries flags (from the model, or from the checks on its reading)", identity_mismatch: "the vendor's tax id on the invoice is not the one recorded for this vendor", buyer_mismatch: "the invoice is not addressed to this company's tax id", withholding_mismatch: "the withholding the invoice shows differs from what the company's accountant set for this vendor" } as Record<string, string>)[r] ?? r).join("; ")}. ${p.dao_proposal_id !== null ? `Sputnik DAO proposal ${p.dao_proposal_id} was opened by the contract; a council member approves it in Trezu.` : "The owner or an approver settles it with approve_payment, or cancels it."}`,
       Settling: "USDC left the treasury towards the Intents deposit address. Waiting for the destination chain transaction.",
       Settled: "Delivered on the destination chain.",
       Blocked: `Refused by policy: ${p.reason}.` + (({
@@ -53,6 +57,9 @@ export async function runMcp() {
         insufficient_treasury: " Not enough USDC in the treasury.",
         dao_proposal_failed: " The DAO refused to open the proposal (missing bond or wrong DAO account). Budget was released; fix the DAO and resubmit.",
         transfer_failed: " The USDC transfer failed (vendor not registered on the token?). The balance was restored; nothing left the treasury.",
+        hold_quota_reached: " The agent already put its daily quota of invoices in front of a person; the owner is not quota'd.",
+        dao_bond_missing: " The treasury account has no NEAR left for the DAO proposal bond; the owner tops it up.",
+        no_invoice_identity: " Neither an invoice number nor a file hash: nothing tells this invoice apart from another.",
       } as Record<string, string | undefined>)[p.reason ?? ""] ?? ""),
       Cancelled: p.reason?.startsWith("dao_") ? `The DAO answered ${p.reason.slice(4)} on proposal ${p.dao_proposal_id}; the contract cancelled the payment and released its budget.` : "Cancelled by the owner.",
     };
@@ -88,8 +95,9 @@ export async function runMcp() {
     return text(await syncApprovals());
   });
 
-  server.tool("owner_cancel_payment", "Owner only: cancel a Queued or Approval payment. Requires the owner key in the local keystore.", { id: z.number() }, async ({ id }) => {
-    const r = await call(config.treasury, "cancel_payment", { id }, 30);
+  server.tool("owner_cancel_payment", "Owner only: cancel a Queued or Approval payment. Requires BURSAR_OWNER and the owner key in the local keystore.", { id: z.number() }, async ({ id }) => {
+    if (!config.owner) throw new Error("BURSAR_OWNER is not set");
+    const r = await call(config.owner, "cancel_payment", { id }, 30);
     return text({ tx: txHash(r) });
   });
 

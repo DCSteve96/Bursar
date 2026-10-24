@@ -20,6 +20,7 @@ export const config = {
   agentAccount: env("BURSAR_AGENT", "agent.bursar.testnet"),
   executorAccount: env("BURSAR_EXECUTOR", "executor.bursar.testnet"),
   relayerAccount: process.env.BURSAR_RELAYER ?? "",
+  owner: process.env.BURSAR_OWNER ?? "",
   relayerUrl: process.env.BURSAR_RELAYER_URL ?? "http://127.0.0.1:8787",
 
   // USDC NEP-141 contract. Mainnet: native Circle USDC. Testnet: any FT you deploy or usdc.fakes.testnet.
@@ -29,13 +30,18 @@ export const config = {
   // NEAR AI Cloud (TEE inference)
   aiBaseUrl: process.env.NEAR_AI_BASE_URL ?? "https://cloud-api.near.ai/v1",
   aiApiKey: process.env.NEAR_AI_API_KEY ?? "",
-  aiModel: process.env.NEAR_AI_MODEL ?? "z-ai/glm-5.3-flash",
+  aiModel: process.env.NEAR_AI_MODEL ?? "Qwen/Qwen3-VL-30B-A3B-Instruct",
 
   // NEAR Intents 1-Click (mainnet only)
   oneClickUrl: process.env.ONE_CLICK_URL ?? "https://1click.chaindefuser.com",
   oneClickJwt: process.env.ONE_CLICK_JWT ?? "",
 
   inbox: process.env.BURSAR_INBOX ?? join(process.cwd(), "..", "invoices", "inbox"),
+  // The reading relay that hosts the Telegram inbox, and this treasury's inbox token (Settings, Keys, in the console).
+  // Both set: the agent also reads and submits the invoices approved from Telegram.
+  relay: (process.env.BURSAR_RELAY ?? "").replace(/\/$/, ""),
+  inboxToken: process.env.BURSAR_INBOX_TOKEN ?? "",
+  explorer: process.env.NEAR_EXPLORER ?? (process.env.NEAR_NETWORK === "mainnet" ? "https://nearblocks.io" : "https://testnet.nearblocks.io"),
   state: process.env.BURSAR_STATE ?? join(process.cwd(), ".bursar"),
 };
 

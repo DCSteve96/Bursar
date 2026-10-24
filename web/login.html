@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qpkVhM5/FSr/gEFFU0lLeI/PuQ3NoZJmmWtfo15rpRs=' 'sha256-cso1mXvxZ4f9rQDHmlZeBqHv9oGyg8Ds4t7zoLlRvrI=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar sign in</title>
 <meta name="description" content="Sign in to the Bursar console with your NEAR wallet (Meteor, HOT, Intear, Nightly and more) or an invite link. No password, no server. A wallet without a treasury gets one created on the spot.">
@@ -65,6 +66,7 @@
       <h2>Continue with your NEAR wallet</h2>
       <p>Meteor, HOT, Intear, Nightly, Near Mobile and the other NEAR wallets. The wallet signs you in. If your account owns a treasury, the console opens it. If it owns none yet, Bursar creates one on the spot: Bursar pays for the accounts and the contract, you pay nothing.</p>
       <button id="wGo" type="button" class="btn-signal">Continue with NEAR wallet</button>
+      <p class="fine" id="wExt" hidden></p>
       <p>No NEAR wallet yet? <a href="https://meteorwallet.app" target="_blank" rel="noopener">Meteor</a>, <a href="https://wallet.intear.tech" target="_blank" rel="noopener">Intear</a> or <a href="https://nightly.app" target="_blank" rel="noopener">Nightly</a> take a minute to set up, and testnet accounts are free. <span id="wNetNote">On testnet, HOT and OKX are not available: they run on mainnet only.</span></p>
       <div id="wErr" class="err" hidden></div>
     </div>
@@ -72,7 +74,7 @@
     <div class="way">
       <h2>Open an invite link</h2>
       <p>A colleague invited you to approve invoices or manage vendors. Open the link, or paste it here. It signs you in with exactly the role they chose.</p>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="iLink" placeholder="https://bursar.network/app#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="iLink" placeholder="https://bursar.network/console#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
       <div id="iErr" class="err" hidden></div>
     </div>
   </div>
@@ -86,10 +88,16 @@
     <p class="way" style="margin:0"><a href="#" id="another" style="font-size:13px">Use another account</a></p>
   </div>
 
-  <p class="fine">Just looking? <a href="app#settings" id="demoLink">Open the README demo, read-only</a>.<br>Have a keys file from an earlier treasury? <label for="kFile">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">. No wallet at all? <a href="app#start">Try it with throwaway keys</a>.</p>
+  <p class="fine">Just looking? <a href="console#settings" id="demoLink">Open the README demo, read-only</a>.<br>Have a keys file from an earlier treasury? <label for="kFile">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">. No wallet at all? <a href="console#start">Try it with throwaway keys</a>.</p>
   <div id="kErr" class="err" hidden style="text-align:center"></div>
 </div></div>
 
+<script type="importmap">
+{"integrity":{
+ "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm":"sha384-HwLfgX1nkNYwI0ie5ymVPmxNsDF9AddN4Ji0dZOxVA1NWrArBQjSBUfuShgREZcu",
+ "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js":"sha384-6/w7TxP/swcyvhGY1DBpxyGn0r3JjrQefXf9ksiF7UFZHP0YHSr8fakC87KMZOPY"
+}}
+</script>
 <script type="module">
 import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm";
 import { NearConnector } from "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js";
@@ -107,12 +115,31 @@ async function view(network, contract, method, args = {}) {
   const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.data ?? j.error.message); if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
 }
+// A registry entry can point at any account; only a contract whose code hash is a Bursar build (contracts/builds.json) is listed.
+let KNOWN_BUILDS = null;
+async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
+async function codeHash(network, account) {
+  const r = await fetch(RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "view_account", finality: "final", account_id: account } }) });
+  const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
+}
 const q = new URLSearchParams(location.search);
 let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
 // NEAR Connect: one picker for every NEAR wallet (Meteor, HOT, Intear, Nightly, Near Mobile, OKX, WalletConnect). Each wallet's
 // own code runs in a sandboxed iframe; this page only sees the account id and the transactions it asks the wallet to sign.
 let connector = null, meteorReady = null;
-const connect = () => { if (!connector) { connector = new NearConnector({ network, footerBranding: null }); window.bursarConnector = connector; meteorReady = registerMeteorExtension().catch((e) => console.warn("Meteor extension bridge:", e)); } return connector; };
+const connect = () => {
+  if (!connector) {
+    connector = new NearConnector({ network, footerBranding: null }); window.bursarConnector = connector;
+    // Say what the page sees of the Meteor extension: it is the one wallet that signs the vault message, and when it is
+    // missing from the picker people should know whether that is the page or the extension.
+    const ext = $("#wExt");
+    meteorReady = registerMeteorExtension().then((ok) => { showExt(ok); return ok; })
+      .catch((e) => { console.warn("Meteor extension bridge:", e); ext.textContent = `Meteor extension seen, but its bridge failed to load: ${e.message || e}. The Meteor entry opens the web wallet.`; ext.hidden = false; });
+  }
+  return connector;
+};
+const showExt = (ok) => { const ext = $("#wExt"); ext.textContent = ok ? "Meteor extension detected: it is listed as \"Meteor Wallet (extension)\"; the plain entry is the web wallet." : "No Meteor extension seen on this page: the Meteor entry opens the web wallet. If you have the extension, check it is enabled and unlocked, then press the button again."; ext.hidden = false; };
+
 function setNet(n) {
   network = n;
   for (const b of document.querySelectorAll("#net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
@@ -126,7 +153,7 @@ $("#net").addEventListener("click", (e) => { const b = e.target.closest("button"
 $("#wGo").addEventListener("click", async () => {
   $("#wErr").hidden = true; $("#wGo").disabled = true;
   try {
-    const c = connect(); await meteorReady;
+    const c = connect(); if (!(await meteorReady)) { const ok = await registerMeteorExtension(1500).catch(() => false); showExt(ok); }
     const wallet = await c.connect();
     const accounts = await wallet.getAccounts({ network });
     if (!accounts?.length) throw new Error("the wallet did not return an account");
@@ -148,14 +175,14 @@ async function openTreasury(treasury, label, owner) {
     const seed = crypto.getRandomValues(new Uint8Array(32)); const pub = ed25519.getPublicKey(seed);
     const pubStr = "ed25519:" + b58(pub), secretKey = "ed25519:" + b58(concat(seed, pub));
     const { wallet } = await connect().getConnectedWallet();
-    await wallet.signAndSendTransaction({ network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: [] } } } }] });
+    await wallet.signAndSendTransaction({ network, signerId: owner, receiverId: owner, actions: [{ type: "AddKey", params: { publicKey: pubStr, accessKey: { permission: { receiverId: treasury, allowance: "250000000000000000000000", methodNames: ["add_vendor", "update_vendor", "confirm_vendor_payout", "set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "add_operator", "remove_operator", "mark_withholding_remitted", "set_paused", "reset_in_flight", "clear_dao"] } } } }] });
     let profiles = []; try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
     const known = profiles.find((p) => p.treasury === treasury) || {};
     const profile = { network, treasury, agent: known.agent || "", agentKey: known.agentKey || "", owner, ownerKey: secretKey, ownerKeyKind: "wallet", label: label || known.label || treasury, operator: "", operatorKey: "", operatorRole: "", payer: known.payer || "", payerKey: known.payerKey || "" };
     for (const [f, v] of Object.entries(profile)) localStorage.setItem("bursar." + f, v);
     const i = profiles.findIndex((p) => p.treasury === treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
-    location.href = "app#overview";
+    location.href = "console#overview";
   } catch (e) { $("#bErr").textContent = `the wallet did not add the key: ${e.message || e}`; $("#bErr").hidden = false; $("#keyWait").hidden = true; for (const b of document.querySelectorAll("#list button")) b.disabled = false; }
 }
 
@@ -167,10 +194,11 @@ async function afterIdentify(account) {
   try {
     if (!REGISTRY[network]) throw new Error(`no registry on ${network} yet`);
     const hints = await view(network, REGISTRY[network], "of", { owner: account });
-    const mine = [];
+    const mine = []; const builds = await knownBuilds(); let strangers = 0;
     await Promise.all(hints.map(async (t) => {
       try {
-        const roles = await view(network, t, "get_roles");
+        const [hash, roles] = await Promise.all([codeHash(network, t), view(network, t, "get_roles")]);
+        if (!builds[hash]) { strangers++; console.warn(`${t} is registered under this account but its code is not a Bursar build: ignored`); return; }
         if (roles[0] !== account) return;
         let company = null; try { company = await view(network, t, "get_company"); } catch {}
         mine.push({ treasury: t, label: company?.name || t });
@@ -188,7 +216,7 @@ async function afterIdentify(account) {
       $("#none").hidden = false;
       $("#createGo").addEventListener("click", () => {
         try { localStorage.setItem("bursar.walletOwner", JSON.stringify({ network, account })); } catch {}
-        location.href = "app#start";
+        location.href = "console#start";
       });
     }
   } catch (e) { $("#lookup").hidden = true; $("#bErr").textContent = e.message; $("#bErr").hidden = false; }
@@ -196,7 +224,7 @@ async function afterIdentify(account) {
 // A wallet connected earlier in this browser: skip straight to its treasuries.
 connect().getConnectedWallet().then(({ accounts }) => { if (accounts?.length) afterIdentify(accounts[0].accountId); }).catch(() => {});
 
-$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "app" + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
+$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "console" + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
 $("#kFile").addEventListener("change", async (e) => {
   $("#kErr").hidden = true;
   try {
@@ -207,7 +235,7 @@ $("#kFile").addEventListener("change", async (e) => {
     let profiles = []; try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
     const i = profiles.findIndex((p) => p.treasury === profile.treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
-    location.href = "app#overview";
+    location.href = "console#overview";
   } catch (err) { $("#kErr").textContent = err.message; $("#kErr").hidden = false; }
 });
 </script>

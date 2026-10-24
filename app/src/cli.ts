@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // bursar <command>
-//   agent [--once] [--offline] [--direct]   watch the inbox and submit invoices
+//   agent [--once] [--offline] [--direct]   watch the inbox folder (and the Telegram approvals, with BURSAR_RELAY and BURSAR_INBOX_TOKEN) and submit invoices
 //   submit <file.pdf> [--offline] [--direct] submit one invoice
 //   read <file.pdf> [--offline] [--no-collateral]
 //                                            read one invoice in the TEE, write and verify the receipt, no chain

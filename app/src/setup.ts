@@ -3,7 +3,7 @@
 //   bursar setup --root you.near --mainnet     (mainnet, uses real USDC, no faucet)
 // Needs the root account's full-access key in ~/.near-credentials/<network>/<root>.json (near-cli login).
 import { Account, JsonRpcProvider, KeyPair, KeyPairSigner, actions } from "near-api-js";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -67,8 +67,7 @@ export async function setup(o: Opts) {
     return new Account(id, provider, new KeyPairSigner(kp));
   };
 
-  // 1. accounts
-  const treasury = await create(names.treasury, o.dao ? 8 : 6); // ~4.7 NEAR of contract storage + DAO bonds
+  // 1. accounts (the treasury is created together with its contract in step 4, and never gets an access key)
   const agent = await create(names.agent, 0.5); // enough gas for a few direct calls from the web console; the relayer path needs none
   const executor = await create(names.executor, 1);
   const vendorHosting = await create(names.vendorHosting, 0.1);
@@ -103,29 +102,51 @@ export async function setup(o: Opts) {
     } else log(`DAO ${names.dao} exists`);
   }
 
-  // 4. policy contract
+  // 4. policy contract. The account is created, funded and given its contract in one transaction signed by the root,
+  // with no access key at all: from then on only the contract's owner methods (`upgrade` included) can change it.
+  // Nobody holds a key that could redeploy or drain it, not even the company's own machine.
   {
     const code = await readFile(join(wasmDir, "policy", "target", "wasm32-unknown-unknown", "release", "bursar_policy.wasm"));
-    const state = await treasury.getState();
-    if (state.codeHash === "11111111111111111111111111111111") {
-      await treasury.signAndSendTransaction({
+    const init = {
+      owner: o.root,
+      agent: names.agent,
+      executor: names.executor,
+      dao: o.dao ? names.dao : null,
+      usdc: names.usdc,
+      per_payment_cap: "10000000000",     // 10,000 USDC
+      daily_cap: "20000000000",           // 20,000 USDC
+      approval_threshold: "2000000000",   // 2,000 USDC
+    };
+    const near = o.dao ? 8 : 6; // ~4.7 NEAR of contract storage + DAO bonds
+    if (!(await exists(names.treasury))) {
+      await root.signAndSendTransaction({
         receiverId: names.treasury,
-        actions: [
-          actions.deployContract(code),
-          actions.functionCall("new", {
-            owner: o.root,
-            agent: names.agent,
-            executor: names.executor,
-            dao: o.dao ? names.dao : null,
-            usdc: names.usdc,
-            per_payment_cap: "10000000000",     // 10,000 USDC
-            daily_cap: "20000000000",           // 20,000 USDC
-            approval_threshold: "2000000000",   // 2,000 USDC
-          }, TGAS(50), 0n),
-        ],
+        actions: [actions.createAccount(), actions.transfer(NEAR(near)), actions.deployContract(code), actions.functionCall("new", init, TGAS(50), 0n)],
       });
-      log(`deployed policy contract at ${names.treasury}`);
-    } else log(`policy contract already deployed at ${names.treasury}`);
+      log(`created ${names.treasury} with ${near} NEAR and the policy contract in one transaction; the account has no access key`);
+    } else {
+      const acc = new Account(names.treasury, provider);
+      const keyFile = join(config.keystore, o.network, `${names.treasury}.json`);
+      const state = await provider.viewAccount({ accountId: names.treasury });
+      if (state.code_hash === "11111111111111111111111111111111") {
+        // an account made by an older setup, still without its contract: its full-access key deploys it
+        if (!existsSync(keyFile)) throw new Error(`${names.treasury} exists without a contract and ${keyFile} is missing: delete the account or restore the key`);
+        const t = new Account(names.treasury, provider, await loadSigner(o.network, names.treasury));
+        await t.signAndSendTransaction({ receiverId: names.treasury, actions: [actions.deployContract(code), actions.functionCall("new", init, TGAS(50), 0n)] });
+        log(`deployed policy contract at ${names.treasury}`);
+      } else log(`policy contract already deployed at ${names.treasury}`);
+      // keys left on the treasury by an older setup are dropped: the contract alone governs the account
+      const keys = await acc.getAccessKeyList();
+      if (keys.keys.length) {
+        if (!existsSync(keyFile)) log(`WARNING: ${names.treasury} still has ${keys.keys.length} access key(s) and the key file is missing; delete them with the key that holds them`);
+        else {
+          const t = new Account(names.treasury, provider, await loadSigner(o.network, names.treasury));
+          for (const k of keys.keys) await t.deleteKey(k.public_key);
+          await rm(keyFile, { force: true });
+          log(`removed ${keys.keys.length} access key(s) from ${names.treasury}: the account is governed by its contract only`);
+        }
+      }
+    }
   }
 
   // 5. vendors
@@ -173,12 +194,15 @@ export async function setup(o: Opts) {
       // 1 NEAR lets the key also sign direct calls (web page, `--direct`) when the relayer is not running.
       await agent.addFunctionCallAccessKey({ publicKey: fc.getPublicKey(), contractId: names.treasury, methodNames: ["request_payment"], allowance: NEAR(1) });
       const full = keys.keys.find((k: any) => k.access_key.permission === "FullAccess");
+      // the old full key is kept as <agent>.full.json until the chain has dropped it: a failure in between loses nothing
+      const file = join(config.keystore, o.network, `${names.agent}.json`);
+      const backup = file.replace(/\.json$/, ".full.json");
+      if (full && existsSync(file)) await rename(file, backup);
       await saveKey(o.network, names.agent, fc);
       if (full) {
-        const a2 = new Account(names.agent, provider, new KeyPairSigner(fc));
-        // deleting a key needs a full-access key; do it with the old signer before swapping
+        // deleting a key needs a full-access key: `agent` still signs with the old one
         await agent.deleteKey(full.public_key);
-        void a2;
+        await rm(backup, { force: true });
       }
       log(`agent ${names.agent} now holds only a function-call key for ${names.treasury}.request_payment`);
     }
