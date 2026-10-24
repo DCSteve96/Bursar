@@ -1985,7 +1985,11 @@ async function tgPair(b, approver) {
     if (!settings.treasury) throw new Error("no treasury selected");
     if (!settings.inboxToken) { $("#inboxToken").value = toHex(crypto.getRandomValues(new Uint8Array(16))); saveSettings(); }
     const company = state.company?.name || settings.label || settings.treasury, vendorId = approver ? "" : $("#tgFor").value.trim(), who = vendorId ? (Object.fromEntries(state.vendors)[vendorId]?.name || vendorId) : "";
-    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, token: settings.inboxToken, label: company, for: who, vendor: vendorId, approver, auto: !approver && !!vendorId && $("#tgAuto").checked }) });
+    if (!settings.ownerKey || !settings.owner) throw new Error("only the owner connects Telegram: the relay checks a signature by the owner's key");
+    // the relay pairs a chat only for the treasury's owner: a key of the owner's account signs treasury, token hash and time
+    const { seed, pubStr } = keyOf(settings.ownerKey), ts = Date.now();
+    const sig = toHex(ed25519.sign(te.encode(`bursar-inbox-pair\n${settings.treasury}\n${sha256hex(settings.inboxToken)}\n${ts}`), seed));
+    const r = await fetch(`${RELAY}/inbox/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ network: settings.network, treasury: settings.treasury, token: settings.inboxToken, owner: settings.owner, pubkey: pubStr, ts, sig, label: company, for: who, vendor: vendorId, approver, auto: !approver && !!vendorId && $("#tgAuto").checked }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
     if (approver) {
       $("#tgApproverLink").href = j.link; $("#tgApproverLink").textContent = j.link; $("#tgApproverCmd").textContent = `/start ${j.code}  to @${j.bot}`; $("#tgApproverOpen").href = j.link;

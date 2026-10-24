@@ -42,6 +42,7 @@ async function underLimits(env, ip) {
 // ---------- Telegram inbox ----------
 const TG = (env) => `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
 const INBOX_MAX = 50;
+const PER_CHAT_MAX = 10;
 const TAKE_TTL = 10 * 60 * 1000; // an approved invoice the agent took but never reported is offered again after this
 const FOLLOW_TTL = 60 * 86400; // seconds a held or queued invoice stays known by payment id, for the outcome that comes later
 const FINAL = new Set(["Paid", "Blocked", "Cancelled", "Settled", "rejected", "discarded", "error"]);
@@ -66,6 +67,38 @@ const authed = async (env, request, treasury) => {
   const rec = treasury && await kvGet(env, `treasury:${treasury}`);
   return rec && t && rec.token === t ? rec : null;
 };
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const b58decode = (str) => { let n = 0n; for (const c of str) { const i = B58.indexOf(c); if (i < 0) throw new Error("bad base58"); n = n * 58n + BigInt(i); } const out = []; while (n > 0n) { out.push(Number(n % 256n)); n /= 256n; } for (const c of str) { if (c !== "1") break; out.push(0); } return new Uint8Array(out.reverse()); };
+const hexBytes = (h) => new Uint8Array((h.match(/../g) || []).map((x) => parseInt(x, 16)));
+const sha256hex = async (str) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str))), (b) => b.toString(16).padStart(2, "0")).join("");
+const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+const ACCOUNT_RE = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+async function rpc(network, params) {
+  const r = await fetch(RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.data || j.error.message || "rpc error");
+  return j.result;
+}
+const nearView = async (network, account, method, args = {}) => { const r = await rpc(network, { request_type: "call_function", finality: "final", account_id: account, method_name: method, args_base64: btoa(JSON.stringify(args)) }); return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result))); };
+/** The pairing of a treasury is signed by its owner: the owner from `get_roles`, a key that is on the owner's account, a fresh timestamp. */
+async function ownerProof(body) {
+  const { network, treasury, token, owner, pubkey, ts, sig } = body;
+  if (!(network in RPC)) return "network must be testnet or mainnet";
+  if (typeof treasury !== "string" || treasury.length > 64 || !ACCOUNT_RE.test(treasury)) return "bad treasury id";
+  if (typeof owner !== "string" || owner.length > 64 || !ACCOUNT_RE.test(owner)) return "bad owner id";
+  if (typeof pubkey !== "string" || !/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(pubkey)) return "bad public key";
+  if (typeof ts !== "number" || Math.abs(Date.now() - ts) > 5 * 60 * 1000) return "the signature is not fresh";
+  if (typeof sig !== "string" || !/^[0-9a-f]{128}$/.test(sig)) return "bad signature";
+  let roles; try { roles = await nearView(network, treasury, "get_roles"); } catch (e) { return `cannot read the treasury: ${e.message}`; }
+  if (!Array.isArray(roles) || roles[0] !== owner) return "that account does not own this treasury";
+  try { await rpc(network, { request_type: "view_access_key", finality: "final", account_id: owner, public_key: pubkey }); } catch { return "that key is not on the owner's account"; }
+  const msg = new TextEncoder().encode(`bursar-inbox-pair\n${treasury}\n${await sha256hex(token)}\n${ts}`);
+  try {
+    const key = await crypto.subtle.importKey("raw", b58decode(pubkey.slice(8)), { name: "Ed25519" }, false, ["verify"]);
+    if (!(await crypto.subtle.verify({ name: "Ed25519" }, key, hexBytes(sig), msg))) return "the signature does not verify";
+  } catch (e) { return `the signature cannot be checked: ${e.message}`; }
+  return null;
+}
 const newCode = () => { const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; const b = crypto.getRandomValues(new Uint8Array(8)); return Array.from(b, (x) => a[x % 32]).join(""); };
 const personName = (u) => u ? [u.first_name, u.last_name].filter(Boolean).join(" ") + (u.username ? ` (@${u.username})` : "") : "";
 const isApprover = (rec, chat) => !!rec.approvers?.[String(chat)];
@@ -183,6 +216,8 @@ async function onUpdate(env, update) {
     const code = text.split(/\s+/)[1];
     const pair = code && await kvGet(env, `pair:${code.toUpperCase()}`);
     if (!pair) return say("Bursar inbox. To connect this chat to a company's treasury, open the Bursar console, Settings, Connect Telegram, and use the link it gives you.");
+    const already = await kvGet(env, `tg:${chat}`);
+    if (already && already.treasury !== pair.treasury) return say("This chat is already connected to another company. Disconnect it from that company's console first.");
     const rec = (await kvGet(env, `treasury:${pair.treasury}`)) || { token: pair.token, chats: [] };
     if (!rec.chats.includes(chat)) rec.chats.push(chat);
     rec.label = pair.label || rec.label;
@@ -226,6 +261,8 @@ async function onUpdate(env, update) {
   if (doc.file_size > MAX_BODY) return say(`${name} is over 2 MB; send a smaller PDF.`);
   const rec = (await kvGet(env, `treasury:${link.treasury}`)) || { chats: [] };
   const items = (await kvGet(env, `inbox:${link.treasury}`)) || [];
+  // one chat cannot push the other vendors' invoices out of the inbox
+  if (items.filter((x) => String(x.chat) === String(chat)).length >= PER_CHAT_MAX) return say(`${name}: this chat already has ${PER_CHAT_MAX} invoices waiting. Send the next one once they are decided.`);
   const from = m.from ? personName(m.from) : (m.chat.title || "channel");
   // a trusted vendor's chat: no question to the approver, the invoice is queued as accepted and the contract still decides
   const auto = !!(link.auto && link.vendor);
@@ -257,11 +294,14 @@ async function inbox(request, env, url, headers) {
   if (!treasury) return json(400, { error: "treasury is required" }, headers);
   // Pairing: the console picks a token for the treasury and gets a code the chat sends to the bot. `approver: true` pairs the owner's own chat.
   if (request.method === "POST" && p === "/inbox/pair") {
-    if (!body.token || body.token.length < 16) return json(400, { error: "token is required" }, headers);
+    if (typeof body.token !== "string" || body.token.length < 16 || body.token.length > 128) return json(400, { error: "token is required" }, headers);
+    if (env.LIMITS) { const k = `pair:${new Date().toISOString().slice(0, 10)}:${request.headers.get("cf-connecting-ip") || "unknown"}`; const n = Number(await env.LIMITS.get(k)) || 0; if (n >= 30) return json(429, { error: "too many pairings today from this address" }, headers); await env.LIMITS.put(k, String(n + 1), { expirationTtl: 86400 }); }
+    // only the treasury's owner pairs chats: the request carries a signature by a key of the owner's account
+    const bad = await ownerProof({ ...body, treasury });
+    if (bad) return json(403, { error: bad }, headers);
     const rec = await kvGet(env, `treasury:${treasury}`);
-    if (rec && rec.token !== body.token) return json(403, { error: "this treasury is already connected from another browser; its token is needed" }, headers);
-    if (!rec) await kvPut(env, `treasury:${treasury}`, { token: body.token, chats: [], label: body.label || "" });
-    else if (body.label && body.label !== rec.label) { rec.label = body.label; await kvPut(env, `treasury:${treasury}`, rec); }
+    if (!rec) await kvPut(env, `treasury:${treasury}`, { token: body.token, chats: [], label: body.label || "", owner: body.owner });
+    else if (rec.token !== body.token || (body.label && body.label !== rec.label)) { rec.token = body.token; rec.label = body.label || rec.label; rec.owner = body.owner; await kvPut(env, `treasury:${treasury}`, rec); } // the owner can rotate the token
     const code = newCode();
     await kvPut(env, `pair:${code}`, { treasury, token: body.token, label: body.label || "", for: String(body.for || "").slice(0, 60), vendor: String(body.vendor || "").slice(0, 64), approver: !!body.approver, auto: !!body.auto }, 86400);
     const bot = await botName(env);
@@ -279,14 +319,16 @@ async function inbox(request, env, url, headers) {
     const chat = body.chat; if (chat == null || !rec.chats.some((c) => String(c) === String(chat))) return json(404, { error: "no such chat on this treasury" }, headers);
     if (body.remove) {
       rec.chats = rec.chats.filter((c) => String(c) !== String(chat)); if (rec.chatInfo) delete rec.chatInfo[chat]; if (rec.approvers) delete rec.approvers[String(chat)];
-      await Promise.all([kvPut(env, `treasury:${treasury}`, rec), env.INBOX.delete(`tg:${chat}`)]);
+      const link = await kvGet(env, `tg:${chat}`);
+      await Promise.all([kvPut(env, `treasury:${treasury}`, rec), link && link.treasury === treasury ? env.INBOX.delete(`tg:${chat}`) : Promise.resolve()]);
       await tg(env, "sendMessage", { chat_id: chat, text: "This chat was disconnected from the company's inbox. Invoices sent here are no longer read." }).catch(() => {});
       return json(200, { ok: true }, headers);
     }
     if (isApprover(rec, chat)) return json(400, { error: "an approver's chat is not a vendor's chat; disconnect it instead" }, headers);
+    const link = await kvGet(env, `tg:${chat}`);
+    if (!link || link.treasury !== treasury) return json(409, { error: "this chat is no longer connected to this treasury" }, headers);
     const vendor = String(body.vendor || "").slice(0, 64), label = String(body.for || "").slice(0, 60), auto = !!(body.auto && vendor);
     rec.chatInfo = rec.chatInfo || {}; rec.chatInfo[chat] = { ...(rec.chatInfo[chat] || { title: "", since: Date.now() }), label, vendor, auto };
-    const link = (await kvGet(env, `tg:${chat}`)) || { treasury };
     await Promise.all([kvPut(env, `treasury:${treasury}`, rec), kvPut(env, `tg:${chat}`, { ...link, label, vendor, auto })]);
     return json(200, { ok: true }, headers);
   }
