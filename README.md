@@ -1,8 +1,26 @@
-# <img src="web/brand/mark.svg" width="28" height="28" alt=""> Bursar
+<p align="center"><img src="web/brand/readme-hero.svg" width="100%" alt="Bursar: the AI reads, the contract decides, a dumb executor moves the money"></p>
 
-**An AI treasurer that pays invoices within limits it cannot change.**
+<h1 align="center">Bursar</h1>
 
-The AI reads. The contract decides. A dumb executor moves the money.
+<p align="center"><strong>An AI treasurer that pays invoices within limits it cannot change.</strong><br>The AI reads. The contract decides. A dumb executor moves the money.</p>
+
+<p align="center">
+<a href="https://bursar.network/console">Console</a> &nbsp;·&nbsp;
+<a href="https://bursar.network/explorer">Explorer</a> &nbsp;·&nbsp;
+<a href="https://bursar.network/docs">Docs</a> &nbsp;·&nbsp;
+<a href="WHITEPAPER.md">White paper</a> &nbsp;·&nbsp;
+<a href="ROADMAP.md">Roadmap</a>
+</p>
+
+<p align="center">
+<img alt="policy contract: 65 unit tests" src="https://img.shields.io/badge/policy%20contract-65%20tests-00ec97?style=flat-square&labelColor=0d0f0e">
+<img alt="three audit rounds" src="https://img.shields.io/badge/security-3%20audit%20rounds-00ec97?style=flat-square&labelColor=0d0f0e">
+<img alt="live on NEAR testnet" src="https://img.shields.io/badge/NEAR-testnet%20live-00ec97?style=flat-square&labelColor=0d0f0e">
+<img alt="reading in a TEE" src="https://img.shields.io/badge/reading-NEAR%20AI%20Cloud%20TEE-00ec97?style=flat-square&labelColor=0d0f0e">
+<img alt="Rust, near-sdk 5" src="https://img.shields.io/badge/Rust-near--sdk%205-ffffff?style=flat-square&labelColor=0d0f0e">
+<img alt="TypeScript, near-api-js 7" src="https://img.shields.io/badge/TypeScript-near--api--js%207-ffffff?style=flat-square&labelColor=0d0f0e">
+<img alt="MIT license" src="https://img.shields.io/badge/license-MIT-ffffff?style=flat-square&labelColor=0d0f0e">
+</p>
 
 Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `business`, `privacy`, `security`. Development started on October 20, 2026; the project was completed, tested and submitted during the hackathon, and the commit history is kept as it is.
 
@@ -11,6 +29,27 @@ Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `busines
 Every company pays invoices. The two things that go wrong are boring and expensive: someone pays a fake invoice (the "please note our new bank details" fraud, the most common business scam in the world), and someone pays the same invoice twice. Letting an AI do the work makes both worse, unless the AI never holds the keys.
 
 ## What Bursar does
+
+```mermaid
+flowchart LR
+    V["Vendor sends a PDF<br>file drop, Telegram, MCP"] --> A
+    subgraph enclave["NEAR AI Cloud, trusted execution environment"]
+        A["The agent reads it<br>attestation before, signed receipt after"]
+    end
+    A -- "request_payment<br>one function-call key, no NEAR" --> C
+    subgraph chain["NEAR, the company's own contract"]
+        C{"The policy contract decides"}
+        C -- "within the limits" --> P["Paid on NEAR<br>same transaction"]
+        C -- "vendor on another chain" --> Q["Queued"]
+        C -- "threshold, flags, no order" --> H["Held for a person<br>owner, approver or DAO council"]
+        C -- "changed payout, duplicate, over cap" --> B["Blocked, with the reason"]
+    end
+    Q --> E["Executor, no AI<br>NEAR Intents, only to the registered payout"]
+    style C fill:#0d0f0e,stroke:#00ec97,color:#fff
+    style P fill:#0d0f0e,stroke:#00ec97,color:#00ec97
+    style H fill:#0d0f0e,stroke:#ffc266,color:#ffc266
+    style B fill:#0d0f0e,stroke:#ff6b6b,color:#ff6b6b
+```
 
 1. An invoice PDF lands in the inbox.
 2. The **agent** reads it inside a TEE on NEAR AI Cloud. The invoice never leaves the enclave in clear text; the model's answer comes with an attestation and a signed receipt.
@@ -56,7 +95,7 @@ git clone <repo> && cd bursar
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 cd app && npm install && npm test
 ```
-See: `53 passed` from `cargo test`, `bursar_policy.wasm: 457970 bytes` (smaller if `wasm-opt` is installed), and 9 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples).
+See: `65 passed` from `cargo test`, `bursar_policy.wasm: 471658 bytes` (smaller if `wasm-opt` is installed), and 13 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples, money parsing).
 
 **1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR: the faucet gives 10 per account, so create two and transfer from one to the other. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
 
@@ -203,11 +242,20 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 **10. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. With `NEAR_NETWORK=mainnet`, real USDC in the treasury and a vendor on Base, `npm run executor -- --once` quotes USDC NEAR to USDC Base with the vendor's address as recipient, calls `settle`, and marks the payment `Settled` with the Base transaction hash.
 
+<details>
+<summary><strong>Security audits: three independent rounds, every finding reproduced by a test</strong> (click to read what they found and what changed)</summary>
+
 **Security audit (21 October).** Four independent reviews of the contracts (authorization, accounting and asynchrony, policy logic, storage and gas) plus a line-by-line read, every finding reproduced by a unit test before the fix, then a second round on the patched code. What they found and what changed: a held payment could be approved after the owner paused the treasury or switched the vendor off (approval now re-checks both); the executor could send a queued payment to any NEAR account by naming the right recipient in the quote (it can now only pay the Intents deposit account the owner registered); an operator with the vendors role could redirect a held payment by editing the payout before the council voted (each payment carries the payout it was checked against, and a payout recorded by an operator pays nothing until the owner confirms it); cancelling yesterday's hold freed today's daily cap (counters are released only in their own day and month); withheld tax sat inside the spendable balance (it is now set aside, `remit_withholding` moves it to the owner for the state); a stolen agent key could fill the contract's storage with oversized claims or drain its NEAR into DAO bonds (claim fields are bounded, non-owner callers get daily quotas of requests, refusals and holds, no proposal opens without NEAR for the bond); a bill split into many small invoices met no one (five autopaid invoices per vendor per day, then a person); duplicates were caught only on the exact number (now on the normalized number and on the file hash); a refunded Intents settlement was stuck forever (`mark_settlement_failed` returns it to the queue); a transfer callback that never ran blocked `sync_balance` for good (`reset_in_flight`); a DAO could not be removed (`clear_dao`); ownership could go to the agent key (refused); event logs could be forged with a quote in a vendor id (escaped); the registry trusted any entry (the explorer and the login page now check the code hash of the contract against `web/contracts/builds.json`, and the registry's `claim` asks the treasury itself who owns it). A second round on the patched code found that the first fix for refunded settlements let the executor pay the same queued payment twice; a settlement now goes back to the queue only once the token contract shows the USDC back on the account, quotas are per caller, DAO proposals opened for a non-owner are limited per day and a person can open the missing ones, and the relayer caps gas and calls per hour. What the contract still trusts, on purpose: the claim's flags and tax ids come from the reading and can only add scrutiny, never remove a block; the executor is trusted for the amounts the contract queued, within the settlement account; the approval threshold is per invoice, the daily cap and the vendor budgets are the bounds that hold whatever the agent does.
 
 **Third round (24 October).** Five independent reviewers, told to be aggressive, on the contracts, the relay, the console, the agent and the relayer; every contract finding reproduced by a unit test before the fix (65 tests now). Contracts: approval and settlement checked the net amount against the balance instead of the gross; releasing a hold from an earlier period freed the current period's allowance; a settlement nobody confirmed had no way out (the owner can now `close_settlement`, delivered or not, and a refunded one waits for a person instead of being re-sent); the agent, executor, operator and DAO roles could overlap (kept distinct now); an invoice larger than its purchase order fell back to the standing order; an operator with the vendors role could switch a vendor back on or change its tax id and withholding (owner only now); invoices without a number collided; the withholding tolerance was a percent instead of rounding; a held claim was stored at full size; a failed DAO proposal left the duplicate keys in place; a vendor's order index was missing after migration; `request_payment` refuses when the account is low on NEAR for storage, instead of failing halfway. Off chain: the inbox pairing is signed by the treasury's owner and checked against `get_roles`, each chat is bound to one treasury, and there is no free-text route; the relayer verifies the delegate's signature, that the key is on the agent's account and the expiry before paying any gas, with per-address limits; the treasury account is created together with its contract and never gets an access key, by `setup` and by the console alike, so only the owner's methods can change it, `upgrade` included; the agent verifies the TEE receipt before claiming on it, flags an invoice from a vendor's chat that names another vendor (`chat_vendor_mismatch`), runs poppler with timeouts and per-file folders, and no longer loads a JavaScript PDF parser; the executor quotes EXACT_INPUT on the net the contract actually sends, caps the fee at 2 percent and stops after three failed attempts; the console confirms unknown RPC and relay parameters, refuses an invite for a treasury whose keys it already holds, routes the owner's sensitive methods through the wallet, pins its CDN modules by integrity hash under a Content Security Policy, and locks each vault with a salt of its own. The round also caught its own mistake: the first fix left `upgrade` with too little gas for the deploy fees of a 471 KB build, which showed up as a failed owner upgrade on the key-less demo treasury; the reserve is now 40 TGas, checked by a real owner upgrade on a treasury with no key before the demo was touched again. Left on purpose: an owner's wallet can still be talked into signing `transfer_ownership` (two-step ownership is on the list); the executor is trusted for the destination within the vendor record; the registry remains a hint, verified against the contract by every reader.
 
-**Unit tests:** `cd contracts/policy && cargo test` (53 tests, one per policy rule and one per finding of the security audit below: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, owner approval without a DAO, purchase orders consumed then held, standing order one invoice per month, vendors without orders unless strict, model flags add scrutiny, operators and roles, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request, chain address case, ownership transfer, tax ids on the invoice, withholding kept back for the state). `cd contracts/registry && cargo test` (4 tests: register and look up, fee, no hijacking, owner updates and removes). `cd app && npm test` (receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser).
+</details>
+
+**Unit tests:** `cd contracts/policy && cargo test` (65 tests, one per policy rule and one per finding of the three audit rounds above: pays under threshold, queues cross-chain, blocks changed payout, blocks duplicates and caps, DAO approval flow, owner approval without a DAO, purchase orders consumed then held, standing order one invoice per month, vendors without orders unless strict, model flags add scrutiny, operators and roles, proposal id recorded by callback, failed proposal releases budget, DAO rejection cancels, failed transfer restores balance, executor cannot redirect funds, only the agent can request, chain address case, ownership transfer, tax ids on the invoice, withholding kept back for the state). `cd contracts/registry && cargo test` (7 tests: register and look up, fee, no hijacking, a claim evicts the squatter, strangers cannot pile entries on an owner, owner updates and removes). `cd app && npm test` (13 tests: receipt verification against tampering, a real NEAR AI Cloud receipt verified offline and rejected after a one-byte edit, offline parser, money parsing and amount bounds).
+
+## What comes next
+
+The hackathon build is the demo above. The [roadmap](ROADMAP.md) has the full plan; in short: a mainnet pilot with a handful of companies, an email inbox with the same approvals as Telegram, bulk approvals and an installable phone app before the end of 2026; NEAR Business as the vault behind a treasury, approval chains and policies per department, exports for auditors, structured e-invoices and a cash forecast in Q1 2027; ERP connectors, dynamic discounting, budgets for fleets of AI agents and a native app in Q2 2027. The [white paper](WHITEPAPER.md) explains the principle, the trust model and the economics. The principle does not move: the AI reads, the contract decides, a dumb executor moves the money.
 
 ## NEAR features used, and why
 
@@ -225,6 +273,9 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 ## Repository
 
 ```
+README.md             this file: what it does, the runnable steps, the audits
+WHITEPAPER.md         the principle, the architecture, the trust model, the economics
+ROADMAP.md            what comes after the hackathon
 contracts/policy      Rust, the policy contract (near-sdk 5), with unit tests
 contracts/test-usdc   Rust, throwaway NEP-141 for testnet
 contracts/registry    Rust, the public list of treasuries the explorer and the sign-in page read
