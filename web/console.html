@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-tAEirC/h81TEGeHJPfxWa+KiqydZV2mGgZjTD1L8Ql0=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-NweLi5iHZcLwZCjB3ibM4aRRtUp+lykN4w1mvgq1Piw=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -686,6 +686,10 @@
       </div>
       <div id="govHas" hidden>
         <div class="kv" id="govKv"></div>
+        <div id="govBondRow" hidden style="margin-top:14px">
+          <p class="muted" style="font-size:14px;margin:0 0 10px;max-width:70ch">This DAO asks the Sputnik default of 1 NEAR per proposal. The treasury pays one bond per held invoice and gets it back when the council decides, so every open hold locks a NEAR. 0.1 NEAR is enough: this proposes the change, votes it with your seat, and records the new bond on the treasury.</p>
+          <div class="actions" style="align-items:center"><button id="govBond" type="button" class="btn-ghost">Set the proposal bond to 0.1 NEAR</button><span class="muted" id="govBondNote" style="font-size:13px"></span></div>
+        </div>
         <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">Held payments open a proposal on this DAO. Council members vote in Attention; on mainnet the same proposals appear in Trezu. Adding council members later is itself a DAO proposal (not in this console yet).</p>
       </div>
     </div>
@@ -1484,18 +1488,28 @@ const held = () => state.payments.filter((p) => p.status === "Approval");
 const dao = () => state.roles?.[3] || null;
 const SPUTNIK = { testnet: "sputnik-v2.testnet", mainnet: "sputnik-dao.near" };
 const DAO_BOND = "100000000000000000000000"; // 0.1 NEAR per proposal, what the DAO created here asks for
-let daoInfo = { council: [], proposals: {} };
+let daoInfo = { council: [], proposals: {}, policy: null, bond: "" };
 async function loadDao() {
-  daoInfo = { council: [], proposals: {} };
+  daoInfo = { council: [], proposals: {}, policy: null, bond: "" };
   if (!dao()) return;
   try {
     const policy = await view(dao(), "get_policy");
     const role = (policy.roles || []).find((r) => r.name === "council") || (policy.roles || []).find((r) => r.kind && r.kind.Group);
     daoInfo.council = role?.kind?.Group || [];
+    daoInfo.policy = policy; daoInfo.bond = String(policy.proposal_bond ?? "");
   } catch {}
   await Promise.all(held().filter((p) => p.dao_proposal_id !== null).map(async (p) => { try { daoInfo.proposals[p.id] = await view(dao(), "get_proposal", { id: p.dao_proposal_id }); } catch {} }));
 }
 const isCouncil = () => !!settings.ownerKey && daoInfo.council.includes(settings.owner);
+/** A call to the DAO as the owner. A wallet owner's browser key is limited to the treasury, so the wallet signs those; a full key signs directly. */
+async function daoCall(method, args, gasTgas, depositYocto = 0n) {
+  if (settings.ownerKeyKind === "wallet") {
+    const wallet = await ownerWallet(settings.owner);
+    const r = await wallet.signAndSendTransaction({ network: settings.network, signerId: settings.owner, receiverId: dao(), actions: [{ type: "FunctionCall", params: { methodName: method, args, gas: String(TGAS(gasTgas)), deposit: String(depositYocto) } }] });
+    return { hash: r?.transaction?.hash || r?.transaction_outcome?.id || "" };
+  }
+  return functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: dao(), method, args, gasTgas, deposit: depositYocto });
+}
 function renderOverview() {
   const { stats, limits, roles, payments, vendors, company } = state;
   $("#companyName").textContent = company?.name || settings.label || settings.treasury;
@@ -1540,7 +1554,7 @@ document.addEventListener("click", async (e) => {
   try {
     if (act === "voteApprove" || act === "voteReject") {
       if (!isCouncil()) throw new Error("only a council member with its key here can vote");
-      await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: dao(), method: "act_proposal", args: { id: Number(b.dataset.proposal), action: act === "voteApprove" ? "VoteApprove" : "VoteReject" }, gasTgas: 300 });
+      await daoCall("act_proposal", { id: Number(b.dataset.proposal), action: act === "voteApprove" ? "VoteApprove" : "VoteReject" }, 300);
       if (act === "voteReject") { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id }, gasTgas: 100 }); } catch {} }
       await loadTreasury(); return;
     }
@@ -1818,7 +1832,9 @@ function renderSettings() {
   ].map(([k, v, h]) => `<span class="k">${k}${help(h)}</span><span class="v mono">${v}</span>`).join("");
   $("#govNone").hidden = !!dao(); $("#govHas").hidden = !dao();
   if (dao()) {
-    $("#govKv").innerHTML = [["dao", dao()], ["council", daoInfo.council.join(", ") || "(could not read the policy)"], ["open proposals", held().filter((p) => p.dao_proposal_id !== null).length]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+    const bondNear = daoInfo.bond ? (Number(BigInt(daoInfo.bond) / 10n ** 21n) / 1000).toString() : "?";
+    $("#govKv").innerHTML = [["dao", dao()], ["council", daoInfo.council.join(", ") || "(could not read the policy)"], ["proposal bond", `${bondNear} NEAR`], ["open proposals", held().filter((p) => p.dao_proposal_id !== null).length]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+    $("#govBondRow").hidden = !(isCouncil() && daoInfo.policy && daoInfo.bond && BigInt(daoInfo.bond) > BigInt(DAO_BOND));
   } else {
     $("#govCouncil").innerHTML = `<label style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" checked disabled style="width:auto"> ${esc(roles[0])} (owner)</label>` + operators.map(([a]) => `<label style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" class="govMember" value="${esc(a)}" ${state.operators.length <= 3 ? "checked" : ""} style="width:auto"> ${esc(a)}</label>`).join("");
   }
@@ -2028,6 +2044,28 @@ $("#tgChats").addEventListener("change", async (e) => {
   try { const r = await fetch(`${RELAY}/inbox/chat`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, chat: isNaN(Number(sel.dataset.chat)) ? sel.dataset.chat : Number(sel.dataset.chat), vendor: vendorId, for: name, auto: !!(auto && auto.checked && vendorId) }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
   catch (err) { $("#tgErr").textContent = err.message; $("#tgErr").hidden = false; }
   finally { sel.disabled = false; loadInbox(); }
+});
+$("#govBond").addEventListener("click", async () => {
+  const b = $("#govBond"), note = $("#govBondNote"); $("#sErr").hidden = true;
+  const policy = daoInfo.policy; if (!policy) return;
+  const members = daoInfo.council.length;
+  if (!(await ask({ eyebrow: "DAO", title: "Set the proposal bond to 0.1 NEAR?", rows: [["dao", dao()], ["bond now", `${Number(BigInt(daoInfo.bond) / 10n ** 21n) / 1000} NEAR`], ["council", `${members} member${members === 1 ? "" : "s"}`]], note: members > 1 ? "A ChangePolicy proposal is opened and voted with your seat; the other council members vote in their DAO tool, then press this again to record the bond on the treasury." : "A ChangePolicy proposal is opened and approved with your seat, then the treasury records the new bond. Three signatures.", ok: "Propose and vote" }))) return;
+  b.disabled = true;
+  try {
+    const next = { ...policy, proposal_bond: DAO_BOND, bounty_bond: DAO_BOND };
+    note.textContent = "opening the proposal...";
+    await daoCall("add_proposal", { proposal: { description: "Bursar: proposal bond 0.1 NEAR", kind: { ChangePolicy: { policy: next } } } }, 100, BigInt(policy.proposal_bond));
+    const id = Number(await view(dao(), "get_last_proposal_id")) - 1;
+    note.textContent = `proposal ${id} open, voting...`;
+    await daoCall("act_proposal", { id, action: "VoteApprove" }, 300);
+    const after = await view(dao(), "get_policy");
+    if (BigInt(after.proposal_bond) > BigInt(DAO_BOND)) { note.textContent = `proposal ${id} voted; it needs the other council members' votes before the bond changes`; await loadTreasury(); return; }
+    note.textContent = "recording 0.1 NEAR on the treasury...";
+    await ownerCall("set_roles", { agent: null, executor: null, dao: null, dao_bond: DAO_BOND });
+    note.textContent = "done: 0.1 NEAR per proposal";
+    await loadTreasury();
+  } catch (e) { $("#sErr").textContent = e.message || String(e); $("#sErr").hidden = false; note.textContent = ""; }
+  finally { b.disabled = false; }
 });
 $("#tgChats").addEventListener("click", async (e) => {
   const b = e.target.closest("button.chatOff"); if (!b) return;
