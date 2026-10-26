@@ -106,7 +106,26 @@ npm run dev status</div><a class="btn btn-ghost" href="docs" style="margin-top:2
 <footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional. <a href="privacy" style="color:inherit">Privacy</a></footer>
 
 <script>
-const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+const RPC = { testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org", "https://rpc.testnet.near.org"], mainnet: ["https://free.rpc.fastnear.com", "https://near.drpc.org", "https://rpc.mainnet.near.org"] };
+// Two public endpoints, tried in turn, twice: a free endpoint drops or throttles requests now and then. Reads only.
+async function rpcPost(network, params, override) {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params });
+  const all = override ? [override] : RPC[network];
+  let last = null;
+  for (let round = 0; round < 3; round++) {
+    const live = all.filter((u) => (rpcBad.get(u) || 0) < Date.now()); const urls = live.length ? live : all; // a dead endpoint is skipped for a minute, unless it is the only one
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(20000) });
+        if (r.status === 429 || r.status >= 500) { last = new Error(`${new URL(url).host} answered ${r.status}`); continue; }
+        return await r.json();
+      } catch (e) { last = new Error(`${new URL(url).host}: ${e.message}`); rpcBad.set(url, Date.now() + 60000); }
+    }
+    await new Promise((res) => setTimeout(res, 400 * 2 ** round + Math.random() * 300));
+  }
+  throw new Error(`the NEAR RPC did not answer (${last?.message}). Check the connection, a VPN or an ad blocker, then reload.`);
+}
+const rpcBad = new Map();
 const q = new URLSearchParams(location.search);
 const network = q.get("network") || "testnet";
 const treasury = q.get("treasury") || "treasury.bursar-b48563e6.testnet";
@@ -114,8 +133,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const usdc = (u) => { const n = BigInt(u); const d = 10n ** 6n; return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(6, "0").slice(0, 2)} USDC`; };
 async function view(method, args = {}) {
-  const r = await fetch(q.get("rpc") || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "final", account_id: treasury, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
-  const j = await r.json();
+  const j = await rpcPost(network, { request_type: "call_function", finality: "final", account_id: treasury, method_name: method, args_base64: btoa(JSON.stringify(args)) }, q.get("rpc"));
   if (j.error) throw new Error(j.error.data?.message ?? j.error.message ?? JSON.stringify(j.error));
   if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
