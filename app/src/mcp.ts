@@ -19,9 +19,9 @@ export async function runMcp() {
     path: z.string().describe("Path to the invoice PDF"),
     offline: z.boolean().optional().describe("Skip NEAR AI and use the offline parser (demo invoices only)"),
   }, async ({ path, offline }) => {
-    // the assistant names files, not arbitrary paths: a PDF under the inbox folder or the working directory
+    // the assistant names files, not arbitrary paths: a PDF under the invoices folder (inbox and samples) or the working directory
     const full = resolve(path);
-    const roots = [resolve(config.inbox), resolve(process.cwd())];
+    const roots = [resolve(config.inbox, ".."), resolve(process.cwd())];
     if (!/\.pdf$/i.test(full) || !roots.some((r) => full === r || full.startsWith(r + sep))) throw new Error(`submit_invoice takes a .pdf under ${roots.join(" or ")}`);
     const r = await processInvoice(full, { offline, direct: !config.relayerAccount && !process.env.BURSAR_RELAYER_URL });
     return text({ paymentId: r.paymentId, status: r.payment?.status, reason: r.payment?.reason, amount: fmtUsdc(r.claim.amount), vendor: r.claim.vendor_id, flags: r.claim.flags, tx: r.txHash });

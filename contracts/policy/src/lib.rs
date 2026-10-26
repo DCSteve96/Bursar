@@ -97,7 +97,7 @@ const HASH_INDEX_PREFIX: &[u8] = b"ih";
 const ORDERS_INDEXED_KEY: &[u8] = b"orders_indexed";
 /// Liquid NEAR a counted caller (the agent) must leave on the account: below it, its requests are refused so
 /// a stolen key cannot write the account out of its storage stake.
-const NEAR_FLOOR: u128 = 1_500_000_000_000_000_000_000_000;
+const NEAR_FLOOR: u128 = 50_000_000_000_000_000_000_000;
 /// Gas `upgrade` keeps back from what it attaches to `migrate`: the deploy action's fees (about 14 MGas per byte of code),
 /// the function call's own fees and the end of the current execution. 15 TGas was a few TGas short at 471 KB; 40 leaves room.
 const UPGRADE_RESERVE: u64 = 40_000_000_000_000;
@@ -2790,7 +2790,7 @@ mod tests {
         let mut c = setup(); // has a dao
         // below the NEAR floor the agent is refused outright: a stolen key cannot write the account dry
         let stake = env::storage_usage() as u128 * env::storage_byte_cost().as_yoctonear();
-        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_yoctonear(stake + NearToken::from_near(1).as_yoctonear())).build());
+        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_yoctonear(stake + NearToken::from_millinear(40).as_yoctonear())).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("hosting", "dry", 1, near(accounts(5))))));
         assert!(r.is_err(), "the agent cannot spend the last NEAR");
         // above the floor but below bond plus headroom: the hold is recorded, no proposal

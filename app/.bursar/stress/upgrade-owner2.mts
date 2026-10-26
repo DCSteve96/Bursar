@@ -8,7 +8,7 @@ try {
   console.log("ok", (r as any).transaction.hash);
 } catch (e: any) {
   console.log("message:", String(e.message).slice(0, 600));
-  const s = JSON.stringify(e, null, 0);
+  const s = JSON.stringify(e, (_, v) => (typeof v === "bigint" ? v.toString() : v));
   const m = s.match(/"ExecutionError":"([^"]{0,400})/); console.log("exec:", m?.[1]);
   const g = s.match(/gas_burnt":(\d+)/g); console.log("gas burnt per outcome:", g?.slice(0, 6));
 }

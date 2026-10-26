@@ -95,9 +95,9 @@ git clone <repo> && cd bursar
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 cd app && npm install && npm test
 ```
-See: `65 passed` from `cargo test`, `bursar_policy.wasm: 471658 bytes` (smaller if `wasm-opt` is installed), and 13 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples, money parsing).
+See: `65 passed` from `cargo test`, `bursar_policy.wasm: 471657 bytes` (smaller if `wasm-opt` is installed), and 13 passing app tests (signature recovery, receipt tampering, a real NEAR AI Cloud receipt, offline parser on the four samples, money parsing).
 
-**1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...`) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 20 NEAR: the faucet gives 10 per account, so create two and transfer from one to the other. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
+**1. Create a testnet account** (any wallet, or `near account create-account sponsor-by-faucet-service you.testnet ...` with [near-cli-rs](https://github.com/near/near-cli-rs), `npm install -g near-cli-rs`, which steps 4 and 5c use too) and put its full-access key in `~/.near-credentials/testnet/you.testnet.json`. You need about 25 NEAR: the faucet gives 10 per account, so create three and transfer 9.5 from each of the other two to the first. Step 2 spends about 19.5 of them (the treasury account, the DAO's 6 NEAR, the test token, the sub-accounts); what is left pays the gas of the steps below. RPC defaults to FastNEAR (`rpc.testnet.near.org` answers 429 these days); set `NEAR_RPC` to use another node.
 
 **2. Deploy everything with one command.**
 
@@ -111,7 +111,7 @@ See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUS
 ```bash
 set -a; source .env.testnet; set +a
 npm run relayer &
-mkdir -p ../invoices/inbox && cp ../invoices/samples/*.pdf ../invoices/inbox/
+mkdir -p ../invoices/inbox && cp ../invoices/samples/0[1-4]-*.pdf ../invoices/inbox/   # the first four; 5 to 9 are for the steps below
 npm run agent -- --once --offline      # drop --offline to read with NEAR AI Cloud (needs NEAR_AI_API_KEY)
 npm run dev status
 ```
@@ -184,7 +184,7 @@ See, one line per check:
 
 ```
  ok  bytes                request and response hashes match the stored bytes
- ok  signed_text          signed text is z-ai/glm-5.3-flash:dc283fe4943454098c459...
+ ok  signed_text          signed text is z-ai/glm-5.3-flash:eea8915f29c4cca26e450...
  ok  signature            ECDSA signature recovers to 0x3b753b4406613c5e70ae640508632b600424fa0c
  ok  signer_kind          signed inside the model TEE (provider_tee)
  ok  attestation_signer   attestation report lists signer 0x3b753b4406613c5e70ae640508632b600424fa0c
@@ -192,8 +192,8 @@ See, one line per check:
  ok  quote_report_data    TDX quote report_data binds signer and nonce (mrtd df4d77c857de652b...)
  ok  quote_tcb            quote verified against Intel collateral: TCB UpToDate
  ok  extraction           the claim was built from exactly this model output
- ok  completion_id        completion id 1bf977a9c03c44508e709513c4c91c1e
- ok  attestation_ref      claim carries nearai:z-ai/glm-5.3-flash:1bf977a9c03c44508e7095...
+ ok  completion_id        completion id 9b1bbd6b036041ea8a8d9b83a7ba26be
+ ok  attestation_ref      claim carries nearai:z-ai/glm-5.3-flash:9b1bbd6b036041ea8a8d9b...
  ok  on_chain             payment #1 on treasury.you.testnet carries this reference
 verified: the decision was made on this model output, inside an attested TEE
 ```
