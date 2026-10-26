@@ -90,6 +90,15 @@ export async function runRelayer(port = Number(new URL(config.relayerUrl).port |
       recent.push(now);
       seen.set(digest, now);
       const outcome: any = await relayer.relayMetaTransaction(signed);
+      // A meta transaction "succeeds" for the relayer even when the delegated call failed: the failure sits in the
+      // treasury's receipt. It is read from there and handed back as the contract's own words, not swallowed.
+      for (const r of outcome.receipts_outcome ?? []) {
+        const f = r.outcome?.status?.Failure;
+        if (!f) continue;
+        const kind = f.ActionError?.kind ?? f;
+        const msg = kind?.FunctionCallError?.ExecutionError ?? kind?.FunctionCallError?.MethodResolveError ?? (typeof kind === "string" ? kind : JSON.stringify(kind));
+        return answer(422, { error: String(msg).replace(/^Smart contract panicked: /, ""), txHash: txHash(outcome) });
+      }
       // The payment id is the return value of the delegated call, i.e. the receipt executed by the treasury.
       let paymentId: number | null = null;
       for (const r of outcome.receipts_outcome ?? []) {
@@ -102,6 +111,7 @@ export async function runRelayer(port = Number(new URL(config.relayerUrl).port |
           break;
         }
       }
+      if (paymentId === null) return answer(502, { error: "the treasury returned no payment id", txHash: txHash(outcome) });
       answer(200, { txHash: txHash(outcome), paymentId });
     } catch (e) {
       answer(500, { error: (e as Error).message });

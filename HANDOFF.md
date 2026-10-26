@@ -500,6 +500,21 @@ Stefano, dopo il login con il wallet (singlefield9320.testnet) su bursar.network
 
 Stefano ha visto il `confirm()` nativo di Chrome ("bursar.network dice") all'accettazione di un invito. Sostituito con un `<dialog id="ask">` nello stile della procedura guidata e un helper `ask({ eyebrow, title, rows, note, ok, cancel, danger })` che restituisce una Promise (true sul bottone principale, false su Cancel o Esc; `btn-danger` rosso per le azioni distruttive, fallback al `confirm()` solo dove `showModal` manca). Usato per: invito (righe treasury, account, permessi), override `?rpc=` e `?relay=` (ora `await` a livello di modulo, il resto della pagina parte dopo la risposta), chiusura dei settlement, upgrade del contratto, limiti senza tetto giornaliero, disconnessione di una chat. `acceptInvite` e' async. Test: invito finto accettato (hash #attention, operator impostato) e rifiutato con Esc (#start); `approvetest.cjs` aggiornato per cliccare `#askYes` al posto del popup. L'override `?rpc=`/`?relay=` accettato viene ricordato in sessionStorage per la scheda: un ricaricamento con lo stesso link non chiede di nuovo (il primo giro del test si era bloccato proprio li', con la pagina ferma sul dialogo dopo il reload).
 
+## 2.41 Prova da giudice anticipata (26 ottobre)
+
+Clone pulito da GitHub in `/home/user/judge/bursar`, README eseguito passo per passo come faranno Claude Code e Codex, con due account del faucet (`judge-d2e4b718.testnet`, 19,5 NEAR). Cosa ha retto: build block (65 test, wasm, 13 vitest), `setup` in un comando (tesoreria senza chiave compresa, 19,3 NEAR spesi), relayer, agente offline, `status`, voto DAO con near-cli-rs, duplicato, ritenuta (#9 Paid, 200 trattenuti), `verify` del fixture contro la demo (12 ok), explorer (95 registrate, 94 verificate).
+
+Cosa non reggeva, corretto:
+- `NEAR_FLOOR` a 1,5 NEAR (terzo audit) bloccava `request_payment` dell'agente dalla sesta fattura: la tesoreria di setup ha 8 NEAR, 4,78 bloccati dallo storage, e ogni hold con DAO deposita 1 NEAR di cauzione, quindi il liquido scende sotto 1,5 subito. Una tesoreria creata dal wizard (5 NEAR) sarebbe stata bloccata dalla prima fattura. Soglia portata a 0,05 NEAR (quello che una richiesta puo' scrivere); la cauzione DAO ha gia' il suo controllo (`can_pay_bond`, reason `dao_bond_missing`). Test adattato, 65 verdi, wasm 471657 byte.
+- Via relayer l'errore del contratto arrivava come "WasmTrap(Unreachable)" o come 200 con `paymentId: null`: in una meta transaction la ricevuta esterna riesce anche quando la chiamata delegata fallisce. Il relayer ora legge `Failure` nelle ricevute e risponde 422 con il messaggio del contratto; senza payment id risponde 502.
+- README passo 3 copiava tutte e nove le fatture di esempio nell'inbox: i numeri dei passi 5-5d non tornavano. Ora copia solo le prime quattro.
+- README passo 1: con 20 NEAR il root resta con 0,11 NEAR dopo setup, poco per il voto DAO e `set_company` (e niente per un `upgrade`): ora chiede 25 NEAR da tre account del faucet e spiega come si installa near-cli-rs (passi 4 e 5c lo usano, non era detto).
+- README passo 6: gli hash nell'output d'esempio erano di un fixture precedente (dc283fe..., 1bf977a9...), aggiornati a quelli del file in repo (eea8915f..., 9b1bbd6b...).
+- MCP `submit_invoice`: la restrizione dei percorsi del terzo audit escludeva `invoices/samples`, che il README usa; ora accetta la cartella `invoices` intera e la cwd.
+- CLAUDE.md: conteggi dei test aggiornati (65, 7).
+
+Deviazioni dalla lettera del README durante la prova: root ricaricato di 3 NEAR da `bursar-66235736.testnet` per poter fare l'`upgrade` della tesoreria del giudice alla build corretta (una vera `upgrade` dal proprietario su un conto senza chiave, riuscita); il passo 5c (`set_company` poi fattura 8) non e' stato rifatto perche' la 8 era gia' stata inviata prima. Da rifare una volta prima della submission, dall'inizio, con il README committato.
+
 ## 3.1 Approvazioni da Telegram (fatto il 22 ottobre)
 
 Richiesta di Stefano, decisa cosi': Telegram per il caso comune, le eccezioni in console, nessuna chiave sui server.
