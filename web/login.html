@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qpkVhM5/FSr/gEFFU0lLeI/PuQ3NoZJmmWtfo15rpRs=' 'sha256-cso1mXvxZ4f9rQDHmlZeBqHv9oGyg8Ds4t7zoLlRvrI=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qpkVhM5/FSr/gEFFU0lLeI/PuQ3NoZJmmWtfo15rpRs=' 'sha256-aUwFH7wP1MfU+Oyh8hLbbUkMUaj8oaCnNyKwvd0XjI8=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar sign in</title>
 <meta name="description" content="Sign in to the Bursar console with your NEAR wallet (Meteor, HOT, Intear, Nightly and more) or an invite link. No password, no server. A wallet without a treasury gets one created on the spot.">
@@ -103,7 +103,21 @@ import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed2551
 import { NearConnector } from "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js";
 import { registerMeteorExtension } from "./meteor.js";
 const $ = (s) => document.querySelector(s);
-const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+// Public RPC endpoints, tried in order: a free endpoint can refuse or drop a request for a moment, and a signed-in owner
+// should not see "Failed to fetch" for that. Read-only pages (this one) can fall back freely.
+const RPC = { testnet: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], mainnet: ["https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"] };
+async function rpcPost(network, params) {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params });
+  let last = null;
+  for (const url of RPC[network]) {
+    try {
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+      if (r.status === 429 || r.status >= 500) { last = new Error(`${new URL(url).host} answered ${r.status}`); continue; }
+      return await r.json();
+    } catch (e) { last = new Error(`${new URL(url).host}: ${e.message}`); }
+  }
+  throw new Error(`the NEAR RPC did not answer (${last?.message}). Check the connection, a VPN or an ad blocker, then reload.`);
+}
 // The public list of treasuries (contracts/registry). Entries are hints: the owner is checked on the treasury itself.
 const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -111,16 +125,16 @@ const b58 = (u8) => { let n = 0n; for (const b of u8) n = n * 256n + BigInt(b); 
 const concat = (a, b) => { const u = new Uint8Array(a.length + b.length); u.set(a); u.set(b, a.length); return u; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 async function view(network, contract, method, args = {}) {
-  const r = await fetch(RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
-  const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.data ?? j.error.message); if (j.result.error) throw new Error(j.result.error);
+  const j = await rpcPost(network, { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) });
+  if (j.error) throw new Error(j.error.data?.message ?? j.error.data ?? j.error.message); if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
 }
 // A registry entry can point at any account; only a contract whose code hash is a Bursar build (contracts/builds.json) is listed.
 let KNOWN_BUILDS = null;
 async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
 async function codeHash(network, account) {
-  const r = await fetch(RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "view_account", finality: "final", account_id: account } }) });
-  const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
+  const j = await rpcPost(network, { request_type: "view_account", finality: "final", account_id: account });
+  if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
 }
 const q = new URLSearchParams(location.search);
 let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";

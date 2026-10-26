@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-uctTqQpnBRoi/GUg69Fm5hRP8Ri2v2Twp/n/TWWpvvw=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-7ZWts1WDsx4AiUs/9JzA+gq8toheyF9MO6UG1ew2dQU=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -705,6 +705,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 
 // ---------- config ----------
 const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+// A second public endpoint for when the first does not answer at all (network error, 429, 5xx). Not used when ?rpc= names one.
+const RPC_FALLBACK = { testnet: "https://rpc.testnet.near.org", mainnet: "https://rpc.mainnet.near.org" };
 const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
 const AI_BASE = "https://cloud-api.near.ai/v1";
 const DEC = 6;
@@ -858,7 +860,17 @@ class Borsh {
 
 // ---------- NEAR RPC ----------
 async function rpc(method, params) {
-  const r = await fetch(rpcOverride || RPC[settings.network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method, params }) });
+  const body = JSON.stringify({ jsonrpc: "2.0", id: "b", method, params });
+  const urls = rpcOverride ? [rpcOverride] : [RPC[settings.network], RPC_FALLBACK[settings.network]];
+  let r = null, last = null;
+  for (const url of urls) {
+    try {
+      r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+      if (r.status === 429 || r.status >= 500) { last = new Error(`${new URL(url).host} answered ${r.status}`); r = null; continue; }
+      break;
+    } catch (e) { last = new Error(`${new URL(url).host}: ${e.message}`); r = null; }
+  }
+  if (!r) throw new Error(`the NEAR RPC did not answer (${last?.message}). Check the connection, a VPN or an ad blocker, then retry.`);
   const j = await r.json();
   if (j.error) { const d = j.error.data; throw new Error(typeof d === "string" ? d : d?.message ?? (d ? JSON.stringify(d) : j.error.message) ?? JSON.stringify(j.error)); }
   return j.result;
