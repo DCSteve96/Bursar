@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-7ZWts1WDsx4AiUs/9JzA+gq8toheyF9MO6UG1ew2dQU=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-p3i4UtuSsaaBOY10c9BIGkKDj/L6LkLsHLi/m5YThIo=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -79,6 +79,9 @@
   .wiz input, .wiz select { border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); } .wiz .btn-ghost { color: var(--fg-light); border-color: var(--line-light); }
   .wiz .log .ok { color: var(--paid-light); } .wiz .log .fail { color: var(--blocked-light); } .wiz .log .wait { color: var(--wait-light); } .wiz .kv .k { color: var(--mute-light); }
   @media (max-width: 640px) { .wiz .pane { padding: 20px; } .wiz .grid.cols-2 { grid-template-columns: 1fr; } }
+  /* the page's own confirm: same dialog as the wizard, one question, two buttons */
+  dialog.ask { width: min(520px, calc(100vw - 32px)); } .ask h3 { font-size: 22px; margin: 6px 0 14px; } .ask .kv { margin: 0 0 14px; } .ask .kv .v { overflow-wrap: anywhere; }
+  .ask p.muted { margin: 0; } .ask .actions { justify-content: flex-end; } .ask .btn-danger { background: var(--blocked-light); color: #fff; border-color: var(--blocked-light); }
   .vaultbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 24px; background: var(--mint); color: var(--fg-light); font-size: 14px; border-bottom: 1px solid var(--line-light); } .vaultbar .btn-signal { padding: 8px 14px; font-size: 14px; }
   /* analytics: charts drawn as inline SVG, no library */
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 24px; }
@@ -211,6 +214,15 @@
 </aside>
 <main class="work">
 <!-- the first-run wizard: company, creation, reading. Three small windows so a newcomer always knows what to do next. -->
+<dialog id="ask" class="wiz ask" aria-labelledby="askTitle">
+  <form method="dialog" class="pane">
+    <div class="eyebrow muted" id="askEyebrow">Confirm</div>
+    <h3 id="askTitle"></h3>
+    <div class="kv" id="askRows"></div>
+    <p class="muted" id="askNote"></p>
+    <div class="actions"><button type="button" class="btn-ghost" id="askNo">Cancel</button><button type="button" class="btn-signal" id="askYes">OK</button></div>
+  </form>
+</dialog>
 <dialog id="wiz" class="wiz">
   <div class="pane" id="wizCompany">
     <div class="eyebrow muted">Step 1 of 3</div>
@@ -713,9 +725,37 @@ const DEC = 6;
 const $ = (s) => document.querySelector(s);
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0); // anything rendered as a number is rendered as a number
 const q = new URLSearchParams(location.search);
+/** The page's own confirm, in the page's style, instead of the browser's popup. Resolves true on the main button, false on Cancel or Escape. */
+function ask({ eyebrow = "Confirm", title, rows = [], note = "", ok = "OK", cancel = "Cancel", danger = false }) {
+  const h = (x) => String(x ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const d = $("#ask");
+  if (!d || typeof d.showModal !== "function") return Promise.resolve(confirm([title, ...rows.map(([k, v]) => `${k}: ${v}`), note].filter(Boolean).join("\n")));
+  $("#askEyebrow").textContent = eyebrow; $("#askTitle").textContent = title;
+  $("#askRows").innerHTML = rows.map(([k, v]) => `<span class="k">${h(k)}</span><span class="v mono">${h(v)}</span>`).join(""); $("#askRows").hidden = !rows.length;
+  $("#askNote").textContent = note; $("#askNote").hidden = !note;
+  const yes = $("#askYes"), no = $("#askNo"); yes.textContent = ok; no.textContent = cancel; yes.className = danger ? "btn-danger" : "btn-signal";
+  return new Promise((resolve) => {
+    const onClose = () => finish(false);
+    const finish = (v) => { d.removeEventListener("close", onClose); if (d.open) d.close(); resolve(v); };
+    yes.onclick = () => finish(true); no.onclick = () => finish(false);
+    d.addEventListener("close", onClose);
+    d.showModal(); (danger ? no : yes).focus();
+  });
+}
 // an RPC or relay named in the URL points the page at someone else's server: only with an explicit yes
-const override = (name, label) => { const v = q.get(name); if (!v) return null; try { return confirm(`This link asks the console to use a different ${label}:\n${v}\n\nOnly accept this if you put it there yourself.`) ? v : null; } catch { return null; } };
-const rpcOverride = override("rpc", "NEAR RPC node");
+// Accepted once per tab: a reload with the same link does not ask again.
+const override = async (name, label) => {
+  const v = q.get(name); if (!v) return null;
+  const k = `bursar.override.${name}`;
+  try { if (sessionStorage.getItem(k) === v) return v; } catch {}
+  try {
+    const yes = await ask({ eyebrow: "This link", title: `Use a different ${label}?`, rows: [[label, v]], note: "Only accept this if you put it in the link yourself. Otherwise your readings and signatures would go through someone else's server.", ok: "Use it", cancel: "Ignore", danger: true });
+    if (!yes) return null;
+    try { sessionStorage.setItem(k, v); } catch {}
+    return v;
+  } catch { return null; }
+};
+const rpcOverride = await override("rpc", "NEAR RPC node");
 
 const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
 const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
@@ -769,7 +809,7 @@ $("#profile").addEventListener("change", () => {
 });
 // Bursar's reading relay (relay/worker.js) holds the NEAR AI Cloud key server-side and forwards the bytes untouched.
 // ?relay=https://... overrides it (local testing). Empty until one is deployed.
-const RELAY = (override("relay", "reading relay") || "https://bursar-relay.pupazzipunkapi.workers.dev").replace(/\/$/, "");
+const RELAY = ((await override("relay", "reading relay")) || "https://bursar-relay.pupazzipunkapi.workers.dev").replace(/\/$/, "");
 const useOwnKey = () => settings.readMode === "own";
 const aiBase = () => useOwnKey() ? AI_BASE : `${RELAY}/v1`;
 const settings = {};
@@ -1507,7 +1547,10 @@ document.addEventListener("click", async (e) => {
       // the executor never confirmed this settlement: the owner says what happened, after checking the destination chain
       if (!settings.ownerKey) throw new Error("only the owner closes a settlement");
       const delivered = act === "closeDelivered";
-      if (!confirm(delivered ? `Payment ${id}: mark it settled? Only if you saw the USDC arrive at the vendor's address.` : `Payment ${id}: mark it not delivered? The amount goes back to the balance; press Sync balance if the refund has not arrived yet.`)) return;
+      const sure = await ask(delivered
+        ? { eyebrow: "Close settlement", title: `Mark payment ${id} as settled?`, note: "Only if you saw the USDC arrive at the vendor's address. The payment is recorded as delivered.", ok: "Mark settled" }
+        : { eyebrow: "Close settlement", title: `Mark payment ${id} as not delivered?`, note: "The amount goes back to the balance. If the refund has not arrived yet, press Sync balance first.", ok: "Not delivered", danger: true });
+      if (!sure) return;
       await ownerCall("close_settlement", { id, delivered }, 60);
       await loadTreasury(); return;
     }
@@ -1811,7 +1854,7 @@ async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (
 $("#upgradeBtn").addEventListener("click", async () => {
   const b = $("#upgradeBtn"); b.disabled = true; $("#upgradeErr").hidden = true;
   try {
-    if (!confirm("Deploy the current Bursar build onto this treasury? The state and every payment are kept. The wallet will ask you to sign.")) return;
+    if (!(await ask({ eyebrow: "Upgrade", title: "Deploy the current Bursar build onto this treasury?", note: "The state and every payment are kept. The wallet will ask you to sign.", ok: "Deploy" }))) return;
     const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
     let bin = ""; for (let i = 0; i < wasm.length; i += 0x8000) bin += String.fromCharCode.apply(null, wasm.subarray(i, i + 0x8000));
     await ownerCall("upgrade", { code: btoa(bin) }, 150);
@@ -1820,7 +1863,7 @@ $("#upgradeBtn").addEventListener("click", async () => {
   finally { b.disabled = false; }
 });
 $("#sAcctSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { const v = $("#sAcct").value.trim(); await ownerCall("set_settlement_account", { account: v || null }); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
-$("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { if (!$("#lDay").value.trim() || Number($("#lDay").value.replace(",", ".")) === 0) { if (!confirm("No daily cap: the agent could pay, every day, up to five invoices under the threshold for every vendor. Save without a daily cap?")) return; } await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
+$("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { if (!$("#lDay").value.trim() || Number($("#lDay").value.replace(",", ".")) === 0) { if (!(await ask({ eyebrow: "Limits", title: "Save without a daily cap?", note: "The agent could pay, every day, up to five invoices under the threshold for every vendor.", ok: "Save anyway", danger: true }))) return; } await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
 // ---------- governance: a Sputnik DAO for the company, from the console ----------
 async function nearBalance(id) { const r = await rpc("query", { request_type: "view_account", finality: "optimistic", account_id: id }); return BigInt(r.amount); }
@@ -1909,7 +1952,7 @@ $("#invCreate").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 $("#invCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("#invLink").value); $("#invCopy").textContent = "Copied"; } catch { $("#invLink").select(); } setTimeout(() => { $("#invCopy").textContent = "Copy link"; }, 1500); });
-function acceptInvite() {
+async function acceptInvite() {
   const m = location.hash.match(/^#invite=([A-Za-z0-9_-]+)$/);
   if (!m) return false;
   try {
@@ -1917,7 +1960,8 @@ function acceptInvite() {
     if (inv.v !== 1 || !inv.treasury || !inv.account || !inv.key) throw new Error("malformed invite");
     if (!/^[a-z0-9._-]{2,64}$/.test(inv.treasury) || !/^[a-z0-9._-]{2,64}$/.test(inv.account) || !/^ed25519:[1-9A-HJ-NP-Za-km-z]{80,96}$/.test(inv.key)) throw new Error("malformed invite");
     const role = Object.keys(inv.role || {}).filter((k) => inv.role[k]).join(", ") || "no permissions";
-    if (!confirm(`Accept this invite?\n\nTreasury: ${inv.treasury}\nYou would sign in as: ${inv.account}\nAllowed to: ${role}\n\nOnly accept invites from people you know.`)) { history.replaceState(null, "", location.pathname); location.hash = "#start"; return false; }
+    const yes = await ask({ eyebrow: "Invite", title: "Accept this invite?", rows: [["treasury", inv.treasury], ["you sign in as", inv.account], ["allowed to", role]], note: "Only accept invites from people you know. The link signs this browser in as that account with that role, nothing else.", ok: "Accept", cancel: "Decline" });
+    if (!yes) { history.replaceState(null, "", location.pathname); location.hash = "#start"; return false; }
     const mine = profiles.find((p) => p.treasury === inv.treasury);
     if (mine && (mine.ownerKey || mine.agentKey || mine.payerKey)) throw new Error(`this browser already holds keys for ${inv.treasury}; open the invite in another browser or profile`);
     for (const f of PROFILE_FIELDS) $("#" + f).value = "";
@@ -1984,7 +2028,7 @@ $("#tgChats").addEventListener("change", async (e) => {
 });
 $("#tgChats").addEventListener("click", async (e) => {
   const b = e.target.closest("button.chatOff"); if (!b) return;
-  if (!confirm("Disconnect this chat? Invoices sent there will no longer land in the inbox.")) return;
+  if (!(await ask({ eyebrow: "Telegram", title: "Disconnect this chat?", note: "Invoices sent there will no longer land in the inbox. The chat can be connected again with a new link.", ok: "Disconnect", danger: true }))) return;
   $("#tgErr").hidden = true; b.disabled = true;
   try { const r = await fetch(`${RELAY}/inbox/chat`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, chat: isNaN(Number(b.dataset.chat)) ? b.dataset.chat : Number(b.dataset.chat), remove: true }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
   catch (err) { $("#tgErr").textContent = err.message; $("#tgErr").hidden = false; b.disabled = false; }
@@ -2445,7 +2489,7 @@ drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files?.[0]); });
 $("#file").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
 loadSettings();
-if (!acceptInvite()) { route(); loadTreasury(); }
+if (!(await acceptInvite())) { route(); loadTreasury(); }
 </script>
 </body>
 </html>
