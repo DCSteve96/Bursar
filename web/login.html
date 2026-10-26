@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qpkVhM5/FSr/gEFFU0lLeI/PuQ3NoZJmmWtfo15rpRs=' 'sha256-aUwFH7wP1MfU+Oyh8hLbbUkMUaj8oaCnNyKwvd0XjI8=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qpkVhM5/FSr/gEFFU0lLeI/PuQ3NoZJmmWtfo15rpRs=' 'sha256-jOcSIQV3PdlEHLiUQtRpn7RbmLzWds78QEyIRxM1KZQ=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar sign in</title>
 <meta name="description" content="Sign in to the Bursar console with your NEAR wallet (Meteor, HOT, Intear, Nightly and more) or an invite link. No password, no server. A wallet without a treasury gets one created on the spot.">
@@ -105,7 +105,7 @@ import { registerMeteorExtension } from "./meteor.js";
 const $ = (s) => document.querySelector(s);
 // Public RPC endpoints, tried in order: a free endpoint can refuse or drop a request for a moment, and a signed-in owner
 // should not see "Failed to fetch" for that. Read-only pages (this one) can fall back freely.
-const RPC = { testnet: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], mainnet: ["https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"] };
+const RPC = { testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org", "https://rpc.testnet.near.org"], mainnet: ["https://free.rpc.fastnear.com", "https://near.drpc.org", "https://rpc.mainnet.near.org"] };
 async function rpcPost(network, params) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params });
   let last = null;

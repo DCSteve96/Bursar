@@ -62,7 +62,34 @@
 <footer>Bursar is software, not a payment service. Funds stay in each company's own contract, with the company's keys.</footer>
 
 <script>
-const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
+// Two public endpoints, tried in turn, each twice: a free endpoint drops or throttles a burst of requests now and then,
+// and this page asks every treasury four questions. Reads only, so any node will do.
+const RPC = { testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org", "https://rpc.testnet.near.org"], mainnet: ["https://free.rpc.fastnear.com", "https://near.drpc.org", "https://rpc.mainnet.near.org"] };
+async function rpcPost(params) {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params });
+  const all = q.get("rpc") ? [q.get("rpc")] : RPC[network];
+  let last = null;
+  for (let round = 0; round < 4; round++) {
+    // an endpoint that just failed to answer at all is left alone for a minute: no point asking it 400 times
+    const live = all.filter((u) => (rpcBad.get(u) || 0) < Date.now()); const urls = live.length ? live : all; // a dead endpoint is skipped for a minute, unless it is the only one
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(20000) });
+        if (r.status === 429 || r.status >= 500) { last = new Error(`${new URL(url).host} answered ${r.status}`); continue; }
+        return await r.json();
+      } catch (e) { last = new Error(`${new URL(url).host}: ${e.message}`); rpcBad.set(url, Date.now() + 60000); }
+    }
+    await new Promise((res) => setTimeout(res, 400 * 2 ** round + Math.random() * 300));
+  }
+  throw new Error(`the NEAR RPC did not answer (${last?.message}). Check the connection, a VPN or an ad blocker, then reload.`);
+}
+const rpcBad = new Map();
+/** At most n at a time: a few hundred requests fired at once is what gets a free endpoint to drop connections. */
+async function mapLimit(items, n, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
+  return out;
+}
 const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
 // The public list of treasuries (contracts/registry). Entries are hints: each treasury's owner is read from the contract itself.
 const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
@@ -71,8 +98,7 @@ const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 let network = q.get("network") === "mainnet" ? "mainnet" : "testnet";
 async function view(contract, method, args = {}) {
-  const r = await fetch(q.get("rpc") || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
-  const j = await r.json();
+  const j = await rpcPost({ request_type: "call_function", finality: "optimistic", account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args)) });
   if (j.error) throw new Error(j.error.data?.message ?? j.error.message ?? JSON.stringify(j.error));
   if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
@@ -82,8 +108,8 @@ async function view(contract, method, args = {}) {
 let KNOWN_BUILDS = null;
 async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
 async function codeHash(account) {
-  const r = await fetch(q.get("rpc") || RPC[network], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "view_account", finality: "final", account_id: account } }) });
-  const j = await r.json(); if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
+  const j = await rpcPost({ request_type: "view_account", finality: "final", account_id: account });
+  if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
 }
 const usdc = (u) => { const n = BigInt(u); const d = 10n ** BigInt(DEC); return `${(n / d).toLocaleString("en-US")}.${(n % d).toString().padStart(DEC, "0").slice(0, 2)} USDC`; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -113,15 +139,16 @@ async function load() {
     if (!reg) throw new Error(`no registry on ${network} yet: Bursar runs on testnet for the hackathon`);
     const entries = [];
     for (let from = 0; ; from += 100) { const page = await view(reg, "list", { from, limit: 100 }); entries.push(...page); if (page.length < 100) break; }
-    const builds = await knownBuilds(); let unknownCode = 0;
-    const companies = (await Promise.all(entries.map(async ([treasury, e]) => {
+    const builds = await knownBuilds(); let unknownCode = 0, unread = 0, done = 0;
+    const companies = (await mapLimit(entries, 4, async ([treasury, e]) => {
       try {
         const [hash, roles, stats, payments] = await Promise.all([codeHash(treasury), view(treasury, "get_roles"), view(treasury, "get_stats"), view(treasury, "list_payments", { from: 0, limit: 200 })]);
         if (!builds[hash]) { unknownCode++; return null; } // not a Bursar policy contract, whatever the registry says: dropped
         if (roles[0] !== e.owner) return null; // the registry entry does not match the contract: dropped
         return { treasury, since: e.registered_at, stats, payments, build: builds[hash] };
-      } catch { return null; }
-    }))).filter(Boolean);
+      } catch { unread++; return null; } // the RPC did not answer for this one after the retries: counted, not hidden
+      finally { done++; if (done % 12 === 0) $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">reading ${done} of ${entries.length} treasuries...</td></tr>`; }
+    })).filter(Boolean);
     const all = companies.flatMap((c) => c.payments.map((p) => ({ ...p, treasury: c.treasury, updated_at: ms(p.updated_at), created_at: ms(p.created_at) })));
     const today = day(Date.now()), month = today.slice(0, 7);
     const moved = (p) => ["Paid", "Settled", "Settling"].includes(p.status);
@@ -143,7 +170,7 @@ async function load() {
       const lastP = c.payments[c.payments.length - 1];
       return `<tr><td class="mono id"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="s ${esc(lastP.status)}">${esc(lastP.status)}</span> <span class="mono">${usdc(lastP.amount)}</span>` : `<span class="muted">none yet</span>`}</td><td><a href="dashboard?network=${network}&treasury=${encodeURIComponent(c.treasury)}">dashboard</a></td></tr>`;
     }).join("") || `<tr><td colspan="6" class="muted">no companies registered yet</td></tr>`;
-    $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts (code hash of a known Bursar build, owner as recorded)${unknownCode ? `, ${unknownCode} dropped: not a Bursar contract` : ""}. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
+    $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts (code hash of a known Bursar build, owner as recorded)${unknownCode ? `, ${unknownCode} dropped: not a Bursar contract` : ""}${unread ? `, ${unread} not read: the RPC did not answer, reload to retry` : ""}. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
   } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; $("#deck").innerHTML = `<div class="dec muted">${esc(e.message)}</div>`; $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
 }
 setNet(network);

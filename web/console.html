@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-NweLi5iHZcLwZCjB3ibM4aRRtUp+lykN4w1mvgq1Piw=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-1gkfIyhs4kPUfF4DrsSKbCz9cYxB39IkwLNczYW+fF8=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -721,8 +721,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 
 // ---------- config ----------
 const RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" };
-// A second public endpoint for when the first does not answer at all (network error, 429, 5xx). Not used when ?rpc= names one.
-const RPC_FALLBACK = { testnet: "https://rpc.testnet.near.org", mainnet: "https://rpc.mainnet.near.org" };
+// Other public endpoints for when the first does not answer at all (network error, 429, 5xx). Not used when ?rpc= names one.
+const RPC_FALLBACK = { testnet: ["https://near-testnet.drpc.org", "https://rpc.testnet.near.org"], mainnet: ["https://near.drpc.org", "https://rpc.mainnet.near.org"] };
 const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
 const AI_BASE = "https://cloud-api.near.ai/v1";
 const DEC = 6;
@@ -905,7 +905,7 @@ class Borsh {
 // ---------- NEAR RPC ----------
 async function rpc(method, params) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: "b", method, params });
-  const urls = rpcOverride ? [rpcOverride] : [RPC[settings.network], RPC_FALLBACK[settings.network]];
+  const urls = rpcOverride ? [rpcOverride] : [RPC[settings.network], ...RPC_FALLBACK[settings.network]];
   let r = null, last = null;
   for (const url of urls) {
     try {
