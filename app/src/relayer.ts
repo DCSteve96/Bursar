@@ -112,6 +112,7 @@ export async function runRelayer(port = Number(new URL(config.relayerUrl).port |
         }
       }
       if (paymentId === null) return answer(502, { error: "the treasury returned no payment id", txHash: txHash(outcome) });
+      console.log(`[relayer] relayed request_payment from ${d.senderId}: payment #${paymentId}, tx ${txHash(outcome)}, gas paid by ${relayer.accountId}`);
       answer(200, { txHash: txHash(outcome), paymentId });
     } catch (e) {
       answer(500, { error: (e as Error).message });

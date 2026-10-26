@@ -125,7 +125,7 @@ See, in `status` (the account names are yours; the same four decisions are live 
 ```
 and in the relayer log, the agent's meta transactions paid by the executor account.
 
-**4. Approve the big one as the DAO council.**
+**4. Approve the big one as the DAO council.** The DAO account is the one `setup` printed, `bursar-<your root without .testnet>.sputnik-v2.testnet`:
 
 ```bash
 near contract call-function as-transaction bursar-you.sputnik-v2.testnet act_proposal json-args '{"id":0,"action":"VoteApprove"}' prepaid-gas '300 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
