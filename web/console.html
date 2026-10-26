@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-p3i4UtuSsaaBOY10c9BIGkKDj/L6LkLsHLi/m5YThIo=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-tAEirC/h81TEGeHJPfxWa+KiqydZV2mGgZjTD1L8Ql0=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -1483,6 +1483,7 @@ async function loadTreasury() {
 const held = () => state.payments.filter((p) => p.status === "Approval");
 const dao = () => state.roles?.[3] || null;
 const SPUTNIK = { testnet: "sputnik-v2.testnet", mainnet: "sputnik-dao.near" };
+const DAO_BOND = "100000000000000000000000"; // 0.1 NEAR per proposal, what the DAO created here asks for
 let daoInfo = { council: [], proposals: {} };
 async function loadDao() {
   daoInfo = { council: [], proposals: {} };
@@ -1900,7 +1901,9 @@ $("#govCreate").addEventListener("click", async () => {
     if (await accountExists(daoAccount)) step("dao", "ok", `${daoAccount} already exists`);
     else {
       step("dao", "wait", `creating ${daoAccount} with council ${council.join(", ")}`);
-      const args = b64(te.encode(JSON.stringify({ config: { name, purpose: `${state.company?.name || settings.label || "Bursar"} approvals`, metadata: "" }, policy: council })));
+      // the council votes, anyone may add a proposal (the treasury does), and a proposal costs 0.1 NEAR instead of Sputnik's default 1 NEAR
+      const policy = { roles: [{ name: "all", kind: "Everyone", permissions: ["*:AddProposal"], vote_policy: {} }, { name: "council", kind: { Group: council }, permissions: ["*:AddProposal", "*:VoteApprove", "*:VoteReject", "*:VoteRemove", "*:Finalize"], vote_policy: {} }], default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: [1, 2] }, proposal_bond: DAO_BOND, proposal_period: "604800000000000", bounty_bond: DAO_BOND, bounty_forgiveness_period: "86400000000000" };
+      const args = b64(te.encode(JSON.stringify({ config: { name, purpose: `${state.company?.name || settings.label || "Bursar"} approvals`, metadata: "" }, policy })));
       const t = await functionCall({ ...f, receiverId: factory, method: "create", args: { name, args }, gasTgas: 150, deposit: NEAR(6) });
       for (let i = 0; i < 20 && !(await accountExists(daoAccount)); i++) await new Promise((r) => setTimeout(r, 1500));
       step("dao", "ok", `${daoAccount} live, ${council.length} council members`, t.hash);
@@ -1909,7 +1912,7 @@ $("#govCreate").addEventListener("click", async () => {
     const t2 = await sendTx({ ...f, receiverId: settings.treasury, actions: [A.transfer(NEAR(2))] });
     step("bonds", "ok", "2 NEAR in the treasury", t2.hash);
     step("roles", "wait", "pointing the treasury at the DAO");
-    const t3 = await ownerCall("set_roles", { agent: null, executor: null, dao: daoAccount, dao_bond: null });
+    const t3 = await ownerCall("set_roles", { agent: null, executor: null, dao: daoAccount, dao_bond: DAO_BOND });
     step("roles", "ok", "from now on held payments open a proposal the council votes on", t3.hash);
     await loadTreasury();
   } catch (e) { step("error", "fail", e.message); }

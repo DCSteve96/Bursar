@@ -59,7 +59,7 @@ flowchart LR
    - the payout printed on the invoice must equal the payout the owner recorded (otherwise `payout_changed`)
    - no duplicate invoice numbers per vendor
    - per-payment cap, per-vendor monthly budget, daily cap
-   - at or above the approval threshold: a Sputnik DAO proposal is opened, a human approves it in Trezu; the proposal id is written back on the payment, and a rejected or expired proposal cancels it
+   - at or above the approval threshold: a Sputnik DAO proposal is opened, a human approves it in Trezu; the proposal id is written back on the payment, and a rejected or expired proposal cancels it. The DAO that `setup` and the console create asks a 0.1 NEAR bond per proposal (Sputnik's default is 1 NEAR); the treasury pays it and gets it back when the council decides, and when the account cannot cover a bond the invoice still waits, without a proposal, until someone opens it or tops the account up
 5. Payment:
    - vendor on NEAR: USDC is transferred in the same transaction (`Paid`)
    - vendor on Base, Arbitrum, Solana or Sui: the **executor** (a plain process with the company's key, no AI) gets a NEAR Intents quote (EXACT_INPUT on the net amount the contract will send, fee capped at 2 percent) with the vendor's recorded address as recipient and calls `settle`. The contract releases USDC only if the recipient it reports equals the vendor record (`Settling`, then `Settled`). A refunded settlement goes back in front of a person (`Approval`, reason `settlement_failed`), nothing is re-sent on the executor's own; one nobody can confirm is closed by the owner (`close_settlement`, delivered or not).
@@ -104,7 +104,7 @@ See: `65 passed` from `cargo test`, `bursar_policy.wasm: 471657 bytes` (smaller 
 ```bash
 npx tsx src/cli.ts setup --root you.testnet
 ```
-See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUSDC token; a Sputnik DAO with you as council; the policy contract deployed and funded with 15,000 tUSDC; four vendors, each with the tax id it prints on its invoices, one of them a freelancer with a 20% withholding set on it; three orders recorded (hosting 500 USDC a month, purchase orders PO-2026-118 and PO-2026-104); the treasury listed in the public registry (`listed treasury.you.testnet in the registry`); the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts.
+See: sub-accounts for treasury, agent, executor and two vendors; a throwaway tUSDC token; a Sputnik DAO with you as council and a 0.1 NEAR proposal bond; the policy contract deployed and funded with 15,000 tUSDC; four vendors, each with the tax id it prints on its invoices, one of them a freelancer with a 20% withholding set on it; three orders recorded (hosting 500 USDC a month, purchase orders PO-2026-118 and PO-2026-104); the treasury listed in the public registry (`listed treasury.you.testnet in the registry`); the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts.
 
 **3. Start the relayer and process the inbox.**
 
