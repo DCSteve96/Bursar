@@ -77,7 +77,7 @@ const HOLDS_PER_DAY: u32 = 50;
 const DAO_TODAY_KEY: &[u8] = b"dao_today";
 const DAO_PROPOSALS_PER_DAY: u32 = 10;
 /// The NEAR the account must keep above its storage stake before it opens a DAO proposal (bond + headroom).
-const NEAR_HEADROOM: u128 = 1_000_000_000_000_000_000_000_000;
+const NEAR_HEADROOM: u128 = 500_000_000_000_000_000_000_000;
 /// The Intents account the executor may send queued payments to (raw storage: `set_settlement_account`).
 const SETTLEMENT_KEY: &[u8] = b"settle_to";
 /// Per payment: the vendor payout the claim was checked against (`b"ps"` + id), the DAO a proposal was opened on
@@ -430,7 +430,7 @@ impl Bursar {
             agent,
             executor,
             dao,
-            dao_bond: NearToken::from_near(1),
+            dao_bond: NearToken::from_millinear(100), // what setup and the console configure on the DAO they create
             usdc,
             limits: Limits {
                 per_payment_cap: per_payment_cap.0,
@@ -2794,7 +2794,7 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.request_payment(claim("hosting", "dry", 1, near(accounts(5))))));
         assert!(r.is_err(), "the agent cannot spend the last NEAR");
         // above the floor but below bond plus headroom: the hold is recorded, no proposal
-        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_yoctonear(stake + NearToken::from_millinear(1_600).as_yoctonear())).build());
+        testing_env!(ctx(accounts(1)).account_balance(NearToken::from_yoctonear(stake + NearToken::from_millinear(400).as_yoctonear())).build());
         let mut cl = claim("hosting", "poor", 1, near(accounts(5))); cl.flags = vec!["x".into()];
         let id = c.request_payment(cl);
         let p = c.get_payment(id).unwrap();

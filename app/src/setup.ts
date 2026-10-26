@@ -14,6 +14,22 @@ const TGAS = (n: number) => BigInt(n) * 10n ** 12n;
 const USDC_MAINNET = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 const SPUTNIK_FACTORY = { testnet: "sputnik-v2.testnet", mainnet: "sputnik-dao.near" };
 
+// The DAO's policy: the council votes, anyone (the treasury contract included) may add a proposal, and a proposal
+// costs a 0.1 NEAR bond instead of Sputnik's default 1 NEAR: the treasury pays one bond per held invoice and gets it
+// back when the council decides, so the default would lock a NEAR per open hold.
+const DAO_BOND = "100000000000000000000000"; // 0.1 NEAR
+const daoPolicy = (council: string[]) => ({
+  roles: [
+    { name: "all", kind: "Everyone", permissions: ["*:AddProposal"], vote_policy: {} },
+    { name: "council", kind: { Group: council }, permissions: ["*:AddProposal", "*:VoteApprove", "*:VoteReject", "*:VoteRemove", "*:Finalize"], vote_policy: {} },
+  ],
+  default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: [1, 2] },
+  proposal_bond: DAO_BOND,
+  proposal_period: "604800000000000", // 7 days
+  bounty_bond: DAO_BOND,
+  bounty_forgiveness_period: "86400000000000",
+});
+
 interface Opts { root: string; network: "testnet" | "mainnet"; prefix: string; dao: boolean; usdc?: string }
 
 async function saveKey(network: string, accountId: string, kp: KeyPair) {
@@ -96,9 +112,9 @@ export async function setup(o: Opts) {
     const daoName = `${o.prefix}bursar-${o.root.split(".")[0]}`.replace(/[^a-z0-9-]/g, "-").slice(0, 40);
     names.dao = `${daoName}.${factory}`;
     if (!(await exists(names.dao))) {
-      const args = Buffer.from(JSON.stringify({ config: { name: daoName, purpose: "Bursar approvals", metadata: "" }, policy: [o.root] })).toString("base64");
+      const args = Buffer.from(JSON.stringify({ config: { name: daoName, purpose: "Bursar approvals", metadata: "" }, policy: daoPolicy([o.root]) })).toString("base64");
       await root.callFunction({ contractId: factory, methodName: "create", args: { name: daoName, args }, gas: TGAS(150), deposit: NEAR(6) });
-      log(`created DAO ${names.dao} (council: ${o.root})`);
+      log(`created DAO ${names.dao} (council: ${o.root}, proposal bond 0.1 NEAR)`);
     } else log(`DAO ${names.dao} exists`);
   }
 
