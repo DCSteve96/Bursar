@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-xeTs+sA9121BhvqLS2HG+IPeHVtN9A+EbkwT2hTUSOE=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-qizD/p8x/NJm8SeW6MZdktv9S5qxwICHNBWVQoFGEHc=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -322,6 +322,19 @@
       <div class="grid stats" id="stats"></div>
       <p class="muted" id="flightNote" hidden><span id="flightText"></span> <button class="btn" type="button" id="resetFlight">Reset the counter</button><span class="err" id="flightErr" hidden></span></p>
       <p class="muted" id="syncNote" hidden><span id="syncText"></span> <button class="btn" type="button" id="syncBalance">Sync balance</button><span class="err" id="syncErr" hidden></span></p>
+      <div class="card" id="topup" style="margin-top:24px">
+        <div class="eyebrow muted" style="margin-bottom:12px">Top up</div>
+        <div class="kv" id="topupKv"></div>
+        <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">Send USDC on NEAR to the treasury account from any wallet or exchange. A plain transfer shows up here with a Sync balance button; a deposit made from this page is counted at once. NEAR on the same account pays the storage of every decision and the DAO bonds.</p>
+        <div class="actions" style="margin-top:14px;align-items:center;gap:10px" id="topupActs">
+          <button type="button" class="btn-ghost small" id="topupCopy">Copy the account</button>
+          <span id="topupOwner" hidden><input id="topupUsdc" type="text" inputmode="decimal" placeholder="USDC" style="width:110px"> <button type="button" class="btn-signal small" id="topupDeposit">Deposit USDC</button>
+          <input id="topupNear" type="text" inputmode="decimal" placeholder="NEAR" style="width:90px;margin-left:8px"> <button type="button" class="btn-ghost small" id="topupNearBtn">Add NEAR</button>
+          <button type="button" class="btn-ghost small" id="topupMint" hidden style="margin-left:8px">Mint 10,000 test USDC</button></span>
+          <span class="muted" id="topupNote" style="font-size:13px"></span>
+        </div>
+        <div class="err" id="topupErr" hidden></div>
+      </div>
       <div class="grid cols-2" style="margin-top:24px">
         <div class="card">
           <div class="eyebrow muted" style="margin-bottom:12px">Needs a person</div>
@@ -1529,6 +1542,7 @@ function renderOverview() {
   $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${num(p.id)}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
   $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
   const n = held().length; $("#attnBadge").textContent = n; $("#attnBadge").hidden = n === 0;
+  renderTopup();
   const flight = state.inFlight ? BigInt(state.inFlight) : 0n;
   $("#flightNote").hidden = flight === 0n; $("#flightErr").hidden = true; $("#resetFlight").disabled = !settings.ownerKey;
   if (flight > 0n) $("#flightText").textContent = `${usdc(flight)} left the books a moment ago and the token has not confirmed the transfer yet. Normal for a few seconds. If it stays, a transfer callback never ran: check the token's balance, then reset the counter and press Sync.`;
@@ -1538,6 +1552,57 @@ function renderOverview() {
   $("#syncBalance").disabled = !(settings.ownerKey || settings.operatorKey);
 }
 $("#resetFlight").addEventListener("click", async () => { const b = $("#resetFlight"); b.disabled = true; $("#flightErr").hidden = true; try { await ownerCall("reset_in_flight", {}); await loadTreasury(); } catch (e) { $("#flightErr").textContent = e.message; $("#flightErr").hidden = false; } finally { b.disabled = false; } });
+// ---------- top up: where the money goes in ----------
+const nearFmt = (y) => (Number(y / 10n ** 20n) / 10000).toFixed(2);
+async function renderTopup() {
+  const t = settings.treasury, usdcContract = state.roles?.[4] || "";
+  const ownerHere = !!settings.ownerKey && !!settings.owner;
+  $("#topupOwner").hidden = !ownerHere; $("#topupMint").hidden = !(ownerHere && settings.network === "testnet");
+  $("#topupKv").innerHTML = [["treasury account", t], ["USDC contract", usdcContract], ["NEAR on the account", "reading..."]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+  try {
+    const a = await rpc("query", { request_type: "view_account", finality: "optimistic", account_id: t });
+    const amount = BigInt(a.amount), locked = BigInt(a.storage_usage) * 10n ** 19n, liquid = amount > locked ? amount - locked : 0n;
+    const low = liquid < 10n ** 24n;
+    $("#topupKv").innerHTML = [["treasury account", t], ["USDC contract", usdcContract], ["NEAR on the account", `${nearFmt(liquid)} free, ${nearFmt(locked)} locked by storage${low ? " (low: add NEAR, or held invoices wait without a DAO proposal and requests stop under 0.05)" : ""}`]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono${k.startsWith("NEAR") && low ? " err" : ""}">${esc(v)}</span>`).join("");
+  } catch {}
+}
+/** A transaction the owner signs to any contract: the wallet for wallet owners, the key in the browser otherwise. `acts` are {method, args, gasTgas, deposit} or {transfer}. */
+async function ownerSend(receiverId, acts) {
+  if (settings.ownerKeyKind === "wallet") {
+    const wallet = await ownerWallet(settings.owner);
+    const actions = acts.map((a) => a.transfer !== undefined ? { type: "Transfer", params: { deposit: String(a.transfer) } } : { type: "FunctionCall", params: { methodName: a.method, args: a.args, gas: String(TGAS(a.gasTgas)), deposit: String(a.deposit ?? 0n) } });
+    const r = await wallet.signAndSendTransaction({ network: settings.network, signerId: settings.owner, receiverId, actions });
+    return { hash: r?.transaction?.hash || r?.transaction_outcome?.id || "" };
+  }
+  return sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId, actions: acts.map((a) => a.transfer !== undefined ? A.transfer(a.transfer) : A.functionCall(a.method, a.args, a.gasTgas, a.deposit ?? 0n)) });
+}
+async function topupRun(btn, fn) {
+  const note = $("#topupNote"); $("#topupErr").hidden = true; btn.disabled = true;
+  try { note.textContent = "signing..."; await fn(); note.textContent = "done"; await loadTreasury(); }
+  catch (e) { note.textContent = ""; $("#topupErr").textContent = e.message || String(e); $("#topupErr").hidden = false; }
+  finally { btn.disabled = false; }
+}
+$("#topupCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText(settings.treasury); $("#topupCopy").textContent = "Copied"; } catch {} setTimeout(() => { $("#topupCopy").textContent = "Copy the account"; }, 1500); });
+$("#topupDeposit").addEventListener("click", () => topupRun($("#topupDeposit"), async () => {
+  const v = $("#topupUsdc").value.replace(",", ".").trim(); if (!(Number(v) > 0)) throw new Error("an amount in USDC");
+  const amount = toUnits(v), usdcContract = state.roles?.[4];
+  if (!(await ask({ eyebrow: "Top up", title: `Deposit ${usdc(amount)} into the treasury?`, rows: [["from", settings.owner], ["to", settings.treasury], ["token", usdcContract]], note: "The USDC leaves your account for the company's contract, which counts it at once. The wallet shows the transfer before signing.", ok: "Deposit" }))) return;
+  // ft_transfer_call: the contract's ft_on_transfer credits the books in the same transaction
+  await ownerSend(usdcContract, [{ method: "ft_transfer_call", args: { receiver_id: settings.treasury, amount, msg: "" }, gasTgas: 80, deposit: 1n }]);
+  $("#topupUsdc").value = "";
+}));
+$("#topupNearBtn").addEventListener("click", () => topupRun($("#topupNearBtn"), async () => {
+  const v = $("#topupNear").value.replace(",", ".").trim(); if (!(Number(v) > 0)) throw new Error("an amount in NEAR");
+  const yocto = BigInt(Math.round(Number(v) * 1e6)) * 10n ** 18n;
+  if (!(await ask({ eyebrow: "Top up", title: `Send ${v} NEAR to the treasury account?`, rows: [["from", settings.owner], ["to", settings.treasury]], note: "NEAR on the treasury pays the storage of each decision and the DAO bonds. It stays the company's: the owner can withdraw it from the contract.", ok: "Send NEAR" }))) return;
+  await ownerSend(settings.treasury, [{ transfer: yocto }]);
+  $("#topupNear").value = "";
+}));
+$("#topupMint").addEventListener("click", () => topupRun($("#topupMint"), async () => {
+  const usdcContract = state.roles?.[4];
+  if (!(await ask({ eyebrow: "Testnet", title: "Mint 10,000 test USDC into the treasury?", rows: [["token", usdcContract]], note: "The test token mints to your account and moves the amount into the treasury in one transaction. Test money, testnet only.", ok: "Mint" }))) return;
+  await ownerSend(usdcContract, [{ method: "mint", args: { to: settings.owner, amount: "10000000000" }, gasTgas: 30, deposit: NEAR(0.01) }, { method: "ft_transfer_call", args: { receiver_id: settings.treasury, amount: "10000000000", msg: "" }, gasTgas: 80, deposit: 1n }]);
+}));
 $("#syncBalance").addEventListener("click", async () => {
   const b = $("#syncBalance"); b.disabled = true; $("#syncErr").hidden = true;
   try {
