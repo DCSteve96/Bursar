@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-qizD/p8x/NJm8SeW6MZdktv9S5qxwICHNBWVQoFGEHc=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-sOoWFC8xvnwnH2qj5kTVwQeFy6XwBQLpREb7kwdcZak=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -79,6 +79,13 @@
   .wiz input, .wiz select { border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); } .wiz .btn-ghost { color: var(--fg-light); border-color: var(--line-light); }
   .wiz .log .ok { color: var(--paid-light); } .wiz .log .fail { color: var(--blocked-light); } .wiz .log .wait { color: var(--wait-light); } .wiz .kv .k { color: var(--mute-light); }
   @media (max-width: 640px) { .wiz .pane { padding: 20px; } .wiz .grid.cols-2 { grid-template-columns: 1fr; } }
+  /* top up: the one card in Overview that stands out, mint like the receipt band */
+  .view .card.topup { background: var(--mint); color: var(--fg-light); border: 0; border-left: 6px solid var(--signal); display: grid; grid-template-columns: 160px 1fr; gap: 24px; align-items: start; }
+  .topup .qr { width: 160px; } .topup .qr svg { width: 160px; height: 160px; display: block; background: #fff; border-radius: 4px; } .topup .qr .cap { font-size: 12px; color: var(--mute-light); margin-top: 8px; text-align: center; }
+  .topup h3 { margin: 0 0 6px; font-size: 22px; line-height: 1.2; } .topup .acct { font: 500 18px/1.3 var(--mono); overflow-wrap: anywhere; margin: 0 0 12px; }
+  .topup .kv .k { color: var(--mute-light); } .topup .kv .v { color: var(--fg-light); } .topup .v.err { color: var(--blocked-light); }
+  .topup input { border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); } .topup .btn-ghost { color: var(--fg-light); border-color: var(--line-light); } .topup .muted { color: var(--mute-light); }
+  @media (max-width: 720px) { .topup { grid-template-columns: 1fr; } .topup .qr { margin: 0 auto; } }
   /* the page's own confirm: same dialog as the wizard, one question, two buttons */
   dialog.ask { width: min(520px, calc(100vw - 32px)); } .ask h3 { font-size: 22px; margin: 6px 0 14px; } .ask .kv { margin: 0 0 14px; } .ask .kv .v { overflow-wrap: anywhere; }
   .ask p.muted { margin: 0; } .ask .actions { justify-content: flex-end; } .ask .btn-danger { background: var(--blocked-light); color: #fff; border-color: var(--blocked-light); }
@@ -322,10 +329,14 @@
       <div class="grid stats" id="stats"></div>
       <p class="muted" id="flightNote" hidden><span id="flightText"></span> <button class="btn" type="button" id="resetFlight">Reset the counter</button><span class="err" id="flightErr" hidden></span></p>
       <p class="muted" id="syncNote" hidden><span id="syncText"></span> <button class="btn" type="button" id="syncBalance">Sync balance</button><span class="err" id="syncErr" hidden></span></p>
-      <div class="card" id="topup" style="margin-top:24px">
-        <div class="eyebrow muted" style="margin-bottom:12px">Top up</div>
+      <div class="card topup" id="topup" style="margin-top:24px">
+        <div class="qr"><div id="topupQr"></div><div class="cap">scan with your wallet</div></div>
+        <div>
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--mute-light)">Top up</div>
+        <h3>Send USDC on NEAR to this account</h3>
+        <p class="acct" id="topupAcct"></p>
         <div class="kv" id="topupKv"></div>
-        <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">Send USDC on NEAR to the treasury account from any wallet or exchange. A plain transfer shows up here with a Sync balance button; a deposit made from this page is counted at once. NEAR on the same account pays the storage of every decision and the DAO bonds.</p>
+        <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">From any wallet or exchange. A plain transfer shows up here with a Sync balance button; a deposit made from this page is counted at once. NEAR on the same account pays the storage of every decision and the DAO bonds.</p>
         <div class="actions" style="margin-top:14px;align-items:center;gap:10px" id="topupActs">
           <button type="button" class="btn-ghost small" id="topupCopy">Copy the account</button>
           <span id="topupOwner" hidden><input id="topupUsdc" type="text" inputmode="decimal" placeholder="USDC" style="width:110px"> <button type="button" class="btn-signal small" id="topupDeposit">Deposit USDC</button>
@@ -334,6 +345,7 @@
           <span class="muted" id="topupNote" style="font-size:13px"></span>
         </div>
         <div class="err" id="topupErr" hidden></div>
+        </div>
       </div>
       <div class="grid cols-2" style="margin-top:24px">
         <div class="card">
@@ -1558,13 +1570,26 @@ async function renderTopup() {
   const t = settings.treasury, usdcContract = state.roles?.[4] || "";
   const ownerHere = !!settings.ownerKey && !!settings.owner;
   $("#topupOwner").hidden = !ownerHere; $("#topupMint").hidden = !(ownerHere && settings.network === "testnet");
-  $("#topupKv").innerHTML = [["treasury account", t], ["USDC contract", usdcContract], ["NEAR on the account", "reading..."]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+  $("#topupAcct").textContent = t;
+  renderQr(t);
+  $("#topupKv").innerHTML = [["USDC contract", usdcContract], ["NEAR on the account", "reading..."]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
   try {
     const a = await rpc("query", { request_type: "view_account", finality: "optimistic", account_id: t });
     const amount = BigInt(a.amount), locked = BigInt(a.storage_usage) * 10n ** 19n, liquid = amount > locked ? amount - locked : 0n;
     const low = liquid < 10n ** 24n;
-    $("#topupKv").innerHTML = [["treasury account", t], ["USDC contract", usdcContract], ["NEAR on the account", `${nearFmt(liquid)} free, ${nearFmt(locked)} locked by storage${low ? " (low: add NEAR, or held invoices wait without a DAO proposal and requests stop under 0.05)" : ""}`]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono${k.startsWith("NEAR") && low ? " err" : ""}">${esc(v)}</span>`).join("");
+    $("#topupKv").innerHTML = [["USDC contract", usdcContract], ["NEAR on the account", `${nearFmt(liquid)} free, ${nearFmt(locked)} locked by storage${low ? " (low: add NEAR, or held invoices wait without a DAO proposal and requests stop under 0.05)" : ""}`]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono${k.startsWith("NEAR") && low ? " err" : ""}">${esc(v)}</span>`).join("");
   } catch {}
+}
+/** The account as a QR code, for a wallet that scans one. The encoder (qrcode-generator, 20 KB) is fetched from cdnjs with an integrity hash the first time. */
+let qrLib = null, qrShown = "";
+async function renderQr(text) {
+  if (qrShown === text) return;
+  try {
+    if (!qrLib) { await new Promise((res, rej) => { if (window.qrcode) return res(); const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"; sc.integrity = "sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1"; sc.crossOrigin = "anonymous"; sc.onload = res; sc.onerror = () => rej(new Error("qr")); document.head.appendChild(sc); }); qrLib = window.qrcode; }
+    const q = qrLib(0, "M"); q.addData(text); q.make();
+    $("#topupQr").innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    qrShown = text;
+  } catch { $("#topupQr").innerHTML = ""; }
 }
 /** A transaction the owner signs to any contract: the wallet for wallet owners, the key in the browser otherwise. `acts` are {method, args, gasTgas, deposit} or {transfer}. */
 async function ownerSend(receiverId, acts) {
