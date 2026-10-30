@@ -533,6 +533,10 @@ Tre vie, il contratto non cambia (ogni fattura resta una decisione a se' con i s
 - Console, Attention: checkbox per riga trattenuta, "select all", "Approve selected"/"Cancel selected": senza DAO una transazione ogni quattro voci con quattro `approve_payment` (o `cancel_payment`) da 60 TGas (un lotto fallisce intero se una chiamata fallisce, il lotto dopo va avanti; `inboxFollowUp` per ogni id con l'hash del lotto); con DAO i bottoni diventano "Vote approve/reject selected", un `act_proposal` per proposta via `daoCall` (wallet o chiave), e sul reject un `sync_dao_proposal`.
 - Test: `bulktest.cjs` con relay-local (tre PDF, "approve all" dal 500, callback `aa`, poi due PDF e "Approve all waiting" dalla console: tutte approvate, messaggi giusti); `attnbulk.cjs` su `bondtreasury.bond-3e9cd2ed.testnet` (DAO: 5 voti, 5 Paid) e su `bulktreasury.bulk-bde57b0e.testnet` (setup `--no-dao`: 5 approvazioni in 2 firme, 5 Paid). Da fare da Stefano: ricaricare `relay/worker.js` nel pannello Cloudflare.
 
+## 2.45 Card "Top up" in Overview (30 ottobre)
+
+Domanda di Stefano: come ricarica il cliente la tesoreria? Prima: trasferimento USDC all'account della tesoreria da un wallet qualsiasi e poi "Sync balance" (o `ft_transfer_call`); nessuna schermata. Ora in Overview la card Top up: account della tesoreria con Copy, contratto USDC, NEAR liberi e bloccati dallo storage (avviso sotto 1 NEAR libero); per il proprietario "Deposit USDC" (`ft_transfer_call` sul token: il contratto conta subito), "Add NEAR" (trasferimento), su testnet "Mint 10,000 test USDC" (mint al proprietario + `ft_transfer_call` nella stessa transazione). Le firme passano da `ownerSend(receiverId, acts)`: wallet per i proprietari da wallet (Transfer e FunctionCall nel formato NEAR Connect), chiave diretta altrimenti. README 9f aggiornato. Niente QR: un account NEAR e' un nome, il Copy basta.
+
 ## 3.1 Approvazioni da Telegram (fatto il 22 ottobre)
 
 Richiesta di Stefano, decisa cosi': Telegram per il caso comune, le eccezioni in console, nessuna chiave sui server.
