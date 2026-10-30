@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-1gkfIyhs4kPUfF4DrsSKbCz9cYxB39IkwLNczYW+fF8=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-N3hkaXjD349GJyd0OxURIDvDF+h6LXihl+f6DspAF1M=' 'sha256-xeTs+sA9121BhvqLS2HG+IPeHVtN9A+EbkwT2hTUSOE=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh; worker-src https://cdnjs.cloudflare.com blob:; connect-src https: wss: http://127.0.0.1:* http://localhost:* http://192.0.2.2:*; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar console</title>
 <meta name="description" content="Drop an invoice, have it read inside a NEAR AI Cloud enclave, check the signed receipt, and ask the policy contract to pay. Everything runs in this browser; keys never leave it.">
@@ -307,7 +307,7 @@
     </div>
     <div id="inboxOn" hidden>
       <div id="inboxGroups"></div>
-      <div class="actions" style="margin-top:16px;align-items:center"><button id="inboxRefresh" type="button" class="btn-ghost">Refresh</button><span class="muted" id="inboxFoot" style="font-size:14px"></span></div>
+      <div class="actions" style="margin-top:16px;align-items:center"><button id="inboxRefresh" type="button" class="btn-ghost">Refresh</button><button id="inboxApproveAll" type="button" class="btn-signal" hidden>Approve all waiting</button><span class="muted" id="inboxFoot" style="font-size:14px"></span></div>
       <div id="inboxErr" class="err" hidden></div>
     </div>
   </div>
@@ -427,7 +427,13 @@
     <div class="band-head"><div class="eyebrow">[ ATTENTION ]</div><h2 class="heading">What needs a person, and what the contract refused.</h2></div>
     <h3 class="heading-sm" style="margin:0 0 12px">Waiting for approval</h3>
     <div id="attnErr" class="err" hidden></div>
-    <div class="wrap"><table id="attnApproval"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>why it waits</th><th>flags</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="actions" id="attnBulk" hidden style="margin:0 0 10px;align-items:center;gap:10px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="attnPickAll" style="width:auto"> select all</label>
+      <button type="button" class="btn-signal small" id="attnApproveAll" disabled>Approve selected</button>
+      <button type="button" class="btn-ghost small" id="attnCancelAll" disabled>Cancel selected</button>
+      <span class="muted" id="attnBulkNote" style="font-size:13px"></span>
+    </div>
+    <div class="wrap"><table id="attnApproval"><thead><tr><th></th><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>why it waits</th><th>flags</th><th></th></tr></thead><tbody></tbody></table></div>
     <div class="actions" id="attnDaoRow" hidden style="margin-top:12px;align-items:center"><button id="attnSync" type="button" class="btn-ghost small">Sync with the DAO</button><span class="muted" style="font-size:14px;max-width:60ch">Sputnik does not call back when the council rejects or a proposal expires: syncing asks the DAO and cancels those payments, releasing their budget.</span></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Refused by policy</h3>
     <div class="wrap"><table id="attnBlocked"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>reason</th><th>flags</th></tr></thead><tbody></tbody></table></div>
@@ -1542,7 +1548,12 @@ $("#syncBalance").addEventListener("click", async () => {
 });
 function renderAttention() {
   const canApprove = canAct("approve") && !(state.roles?.[3]);
-  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${num(p.dao_proposal_id)}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${num(p.id)}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${num(p.id)}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${num(p.id)}" data-proposal="${num(p.dao_proposal_id)}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${num(p.id)}" data-proposal="${num(p.dao_proposal_id)}">Vote reject</button>` : dao() && p.dao_proposal_id === null && canAct("approve") ? `<span class="muted">no proposal yet (the day's quota, no NEAR for the bond, or a payout to confirm)</span> <button type="button" class="btn-ghost small act" data-act="openProposal" data-id="${num(p.id)}">Open proposal</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">nothing waits for a person</td></tr>`;
+  // bulk: approve or cancel the picked rows in one transaction (no DAO), or vote them one by one (council)
+  const pickable = (p) => canApprove || (dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress");
+  $("#attnBulk").hidden = !held().some(pickable);
+  $("#attnApproveAll").textContent = canApprove ? "Approve selected" : "Vote approve selected"; $("#attnCancelAll").textContent = canApprove ? "Cancel selected" : "Vote reject selected";
+  $("#attnApproval tbody").innerHTML = held().slice().reverse().map((p) => `<tr><td>${pickable(p) ? `<input type="checkbox" class="attnPick" data-id="${num(p.id)}" data-proposal="${p.dao_proposal_id === null ? "" : num(p.dao_proposal_id)}" data-amount="${esc(p.amount)}" style="width:auto">` : ""}</td><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${esc(holdText(p.reason))}${p.dao_proposal_id !== null ? `<div class="mono muted">Sputnik proposal ${num(p.dao_proposal_id)}${daoInfo.proposals[p.id] ? `: ${esc(daoInfo.proposals[p.id].status)}, ${Object.keys(daoInfo.proposals[p.id].votes || {}).length} of ${daoInfo.council.length} voted` : ""}</div>` : ""}</td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td><td class="acts">${canApprove ? `<button type="button" class="btn-signal small act" data-act="approve" data-id="${num(p.id)}">Approve</button> <button type="button" class="btn-ghost small act" data-act="cancel" data-id="${num(p.id)}">Cancel</button>` : dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress" ? `<button type="button" class="btn-signal small act" data-act="voteApprove" data-id="${num(p.id)}" data-proposal="${num(p.dao_proposal_id)}">Vote approve</button> <button type="button" class="btn-ghost small act" data-act="voteReject" data-id="${num(p.id)}" data-proposal="${num(p.dao_proposal_id)}">Vote reject</button>` : dao() && p.dao_proposal_id === null && canAct("approve") ? `<span class="muted">no proposal yet (the day's quota, no NEAR for the bond, or a payout to confirm)</span> <button type="button" class="btn-ghost small act" data-act="openProposal" data-id="${num(p.id)}">Open proposal</button>` : `<span class="muted">${dao() ? (p.dao_proposal_id === null ? "proposal being opened" : isCouncil() ? "voted" : "the DAO council decides") : "an owner or approver key is needed"}</span>`}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">nothing waits for a person</td></tr>`;
+  attnPicked();
   $("#attnDaoRow").hidden = !(dao() && !!settings.ownerKey && held().some((p) => p.dao_proposal_id !== null));
   $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
   $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}${p.status === "Settling" && settings.ownerKey ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-ghost small act" data-act="closeDelivered" data-id="${num(p.id)}">Mark delivered</button> <button type="button" class="btn-ghost small act" data-act="closeFailed" data-id="${num(p.id)}">Not delivered</button></div>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
@@ -1583,6 +1594,52 @@ document.addEventListener("click", async (e) => {
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
   finally { b.disabled = false; }
 });
+function attnPicked() {
+  const picked = Array.from(document.querySelectorAll(".attnPick:checked"));
+  const n = picked.length, total = picked.reduce((a, c) => a + BigInt(c.dataset.amount || "0"), 0n);
+  $("#attnApproveAll").disabled = !n; $("#attnCancelAll").disabled = !n;
+  $("#attnBulkNote").textContent = n ? `${n} picked, ${usdc(total)}` : "pick the rows to decide together";
+  const all = document.querySelectorAll(".attnPick"); $("#attnPickAll").checked = !!all.length && n === all.length;
+}
+document.addEventListener("change", (e) => { if (e.target.id === "attnPickAll") document.querySelectorAll(".attnPick").forEach((c) => { c.checked = e.target.checked; }); if (e.target.classList?.contains("attnPick") || e.target.id === "attnPickAll") attnPicked(); });
+/** The picked held payments, approved or cancelled: four `approve_payment` calls per transaction when the owner or an approver decides,
+ *  one DAO vote per transaction when the council does. A batch fails as a whole if one of its calls does; the next batch still runs. */
+async function attnBulk(approve) {
+  const picked = Array.from(document.querySelectorAll(".attnPick:checked")).map((c) => ({ id: Number(c.dataset.id), proposal: c.dataset.proposal === "" ? null : Number(c.dataset.proposal), amount: BigInt(c.dataset.amount || "0") }));
+  if (!picked.length) return;
+  const canApprove = canAct("approve") && !(state.roles?.[3]);
+  const total = picked.reduce((a, x) => a + x.amount, 0n);
+  const verb = approve ? (canApprove ? "Approve" : "Vote approve") : (canApprove ? "Cancel" : "Vote reject");
+  if (!(await ask({ eyebrow: "Attention", title: `${verb} ${picked.length} payment${picked.length === 1 ? "" : "s"}?`, rows: [["payments", picked.map((x) => `#${x.id}`).join(", ")], ["total", usdc(total)]], note: canApprove ? `${approve ? "Each one is paid by the contract on its own limits" : "Each one is cancelled and its budget released"}: four per signature, so ${Math.ceil(picked.length / 4)} signature${Math.ceil(picked.length / 4) === 1 ? "" : "s"}.` : `One vote per proposal, ${picked.length} signature${picked.length === 1 ? "" : "s"}; a proposal passes when the council's threshold is met.`, ok: verb, danger: !approve }))) return;
+  const note = $("#attnBulkNote"); $("#attnErr").hidden = true; $("#attnApproveAll").disabled = true; $("#attnCancelAll").disabled = true;
+  let done = 0, failed = [];
+  try {
+    if (canApprove) {
+      const method = approve ? "approve_payment" : "cancel_payment";
+      for (let i = 0; i < picked.length; i += 4) {
+        const batch = picked.slice(i, i + 4);
+        note.textContent = `${approve ? "approving" : "cancelling"} ${batch.map((x) => `#${x.id}`).join(", ")}...`;
+        try {
+          const r = await sendTx({ ...actor(), receiverId: settings.treasury, actions: batch.map((x) => A.functionCall(method, { id: x.id }, 60, 0n)) });
+          done += batch.length;
+          for (const x of batch) inboxFollowUp(x.id, r?.hash);
+        } catch (e) { failed.push(`${batch.map((x) => `#${x.id}`).join(", ")}: ${e.message}`); }
+      }
+    } else {
+      for (const x of picked.filter((x) => x.proposal !== null)) {
+        note.textContent = `voting on proposal ${x.proposal} (#${x.id})...`;
+        try { await daoCall("act_proposal", { id: x.proposal, action: approve ? "VoteApprove" : "VoteReject" }, 300); done++; if (!approve) { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id: x.id }, gasTgas: 100 }); } catch {} } }
+        catch (e) { failed.push(`#${x.id}: ${e.message}`); }
+      }
+    }
+    note.textContent = `${done} done${failed.length ? `, ${failed.length} failed` : ""}`;
+    if (failed.length) { $("#attnErr").textContent = failed.join("; "); $("#attnErr").hidden = false; }
+    await loadTreasury();
+  } catch (e) { $("#attnErr").textContent = e.message; $("#attnErr").hidden = false; }
+  finally { attnPicked(); }
+}
+$("#attnApproveAll").addEventListener("click", () => attnBulk(true));
+$("#attnCancelAll").addEventListener("click", () => attnBulk(false));
 $("#attnSync").addEventListener("click", async () => {
   $("#attnErr").hidden = true; const b = $("#attnSync"); b.disabled = true;
   try {
@@ -2010,7 +2067,7 @@ async function loadInbox() {
     const vmap = Object.fromEntries(state.vendors), groups = {};
     for (const it of inboxItems.slice().reverse()) (groups[it.vendor || ""] ??= []).push(it);
     const keys = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : (vmap[a]?.name || a).localeCompare(vmap[b]?.name || b)));
-    const stateOf = (it) => it.status === "approved" ? `<span class="pill Approval">approved on Telegram</span><div class="muted" style="font-size:12px">${/^trusted vendor/.test(it.approved_by || "") ? "trusted vendor, accepted without asking" : `by ${esc(it.approved_by || "the approver")}`}: press Read to send it to the contract, or let the agent</div>` : it.status === "reading" ? `<span class="pill Queued">the agent is reading it</span>` : `<span class="muted">waiting${j.approvers ? " for Telegram or Read" : ""}</span>`;
+    const stateOf = (it) => it.status === "approved" ? `<span class="pill Approval">approved</span><div class="muted" style="font-size:12px">${/^trusted vendor/.test(it.approved_by || "") ? "trusted vendor, accepted without asking" : `by ${esc(it.approved_by || "the approver")}`}: press Read to send it to the contract, or let the agent</div>` : it.status === "reading" ? `<span class="pill Queued">the agent is reading it</span>` : `<span class="muted">waiting${j.approvers ? " for Telegram or Read" : ""}</span>`;
     const row = (it) => `<tr><td class="mono">${esc(new Date(it.date).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(it.from)}${it.chat_title ? `<div class="muted" style="font-size:12px">${esc(it.chat_title)}</div>` : ""}</td><td class="mono">${esc(it.name)} <span class="muted">${(it.size / 1024).toFixed(0)} KB</span></td><td>${esc(it.caption || "")}${it.caption ? "<br>" : ""}${stateOf(it)}</td><td class="acts"><button type="button" class="btn-signal small act" data-act="inboxRead" data-id="${esc(it.id)}"${it.status === "reading" ? " disabled" : ""}>Read</button> <button type="button" class="btn-ghost small act" data-act="inboxDiscard" data-id="${esc(it.id)}">Discard</button></td></tr>`;
     $("#inboxGroups").innerHTML = keys.map((k) => { const v = vmap[k]; const name = k ? (v?.name || k) : "The whole company"; return `<details class="vgroup" open><summary>
       <span><span class="k">${k ? "vendor" : "chats"}</span><span class="n"><b>${k ? flagImg(v?.country) : ""}${esc(name)}</b>${k && !v ? ` <span class="muted">(no longer a vendor)</span>` : ""}${k && v && v.active === false ? ` <span class="muted">(inactive)</span>` : ""}</span></span>
@@ -2020,10 +2077,26 @@ async function loadInbox() {
     renderChats(j.chatList || []);
     const approvers = j.approvers ? `, ${j.approvers} approver${j.approvers === 1 ? "" : "s"} on Telegram` : "";
     $("#inboxFoot").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}${approvers}. ${inboxItems.length} waiting.`;
+    const unapproved = inboxItems.filter((it) => (it.status || "waiting") === "waiting");
+    $("#inboxApproveAll").hidden = !unapproved.length; $("#inboxApproveAll").textContent = `Approve all waiting (${unapproved.length})`;
     $("#tgStatus").textContent = `${j.chats} chat${j.chats === 1 ? "" : "s"} connected to @${j.bot}${approvers}`;
   } catch (e) { $("#inboxErr").textContent = `could not read the inbox: ${e.message}`; $("#inboxErr").hidden = false; }
 }
 $("#inboxRefresh").addEventListener("click", loadInbox);
+/** Every waiting invoice marked approved at once, like an Approve from Telegram: the agent reads each one and the contract decides each on its own limits. */
+$("#inboxApproveAll").addEventListener("click", async () => {
+  const items = inboxItems.filter((it) => (it.status || "waiting") === "waiting");
+  if (!items.length) return;
+  const who = settings.owner || settings.operator || "the console";
+  if (!(await ask({ eyebrow: "Inbox", title: `Approve all ${items.length} waiting invoice${items.length === 1 ? "" : "s"}?`, rows: items.slice(0, 8).map((it, i) => [`invoice ${i + 1}`, `${it.name}, from ${it.from}${it.vendor ? ` (${Object.fromEntries(state.vendors)[it.vendor]?.name || it.vendor})` : ""}`]).concat(items.length > 8 ? [["and", `${items.length - 8} more`]] : []), note: "Approve means the agent reads each one in the enclave and the contract decides each on its own limits: duplicates, changed payouts and anything over the caps are still refused or held. The chats are told.", ok: "Approve all" }))) return;
+  const b = $("#inboxApproveAll"); b.disabled = true; $("#inboxErr").hidden = true;
+  try {
+    const r = await fetch(`${RELAY}/inbox/approve`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, ids: items.map((it) => it.id), by: who }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status);
+    await loadInbox();
+  } catch (err) { $("#inboxErr").textContent = err.message; $("#inboxErr").hidden = false; }
+  finally { b.disabled = false; }
+});
 /** The vendor picker for a new chat: filled from the contract's vendors, keeps the current choice. */
 function fillTgFor() {
   const sel = $("#tgFor"), cur = sel.value;

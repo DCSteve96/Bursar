@@ -102,6 +102,11 @@ async function ownerProof(body) {
 const newCode = () => { const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; const b = crypto.getRandomValues(new Uint8Array(8)); return Array.from(b, (x) => a[x % 32]).join(""); };
 const personName = (u) => u ? [u.first_name, u.last_name].filter(Boolean).join(" ") + (u.username ? ` (@${u.username})` : "") : "";
 const isApprover = (rec, chat) => !!rec.approvers?.[String(chat)];
+/** The invoices still waiting for a decision that were put in front of this approver chat. */
+async function waitingFor(env, treasury, chat) {
+  const items = (await kvGet(env, `inbox:${treasury}`)) || [];
+  return items.filter((x) => (x.status || "waiting") === "waiting" && x.asked?.[String(chat)]);
+}
 const stripItem = ({ file_id, asked, ...x }) => ({ ...x, status: x.status || "waiting" });
 
 // The contract's reasons, in words. Same texts as the console.
@@ -197,8 +202,17 @@ async function onCallback(env, cq) {
   const chat = cq.message?.chat?.id;
   const [verb, id] = String(cq.data || "").split(":");
   const link = chat != null && await kvGet(env, `tg:${chat}`);
-  if (!link || !link.approver || !(verb === "a" || verb === "r") || !id) return answer("Not for this chat.");
+  if (!link || !link.approver || !["a", "r", "aa", "ak"].includes(verb) || (verb.length === 1 && !id)) return answer("Not for this chat.");
   if (String(cq.from?.id) !== String(link.user)) return answer("Only the person who connected this chat as approver decides here.");
+  if (verb === "aa" || verb === "ak") {
+    // "Approve all" under the summary this chat asked for: every invoice still waiting here, in one go
+    await tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: cq.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    if (verb === "ak") return answer("Kept waiting.");
+    const waiting = await waitingFor(env, link.treasury, chat);
+    let n = 0;
+    for (const it of waiting) if (/^Approved\./.test(await decide(env, link.treasury, it.id, true, personName(cq.from)))) n++;
+    return answer(n ? `Approved ${n}. The outcomes follow here.` : "Nothing was waiting any more.");
+  }
   return answer(await decide(env, link.treasury, id, verb === "a", personName(cq.from)));
 }
 
@@ -240,6 +254,14 @@ async function onUpdate(env, update) {
   if (/^\/help\b/.test(text)) return say("Bursar inbox. A company connects this chat from its console; PDF invoices posted here reach the company, a person reads them and the treasury contract decides. An approver connected from the console gets each invoice with Approve and Reject. Nothing is paid from this chat. /privacy for what is kept.");
   const link = await kvGet(env, `tg:${chat}`);
   const doc = m.document;
+  // an approver asking for everything at once: a summary first, then one button for all of it
+  if (!doc && link?.approver && /^(\/all\b|approve all\b|yes all\b|all\b)/i.test(text)) {
+    if (String(m.from?.id) !== String(link.user)) return say("Only the person who connected this chat as approver decides here.");
+    const waiting = await waitingFor(env, link.treasury, chat);
+    if (!waiting.length) return say("Nothing is waiting for a decision.");
+    const lines = waiting.map((it, i) => `${i + 1}. ${it.name}, from ${it.from}${it.vendor ? ` (${it.chat_title || it.vendor})` : ""}${it.caption ? `: ${it.caption.slice(0, 60)}` : ""}`);
+    return tg(env, "sendMessage", { chat_id: chat, text: `${waiting.length} invoice${waiting.length === 1 ? "" : "s"} waiting:\n${lines.join("\n")}\n\nApprove all means Bursar reads each one in the enclave and the contract decides each on its own limits; what the contract holds comes back here.`, reply_markup: { inline_keyboard: [[{ text: `Approve all ${waiting.length}`, callback_data: "aa" }, { text: "Keep waiting", callback_data: "ak" }]] } }).catch(() => {});
+  }
   // an approver writing yes or no: the invoice they replied to, or the only one waiting
   if (!doc && text && link?.approver) {
     const yes = /^(yes|y|ok|okay|approve|approved|pay)\b/i.test(text), no = /^(no|reject|rejected|decline|declined|cancel)\b/i.test(text);
@@ -340,6 +362,15 @@ async function inbox(request, env, url, headers) {
     const up = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${f.file_path}`);
     if (!up.ok) return json(502, { error: `telegram file ${up.status}` }, headers);
     return new Response(up.body, { status: 200, headers: { ...headers, "content-type": "application/pdf", "content-disposition": `inline; filename="${it.name.replace(/[^\w.-]/g, "_")}"` } });
+  }
+  // The console approving waiting invoices in bulk: each is marked like an Approve from Telegram and the agent takes it from there.
+  if (request.method === "POST" && p === "/inbox/approve") {
+    const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 100) : [];
+    if (!ids.length) return json(400, { error: "ids is required" }, headers);
+    const by = String(body.by || "the console").slice(0, 60);
+    let approved = 0;
+    for (const id of ids) if (/^Approved\./.test(await decide(env, treasury, id, true, by))) approved++;
+    return json(200, { ok: true, approved }, headers);
   }
   if (request.method === "POST" && p === "/inbox/discard") {
     const items = (await kvGet(env, `inbox:${treasury}`)) || [];
