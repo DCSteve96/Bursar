@@ -308,6 +308,36 @@ invoices/             make_invoices.py and six fictional sample invoices
 
 [NEAR Business](https://docs.business.near.com/what-is) is a multisig treasury: members, roles, a voting threshold, assets on many chains, confidential. It answers "who must approve this transfer". Bursar answers the question before it: "should this invoice be paid at all, and on what checks, without anyone reading it". The AI reads the invoice in an enclave; the contract applies the company's policy (registered vendor, fixed payout, caps, budgets, orders, duplicates, tax ids, withholding) and pays what passes; a person sees only what the rules hold back. The two fit together: Bursar already escalates held invoices to a Sputnik DAO, and a NEAR Business treasury could sit in the same place, as the vault that holds the funds and votes on the exceptions, while Bursar does the reading and the policy. Not built yet; the escalation hook is the same.
 
+## Libraries, templates and AI-generated code
+
+No template, starter kit or boilerplate: every file was written for this project. What it stands on:
+
+| Where | Library | Role |
+|---|---|---|
+| `contracts/policy`, `contracts/registry` | near-sdk 5, schemars | the contracts |
+| `contracts/test-usdc` | near-sdk 5, near-contract-standards 5 | the throwaway NEP-141 for testnet |
+| `app/` | near-api-js 7, borsh | accounts, transactions, meta transactions |
+| `app/` | @noble/curves, @noble/hashes | ed25519 and secp256k1 signatures, hashes, in the verifier and the relayer |
+| `app/` | @phala/dcap-qvl | Intel TDX quote verification against Intel collateral |
+| `app/` | @defuse-protocol/one-click-sdk-typescript | NEAR Intents 1-Click quotes and status |
+| `app/` | @modelcontextprotocol/sdk, zod | the MCP server and its tool schemas |
+| `app/` (dev) | typescript, tsx, vitest, @types/node | build and tests |
+| `web/` (CDN, pinned with integrity hashes) | @fastnear/near-connect 0.14.1 | the wallet picker and the wallets' own code |
+| `web/` | @noble/curves 2.4.0, @noble/hashes 2.4.0 | signing in the browser, receipt checks |
+| `web/` | pdf.js 4.10.38 | PDF pages to PNG in the browser |
+| `web/` | @phala/dcap-qvl 0.7.0 | the same quote verifier, in the browser |
+| `web/` | SheetJS xlsx 0.18.5 | the Excel report (loaded on first use) |
+| `web/` | qrcode-generator 1.4.4 | the treasury account as a QR code (loaded on first use) |
+| `web/vendor/meteor-sdk.js` | @meteorwallet/sdk 3.24.0 bundled with esbuild | the Meteor browser extension path (the CDN builds do not load) |
+| `relay/` | none (Cloudflare Workers runtime, KV) | the reading relay and the Telegram inbox |
+| `invoices/` | reportlab (Python) | the fictional sample invoices |
+| `video/` | remotion 4.0.538, react 19 | the demo video, not part of the product |
+| tools | poppler (pdftoppm, pdftotext), near-cli-rs | rasterizing and text extraction, the CLI steps |
+
+The invoice reading at runtime is a model on NEAR AI Cloud (`Qwen/Qwen3-VL-30B-A3B-Instruct` by default; the recorded demo readings used `z-ai/glm-5.3-flash`), inside a TDX enclave, with the receipt and attestation described in step 6. The model only reads: it produces the claim, never a decision.
+
+AI-generated code: the project was built by one person working with Claude Code (Anthropic) as the pair programmer for the whole codebase, contracts, tests, pages, relay, docs and this README included, under that person's direction and review, with the design decisions, the security rounds and the dry runs described above. Nothing was copied from another project. The three internal audit rounds were also run with Claude Code, as independent reviewer agents, and every contract finding has a unit test.
+
 ## Honest limits
 
 - Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through us. Paying vendors in a stablecoin is regulated differently from country to country (unrestricted, to be reported, or not allowed for businesses): checking that is the company's responsibility, not something Bursar can do.
