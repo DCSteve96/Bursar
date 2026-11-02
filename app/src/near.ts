@@ -129,7 +129,7 @@ export async function requestPaymentViaRelayer(claim: InvoiceClaim): Promise<{ t
   const a = await account(config.agentAccount);
   const { signedDelegate } = await a.createSignedMetaTransaction({
     receiverId: config.treasury,
-    actions: [actions.functionCall("request_payment", { claim }, 150_000_000_000_000n, 0n)],
+    actions: [actions.functionCall("request_payment", { claim }, 100_000_000_000_000n, 0n)],
     blockHeightTtl: 120,
   });
   const bytes = encodeSignedDelegate(signedDelegate);
@@ -144,7 +144,7 @@ export async function requestPaymentViaRelayer(claim: InvoiceClaim): Promise<{ t
 
 /** Direct call, for when the agent account holds a little NEAR itself (no relayer). */
 export async function requestPaymentDirect(claim: InvoiceClaim): Promise<{ txHash: string; paymentId: number }> {
-  const r = await call(config.agentAccount, "request_payment", { claim }, 150);
+  const r = await call(config.agentAccount, "request_payment", { claim }, 100);
   const paymentId = Number(getTransactionLastResult(r as any));
   return { txHash: txHash(r), paymentId };
 }

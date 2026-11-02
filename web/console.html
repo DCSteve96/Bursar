@@ -991,7 +991,7 @@ const A = {
   functionCall: (method, args, gasTgas, deposit = 0n) => (b) => b.u8(2).str(method).vec(te.encode(JSON.stringify(args))).uint(TGAS(gasTgas), 8).uint(deposit, 16),
   transfer: (amount) => (b) => b.u8(3).uint(amount, 16),
   addFullAccessKey: (pub) => (b) => b.u8(5).u8(0).bytes(pub).uint(0n, 8).u8(1),
-  addFunctionCallKey: (pub, allowance, receiverId, methods) => (b) => { b.u8(5).u8(0).bytes(pub).uint(0n, 8).u8(0).u8(1).uint(allowance, 16).str(receiverId).uint(methods.length, 4); for (const m of methods) b.str(m); return b; },
+  addFunctionCallKey: (pub, allowance, receiverId, methods) => (b) => { b.u8(5).u8(0).bytes(pub).uint(0n, 8).u8(0); if (allowance == null) b.u8(0); else b.u8(1).uint(allowance, 16); b.str(receiverId).uint(methods.length, 4); for (const m of methods) b.str(m); return b; },
 };
 const keyOf = (secretKey) => {
   const raw = b58decode(secretKey.replace(/^ed25519:/, ""));
@@ -1470,7 +1470,7 @@ $("#submit").addEventListener("click", async () => {
       : settings.owner && settings.ownerKey ? { signerId: settings.owner, secretKey: settings.ownerKey, how: settings.ownerKeyKind === "wallet" ? "signed by the owner's wallet key" : "signed by the owner's key" }
       : settings.operator && settings.operatorKey ? { signerId: settings.operator, secretKey: settings.operatorKey, how: "signed by a collaborator's key" } : null;
     if (!signer) throw new Error("no key in this browser can ask the contract: sign in with your wallet, or set the agent key in Settings");
-    const { hash, value } = await functionCall({ signerId: signer.signerId, secretKey: signer.secretKey, receiverId: settings.treasury, method: "request_payment", args: { claim: current.claim }, gasTgas: 150 });
+    const { hash, value } = await functionCall({ signerId: signer.signerId, secretKey: signer.secretKey, receiverId: settings.treasury, method: "request_payment", args: { claim: current.claim }, gasTgas: 100 }); // a paid invoice burns about 10 TGas, a DAO proposal about 70; the network charges the attached gas at a pessimistic price until the refund, so less attached means less NEAR the agent needs to hold
     await showDecision(Number(value), hash, signer.how);
     loadTreasury();
   } catch (e) {
@@ -2555,7 +2555,7 @@ async function createTreasuryWithWallet(company) {
     if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
     else {
       step("agent", "wait", `creating ${agent}`);
-      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.1)), A.addFunctionCallKey(agentKey.pub, NEAR(0.3), treasury, ["request_payment"])]);
+      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.1)), A.addFunctionCallKey(agentKey.pub, null, treasury, ["request_payment"])]);
       step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`, t2.hash);
     }
     if (await accountExists(executor)) step("executor", "ok", `${executor} already exists`);
@@ -2653,7 +2653,7 @@ async function createTreasury(company) {
     if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
     else {
       step("agent", "wait", `creating ${agent}`);
-      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(agentKey.pub, NEAR(1), treasury, ["request_payment"])]);
+      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.5)), A.addFunctionCallKey(agentKey.pub, null, treasury, ["request_payment"])]);
       step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`, t2.hash);
     }
     const stats = await view(treasury, "get_stats");
