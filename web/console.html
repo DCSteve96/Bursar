@@ -2683,18 +2683,23 @@ async function createTreasury(company) {
     $("#createErr").textContent = e.message; $("#createErr").hidden = false; $("#wizRetry").hidden = false;
   } finally { btn.disabled = false; }
 }
-// ----- one-off: deploy the public registry as a sub-account of the signed-in owner (console?deploy=registry) -----
+// ----- one-off: deploy the public registry as a sub-account of the wallet's account (console?deploy=registry[&network=mainnet]) -----
+// The wallet, not the profile, says who signs: the page may hold a testnet profile while the registry goes on mainnet.
 async function deployRegistry() {
-  const wo = walletOwner(); const owner = settings.owner || wo?.account; const network = settings.network || wo?.network || "testnet";
-  if (!owner) { alert("sign in with the wallet first"); return; }
-  if (!settings.ownerKeyKind && !settings.ownerKey) { $("#ownerKeyKind").value = "wallet"; $("#owner").value = owner; $("#network").value = network; saveSettings(); }
-  const reg = `registry.${owner}`;
-  if (!(await ask({ eyebrow: "Registry", title: `Deploy the Bursar registry at ${reg}?`, rows: [["network", network], ["cost", "2 NEAR, locked as the contract's storage on that account"]], note: "One transaction: the account is created with the registry contract inside and no access key. The pages of this site name it, so every treasury created from here lists itself in it.", ok: "Deploy" }))) return;
+  const network = q.get("network") === "testnet" ? "testnet" : "mainnet";
   try {
+    const [{ NearConnector }, { registerMeteorExtension }] = await Promise.all([import("https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js"), import("./meteor.js")]);
+    const connector = new NearConnector({ network, footerBranding: null });
+    await registerMeteorExtension().catch(() => {});
+    let wallet, accounts;
+    try { ({ wallet, accounts } = await connector.getConnectedWallet()); } catch { wallet = await connector.connect(); accounts = await wallet.getAccounts({ network }); }
+    const owner = accounts?.[0]?.accountId; if (!owner) throw new Error("the wallet gave no account");
+    const reg = `registry.${owner}`;
+    if (!(await ask({ eyebrow: "Registry", title: `Deploy the Bursar registry at ${reg}?`, rows: [["network", network], ["signer", owner], ["cost", "2 NEAR, locked as the contract's storage on that account"]], note: "One transaction: the account is created with the registry contract inside and no access key. The pages of this site name it, so every treasury created from here lists itself in it.", ok: "Deploy" }))) return;
     const wasm = new Uint8Array(await (await fetch("contracts/bursar_registry.wasm")).arrayBuffer());
-    const r = await ownerSend(reg, [{ createAccount: true }, { transfer: NEAR(2) }, { deploy: wasm }, { method: "new", args: {}, gasTgas: 30 }]);
-    alert(`registry live at ${reg} (tx ${r.hash})`);
-  } catch (e) { alert(`not deployed: ${e.message}`); }
+    const r = await wallet.signAndSendTransaction({ network, signerId: owner, receiverId: reg, actions: [{ type: "CreateAccount" }, { type: "Transfer", params: { deposit: String(NEAR(2)) } }, { type: "DeployContract", params: { code: wasm } }, { type: "FunctionCall", params: { methodName: "new", args: {}, gas: String(TGAS(30)), deposit: "0" } }] });
+    alert(`registry live at ${reg} (tx ${r?.transaction?.hash || r?.transaction_outcome?.id || ""})`);
+  } catch (e) { alert(`not deployed: ${e.message || e}`); }
 }
 if (q.get("deploy") === "registry") setTimeout(deployRegistry, 1500);
 // ----- the wizard -----
