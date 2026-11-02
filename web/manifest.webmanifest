@@ -1,0 +1,20 @@
+{
+  "name": "Bursar",
+  "short_name": "Bursar",
+  "description": "An AI treasurer that pays invoices within limits it cannot change.",
+  "id": "/console",
+  "start_url": "/console",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d0f0e",
+  "theme_color": "#0d0f0e",
+  "icons": [
+    { "src": "brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "brand/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "brand/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Inbox", "url": "/console#inbox" },
+    { "name": "Attention", "url": "/console#attention" }
+  ]
+}
