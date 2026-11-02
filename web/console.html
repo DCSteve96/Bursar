@@ -59,7 +59,8 @@
     .side .me { margin-top: 0; border-top: 0; padding: 0; } .side .me .min { display: none; }
     .wordmark span { display: none; }
     .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; flex-direction: row; justify-content: space-around; gap: 0; background: var(--void); border-top: 1px solid var(--line-dark); padding: 6px max(4px, env(safe-area-inset-right, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px)); }
-    .tabs a { flex: 1 1 0; min-width: 0; flex-direction: column; gap: 4px; padding: 6px 2px; font: 500 10px/1 var(--display); text-align: center; position: relative; }
+    .tabs { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); }
+    .tabs a { min-width: 0; flex-direction: column; gap: 4px; padding: 6px 1px; font: 500 9.5px/1 var(--display); letter-spacing: -0.01em; text-align: center; position: relative; overflow: hidden; }
     .tabs a[aria-current] { font-weight: 600; }
     .tabs a svg { width: 18px; height: 18px; }
     .badge { position: absolute; top: 0; left: calc(50% + 4px); margin: 0; font-size: 10px; line-height: 16px; padding: 0 5px; }
@@ -85,13 +86,25 @@
   .wiz input, .wiz select { border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); } .wiz .btn-ghost { color: var(--fg-light); border-color: var(--line-light); }
   .wiz .log .ok { color: var(--paid-light); } .wiz .log .fail { color: var(--blocked-light); } .wiz .log .wait { color: var(--wait-light); } .wiz .kv .k { color: var(--mute-light); }
   @media (max-width: 640px) { .wiz .pane { padding: 20px; } .wiz .grid.cols-2 { grid-template-columns: 1fr; } }
+  /* Phones: long identifiers wrap instead of widening the page; a table becomes a stack of cards, one per row, each cell labelled with its column name. */
+  @media (max-width: 640px) {
+    .view .card, .view .card p, .view .kv .v, .view .mono { overflow-wrap: anywhere; }
+    .wrap table.cards, .wrap table.cards tbody, .wrap table.cards tr, .wrap table.cards td { display: block; }
+    .wrap table.cards thead { display: none; }
+    .wrap table.cards tr { padding: 10px 14px 12px; border-top: 1px solid var(--line-light); } .wrap table.cards tr:first-child { border-top: 0; }
+    .wrap table.cards td { padding: 4px 0; border: 0; overflow-wrap: anywhere; white-space: normal; }
+    .wrap table.cards td[data-label]::before { content: attr(data-label); display: block; font: 600 10px/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); }
+    .wrap table.cards td[data-label=""]::before, .wrap table.cards td.muted[colspan]::before { display: none; }
+    .wrap table.cards td .acts { margin-top: 8px; } .wrap table.cards td.mono { white-space: normal; }
+    .wrap table.cards td:has(> input[type="checkbox"]:only-child) { padding-bottom: 0; }
+  }
   /* top up: the one card in Overview that stands out, mint like the receipt band */
   .view .card.topup { background: var(--mint); color: var(--fg-light); border: 0; border-left: 6px solid var(--signal); display: grid; grid-template-columns: 160px 1fr; gap: 24px; align-items: start; }
   .topup .qr { width: 160px; } .topup .qr svg { width: 160px; height: 160px; display: block; background: #fff; border-radius: 4px; } .topup .qr .cap { font-size: 12px; color: var(--mute-light); margin-top: 8px; text-align: center; }
   .topup h3 { margin: 0 0 6px; font-size: 22px; line-height: 1.2; } .topup .acct { font: 500 18px/1.3 var(--mono); overflow-wrap: anywhere; margin: 0 0 12px; }
   .topup .kv .k { color: var(--mute-light); } .topup .kv .v { color: var(--fg-light); } .topup .v.err { color: var(--blocked-light); }
   .topup input { border: 1px solid var(--line-light); background: var(--paper); color: var(--fg-light); } .topup .btn-ghost { color: var(--fg-light); border-color: var(--line-light); } .topup .muted { color: var(--mute-light); }
-  @media (max-width: 720px) { .topup { grid-template-columns: 1fr; } .topup .qr { margin: 0 auto; } }
+  @media (max-width: 720px) { .view .card.topup { grid-template-columns: 1fr; } .topup .qr { margin: 0 auto; } .topup .kv { grid-template-columns: 1fr; gap: 2px 0; } .topup .kv .k { margin-top: 8px; } .topup .kv .v { overflow-wrap: anywhere; } }
   /* the page's own confirm: same dialog as the wizard, one question, two buttons */
   dialog.ask { width: min(520px, calc(100vw - 32px)); } .ask h3 { font-size: 22px; margin: 6px 0 14px; } .ask .kv { margin: 0 0 14px; } .ask .kv .v { overflow-wrap: anywhere; }
   .ask p.muted { margin: 0; } .ask .actions { justify-content: flex-end; } .ask .btn-danger { background: var(--blocked-light); color: #fff; border-color: var(--blocked-light); }
@@ -859,10 +872,18 @@ const RELAY = ((await override("relay", "reading relay")) || "https://bursar-rel
 const useOwnKey = () => settings.readMode === "own";
 const aiBase = () => useOwnKey() ? AI_BASE : `${RELAY}/v1`;
 const settings = {};
+// Phones show tables as cards (see the CSS): every cell carries its column name. Runs after each render.
+function labelCells() {
+  for (const t of document.querySelectorAll(".wrap table")) {
+    t.classList.add("cards");
+    const heads = [...t.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+    for (const tr of t.querySelectorAll("tbody tr")) [...tr.children].forEach((td, i) => { if (!td.hasAttribute("colspan")) td.setAttribute("data-label", heads[i] ?? ""); });
+  }
+}
+new MutationObserver((muts) => { if (muts.some((m) => m.target.closest?.("table") || [...m.addedNodes].some((n) => n.querySelector?.("table") || n.tagName === "TABLE"))) { clearTimeout(labelCells.t); labelCells.t = setTimeout(labelCells, 30); } }).observe(document.body, { childList: true, subtree: true });
 function loadSettings() {
   for (const f of FIELDS) { try { const v = localStorage.getItem("bursar." + f); if (v !== null) $("#" + f).value = v; } catch {} }
   // The reading model moved from GLM (a reasoning model, 20 to 60 s a page) to Qwen3-VL (3 s), both in NEAR's TEE.
-  try { if (localStorage.getItem("bursar.model") === "z-ai/glm-5.3-flash") { localStorage.setItem("bursar.model", "Qwen/Qwen3-VL-30B-A3B-Instruct"); $("#model").value = "Qwen/Qwen3-VL-30B-A3B-Instruct"; } } catch {}
   if (q.get("treasury") && (profiles.some((p) => p.treasury === q.get("treasury")) || !profiles.length)) $("#treasury").value = q.get("treasury");
   if (q.get("network")) $("#network").value = q.get("network");
   if (q.get("agent")) $("#agent").value = q.get("agent");
