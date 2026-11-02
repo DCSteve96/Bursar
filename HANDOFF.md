@@ -584,3 +584,11 @@ Primo tentativo su mainnet: `Qwen/Qwen3-VL-30B-A3B-Instruct` rispondeva 502 "ups
 - Console: `#model` è una select in Settings (Qwen3-VL, glm-5.3-flash). `readInTee` chiede l'attestazione per modello; se il modello scelto fallisce due volte con uno status transitorio, passa all'altro (`MODEL_FALLBACK`), richiede l'attestazione con lo stesso nonce e scrive nella ricevuta il modello che ha risposto davvero. La riga "model" di This treasury rimanda a Settings.
 - Agente: `NEAR_AI_MODEL_FALLBACK` (default `z-ai/glm-5.3-flash`), stessa logica in `readInvoice`; `fetchAttestation(nonce, model)`.
 - Da ricordare: il verificatore controlla il modello della ricevuta, quindi un fallback non rompe `bursar verify`.
+
+### 2.50 Gas di request_payment dal browser (2 novembre, mainnet)
+
+Primo Request payment su mainnet: `NotEnoughBalance`, agente con 0.1 NEAR, costo 0.1509 NEAR. NEAR addebita il gas allegato a un prezzo pessimistico (gas × prezzo × 1.03^n, con n proporzionale al gas allegato) e rimborsa dopo: con 150 TGas il costo anticipato è 0.15 NEAR, con 100 TGas circa 0.047. Lo stesso costo pessimistico viene scalato dall'allowance della chiave e non rientra: un'allowance di 0.3 NEAR moriva dopo due richieste.
+
+Misure su testnet (bulktreasury): request_payment pagata su NEAR brucia circa 10 TGas in tutto (contratto 5.3, ft_transfer 1.8, callback 1.9), con 50 TGas allegati; hold 4.4 TGas. Percorso DAO: 30 (proposta) + 30 (callback) statici + 6 propri, quindi 100 TGas bastano con margine.
+
+Cambiato: console e agente allegano 100 TGas; la chiave dell'agente creata dal wizard non ha allowance (può chiamare solo request_payment, il tetto reale è il saldo dell'agente). La chiave mainnet di `agent.bursar-8ccac085.near` ha ancora allowance 0.3 NEAR: bastano per la demo (circa 6 richieste), poi va aggiunta una chiave nuova dal wallet.
