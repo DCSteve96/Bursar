@@ -119,8 +119,8 @@ const headers = (): Record<string, string> =>
   config.aiApiKey === "proxy" ? { "x-no-aliasing": "true" } : { Authorization: `Bearer ${config.aiApiKey}`, "x-no-aliasing": "true" };
 
 /** Preflight: fetch the model attestation bound to a fresh nonce. We keep the nonce in the receipt. */
-export async function fetchAttestation(nonce: string): Promise<AttestationReport> {
-  const url = `${config.aiBaseUrl}/attestation/report?model=${encodeURIComponent(config.aiModel)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`;
+export async function fetchAttestation(nonce: string, model = config.aiModel): Promise<AttestationReport> {
+  const url = `${config.aiBaseUrl}/attestation/report?model=${encodeURIComponent(model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`;
   const r = await fetch(url, { headers: headers() });
   if (!r.ok) throw new Error(`attestation ${r.status}: ${await r.text()}`);
   return (await r.json()) as AttestationReport;
@@ -146,26 +146,21 @@ export async function fetchSignature(id: string): Promise<SignatureRecord | null
 export async function readInvoice(pngPages: Buffer[], textFallback?: string): Promise<{ extraction: Extraction; receipt: AiReceipt; attestation: AttestationReport }> {
   if (!config.aiApiKey) throw new Error("NEAR_AI_API_KEY is not set");
   const nonce = randomBytes(32).toString("hex");
-  const attestation = await fetchAttestation(nonce).catch((e) => ({ error: String(e) }) as AttestationReport);
+  let model = config.aiModel;
+  let attestation = await fetchAttestation(nonce, model).catch((e) => ({ error: String(e) }) as AttestationReport);
 
   const content: unknown[] = [{ type: "text", text: "Read this invoice." }];
   for (const p of pngPages) content.push({ type: "image_url", image_url: { url: `data:${p[0] === 0xff && p[1] === 0xd8 ? "image/jpeg" : "image/png"};base64,${p.toString("base64")}` } });
   if (textFallback) content.push({ type: "text", text: `Extracted text, in case the image is unclear:\n${textFallback.slice(0, 12000)}` });
 
-  const body = {
-    model: config.aiModel,
-    temperature: 0,
-    messages: [
-      { role: "system", content: SYSTEM },
-      { role: "user", content },
-    ],
-    response_format: { type: "json_object" },
-    stream: false,
-  };
-  const requestBody = JSON.stringify(body);
-  // The gateway answers 502 now and then ("upstream request failed"): retry a few times before giving up.
+  const bodyFor = (m: string) => JSON.stringify({ model: m, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false });
+  let requestBody = bodyFor(model);
+  // The gateway answers 502 now and then ("upstream request failed"): retry a few times before giving up. When the
+  // chosen model keeps failing and another is configured (NEAR_AI_MODEL_FALLBACK), it takes over with its own attestation.
+  const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530];
   let r!: Response;
   let responseBody = "";
+  let switched = false;
   for (let attempt = 0; ; attempt++) {
     r = await fetch(`${config.aiBaseUrl}/chat/completions`, {
       method: "POST",
@@ -173,7 +168,14 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
       body: requestBody,
     });
     responseBody = await r.text();
-    if (r.ok || attempt >= 3 || ![429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530].includes(r.status)) break;
+    if (r.ok || !TRANSIENT.includes(r.status)) break;
+    if (!switched && attempt >= 1 && config.aiModelFallback && config.aiModelFallback !== model) {
+      switched = true; model = config.aiModelFallback; requestBody = bodyFor(model);
+      console.error(`[ai] ${config.aiModel} answered ${r.status} twice: switching to ${model}`);
+      attestation = await fetchAttestation(nonce, model).catch((e) => ({ error: String(e) }) as AttestationReport);
+      continue;
+    }
+    if (attempt >= 3) break;
     await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
   }
   if (!r.ok) throw new Error(`chat ${r.status}: ${responseBody.slice(0, 500)}`);
@@ -183,7 +185,7 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
 
   const sig = await fetchSignature(completion.id).catch(() => null);
   const receipt: AiReceipt = {
-    model: config.aiModel,
+    model,
     inference_id: completion.id,
     request_sha256: sha256(requestBody),
     response_sha256: sha256(responseBody),

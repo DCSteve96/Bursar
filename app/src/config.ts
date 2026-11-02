@@ -31,6 +31,8 @@ export const config = {
   aiBaseUrl: process.env.NEAR_AI_BASE_URL ?? "https://cloud-api.near.ai/v1",
   aiApiKey: process.env.NEAR_AI_API_KEY ?? "",
   aiModel: process.env.NEAR_AI_MODEL ?? "Qwen/Qwen3-VL-30B-A3B-Instruct",
+  aiModelFallback: process.env.NEAR_AI_MODEL_FALLBACK ?? "z-ai/glm-5.3-flash", // tried when the chosen model keeps failing at the gateway
+
 
   // NEAR Intents 1-Click (mainnet only)
   oneClickUrl: process.env.ONE_CLICK_URL ?? "https://1click.chaindefuser.com",

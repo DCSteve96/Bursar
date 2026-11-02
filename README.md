@@ -336,7 +336,7 @@ No template, starter kit or boilerplate: every file was written for this project
 | `video/` | remotion 4.0.538, react 19 | the demo video, not part of the product |
 | tools | poppler (pdftoppm, pdftotext), near-cli-rs | rasterizing and text extraction, the CLI steps |
 
-The invoice reading at runtime is a model on NEAR AI Cloud (`Qwen/Qwen3-VL-30B-A3B-Instruct` by default; the recorded demo readings used `z-ai/glm-5.3-flash`), inside a TDX enclave, with the receipt and attestation described in step 6. The model only reads: it produces the claim, never a decision.
+The invoice reading at runtime is a model on NEAR AI Cloud (`Qwen/Qwen3-VL-30B-A3B-Instruct` by default, `z-ai/glm-5.3-flash` as the fallback the agent and the console switch to when the gateway cannot reach the chosen one; the receipt names the model that actually answered; the recorded demo readings used `z-ai/glm-5.3-flash`), inside a TDX enclave, with the receipt and attestation described in step 6. The model only reads: it produces the claim, never a decision.
 
 AI-generated code: the project was built by one person working with Claude Code (Anthropic) as the pair programmer for the whole codebase, contracts, tests, pages, relay, docs and this README included, under that person's direction and review, with the design decisions, the security rounds and the dry runs described above. Nothing was copied from another project. The three internal audit rounds were also run with Claude Code, as independent reviewer agents, and every contract finding has a unit test.
 

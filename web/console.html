@@ -614,7 +614,9 @@
           <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
           <label><span>Inbox token (Telegram) <i class="help" tabindex="0" data-help="Set when you connect the first Telegram chat. The agent needs it too, to read what you approve from Telegram: BURSAR_INBOX_TOKEN in its environment, with BURSAR_RELAY set to the relay URL.">?</i></span><input id="inboxToken" type="password" placeholder="set by Connect a Telegram chat" autocomplete="off"></label>
         </div>
-        <input id="model" type="hidden" value="Qwen/Qwen3-VL-30B-A3B-Instruct">
+        <div class="grid cols-3" style="margin-top:12px">
+          <label><span>Model in the enclave <i class="help" tabindex="0" data-help="The model that reads the invoices on NEAR AI Cloud. The receipt names it and the verifier checks it. When the chosen one does not answer, the other is tried."></i></span><select id="model"><option value="Qwen/Qwen3-VL-30B-A3B-Instruct">Qwen/Qwen3-VL-30B-A3B-Instruct</option><option value="z-ai/glm-5.3-flash">z-ai/glm-5.3-flash</option></select></label>
+        </div>
         <div class="actions" style="margin-top:16px;align-items:center">
           <button id="demo" type="button" class="btn-ghost">Use the README demo treasury</button>
           <span class="muted" style="font-size:13px">Loads the treasury of the README walkthrough, read-only.</span>
@@ -1145,6 +1147,7 @@ function readingFlags(ex, text) {
 }
 const FLAG = { chat_vendor_mismatch: "it came from a chat linked to a different vendor", new_payment_details: "the invoice announces new payment details", urgency: "the invoice presses for immediate payment", mismatched_contact: "the contact details do not match the vendor", handwritten_or_altered: "the document looks altered", missing_invoice_number: "no invoice number", unreadable: "parts of the document are unreadable", no_text_layer: "a scan with no text layer: the amount cannot be cross-checked", amount_not_in_text: "the total the model read does not appear in the document's text", larger_amount_in_text: "a larger amount than the total appears in the document", totals_mismatch: "subtotal plus tax does not equal the total", low_confidence: "the model was not confident", currency_not_usdc: "the invoice is not in USDC" };
 const flagText = (f) => FLAG[f] ?? f;
+const MODEL_FALLBACK = { "Qwen/Qwen3-VL-30B-A3B-Instruct": "z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash": "Qwen/Qwen3-VL-30B-A3B-Instruct" };
 const aiHeaders = () => useOwnKey() && settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
 const sha256hex = (s) => toHex(sha256(te.encode(s)));
 
@@ -1153,29 +1156,35 @@ async function readInTee(pngPages, textFallback, step) {
   if (!useOwnKey() && !RELAY) throw new Error("Bursar reading is not available in this build yet: use your own NEAR AI Cloud key in Settings, or load a recorded reading below");
   const AI = aiBase();
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)));
-  step("attestation", "wait", "fetching the model attestation for a fresh nonce");
-  let attestation = { error: "not fetched" };
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const r = await fetch(`${AI}/attestation/report?model=${encodeURIComponent(settings.model)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
-      attestation = r.ok ? await r.json() : { error: `attestation ${r.status}: ${(await r.text()).slice(0, 200)}` };
-    } catch (e) { attestation = { error: String(e) }; } // a gateway hiccup answers without CORS headers: the browser sees a network error
-    if (!attestation.error) break;
-    step("attestation", "wait", `${attestation.error}, retrying`);
-    await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
-  }
-  step("attestation", attestation.error ? "fail" : "ok", attestation.error ?? `${attestation.model_attestations?.length ?? 0} model attestation(s), TDX quote bound to our nonce`);
+  let model = settings.model || "Qwen/Qwen3-VL-30B-A3B-Instruct";
+  const fetchAttestation = async (m) => {
+    step("attestation", "wait", `fetching the attestation of ${m} for a fresh nonce`);
+    let att = { error: "not fetched" };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch(`${AI}/attestation/report?model=${encodeURIComponent(m)}&provider=near&signing_algo=ecdsa&nonce=${nonce}`, { headers: aiHeaders() });
+        att = r.ok ? await r.json() : { error: `attestation ${r.status}: ${(await r.text()).slice(0, 200)}` };
+      } catch (e) { att = { error: String(e) }; } // a gateway hiccup answers without CORS headers: the browser sees a network error
+      if (!att.error) break;
+      step("attestation", "wait", `${att.error}, retrying`);
+      await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));
+    }
+    step("attestation", att.error ? "fail" : "ok", att.error ?? `${att.model_attestations?.length ?? 0} model attestation(s) of ${m}, TDX quote bound to our nonce`);
+    return att;
+  };
+  let attestation = await fetchAttestation(model);
 
   const content = [{ type: "text", text: "Read this invoice." }];
   for (const p of pngPages) content.push({ type: "image_url", image_url: { url: p.startsWith("data:") ? p : `data:image/png;base64,${p}` } });
   if (textFallback) content.push({ type: "text", text: `Extracted text, in case the image is unclear:\n${textFallback.slice(0, 12000)}` });
-  const body = { model: settings.model, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false };
-  const requestBody = JSON.stringify(body);
-  step("model", "wait", `asking ${settings.model} inside the enclave`);
+  const bodyFor = (m) => JSON.stringify({ model: m, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false });
+  let requestBody = bodyFor(model);
+  step("model", "wait", `asking ${model} inside the enclave`);
   // The gateway answers 502 now and then, 524 when the model takes longer than its edge allows, and an
   // error response carries no CORS headers, so the browser reports it as a network error: retry on all.
-  const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530], TRIES = 6;
-  let r = null, responseBody = "", lastErr = "";
+  // When the chosen model keeps failing, the other one takes over, with its own attestation for the same nonce.
+  const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530], TRIES = 6, SWITCH_AT = 2;
+  let r = null, responseBody = "", lastErr = "", switched = false;
   for (let attempt = 0; attempt < TRIES; attempt++) {
     try {
       r = await fetch(`${AI}/chat/completions`, { method: "POST", headers: { ...aiHeaders(), "content-type": "application/json" }, body: requestBody });
@@ -1183,6 +1192,12 @@ async function readInTee(pngPages, textFallback, step) {
       if (r.ok || !TRANSIENT.includes(r.status)) break;
       lastErr = `gateway answered ${r.status}`;
     } catch (e) { r = null; lastErr = `network error (${e.message})`; }
+    if (!switched && attempt + 1 >= SWITCH_AT && MODEL_FALLBACK[model]) {
+      switched = true; model = MODEL_FALLBACK[model]; requestBody = bodyFor(model);
+      step("model", "wait", `${lastErr}: switching to ${model}`);
+      attestation = await fetchAttestation(model);
+      continue;
+    }
     if (attempt < TRIES - 1) { step("model", "wait", `${lastErr}, retrying (${attempt + 2} of ${TRIES})`); await new Promise((res) => setTimeout(res, 2000 * (attempt + 1))); }
   }
   if (!r) throw new Error(`chat: ${lastErr} after ${TRIES} attempts; the NEAR AI Cloud gateway is not reachable right now, try again in a minute`);
@@ -1203,7 +1218,7 @@ async function readInTee(pngPages, textFallback, step) {
   }
   step("signature", sig ? "ok" : "fail", sig ? `${sig.signature_kind} by ${sig.signing_address}` : "the gateway returned no signature");
   const receipt = {
-    model: settings.model, inference_id: completion.id,
+    model, inference_id: completion.id,
     request_sha256: sha256hex(requestBody), response_sha256: sha256hex(responseBody),
     attestation_nonce: nonce,
     signing_address: sig?.signing_address ?? null, signing_algo: sig?.signing_algo ?? null,
@@ -2061,7 +2076,7 @@ function renderSettings() {
     ...(settings.payer ? [["payer", esc(settings.payer), "A testnet account Bursar funded to create everything. Its key stays here to pay for invites and the DAO. It has no power over the treasury."]] : []),
     ["dao", esc(roles[3] ?? "none"), "The council that votes on held invoices, if the company created one."],
     ["token", esc(roles[4]), "The USDC contract the treasury holds and pays with. On testnet, a test token."],
-    ["model", esc(settings.model || "Qwen/Qwen3-VL-30B-A3B-Instruct"), "The model that reads the invoices inside the enclave. Fixed: the receipt names it and the verifier checks it."],
+    ["model", esc(settings.model || "Qwen/Qwen3-VL-30B-A3B-Instruct"), "The model that reads the invoices inside the enclave; change it under Settings. The receipt names the model that actually answered, and the verifier checks it."],
   ].map(([k, v, h]) => `<span class="k">${k}${help(h)}</span><span class="v mono">${v}</span>`).join("");
   $("#govNone").hidden = !!dao(); $("#govHas").hidden = !dao();
   if (dao()) {
