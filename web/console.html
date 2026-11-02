@@ -683,7 +683,7 @@
       <div class="card">
         <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Contract build <i class="help" tabindex="0" data-help="The policy contract this treasury runs, recognised by its code hash among Bursar's builds. The owner upgrades it from here: the wallet signs, the contract deploys the new code onto itself and keeps every payment.">?</i></div>
         <p class="muted" id="buildNow">reading...</p>
-        <div class="actions" style="margin-top:16px"><button id="upgradeBtn" type="button" class="btn-inverse" hidden>Upgrade contract</button><span class="err" id="upgradeErr" hidden></span></div>
+        <div class="actions" style="margin-top:16px"><button id="upgradeBtn" type="button" class="btn-inverse" hidden>Upgrade contract</button><button id="registryBtn" type="button" class="btn-ghost" hidden>List in the registry</button><span class="muted" id="registryNote" style="font-size:13px"></span><span class="err" id="upgradeErr" hidden></span></div>
       </div>
     </div>
 
@@ -2043,6 +2043,7 @@ function renderSettings() {
     const label = state.codeHash && builds[state.codeHash];
     $("#buildNow").textContent = !state.codeHash ? "could not read the code hash" : label === "current" ? "This treasury runs the current Bursar build." : label ? `This treasury runs the build of ${label}; a newer one is available.` : "This treasury runs code that is not a Bursar build this page knows.";
     $("#upgradeBtn").hidden = !(settings.ownerKey && current && state.codeHash !== current);
+    renderRegistryRow();
   });
   $("#sAcctNow").textContent = state.settlement === undefined ? "This contract was deployed before settlement accounts existed: redeploy it to use one." : state.settlement ? `Now: ${state.settlement}` : "None set: queued cross-chain payments wait.";
   if (state.settlement && !$("#sAcct").value) $("#sAcct").value = state.settlement;
@@ -2696,6 +2697,28 @@ async function createTreasury(company) {
     $("#createErr").textContent = e.message; $("#createErr").hidden = false; $("#wizRetry").hidden = false;
   } finally { btn.disabled = false; }
 }
+// ----- the registry listing, for a treasury created before the registry existed (or whose listing failed) -----
+async function renderRegistryRow() {
+  const reg = REGISTRY[settings.network]; const btn = $("#registryBtn"), note = $("#registryNote"); if (!btn) return;
+  btn.hidden = true; note.textContent = "";
+  if (!reg || !settings.treasury || !(settings.ownerKey || settings.payerKey)) return;
+  const got = await view(reg, "get", { treasury: settings.treasury }).catch(() => undefined);
+  if (got === undefined) { note.textContent = `registry ${reg} not reachable`; return; }
+  if (got && got.owner === state.roles?.[0]) { note.textContent = `listed in ${reg}`; return; }
+  btn.hidden = false; note.textContent = `not yet in ${reg}: the explorer and the sign-in page will not find this treasury`;
+}
+$("#registryBtn").addEventListener("click", async () => {
+  const reg = REGISTRY[settings.network]; const btn = $("#registryBtn"); btn.disabled = true; $("#upgradeErr").hidden = true;
+  try {
+    const owner = state.roles?.[0];
+    if (!(await ask({ eyebrow: "Registry", title: `List ${settings.treasury} in the registry?`, rows: [["registry", reg], ["owner", owner]], note: "A public entry with the treasury and its owner, 0.01 NEAR of storage. Readers verify it against the contract itself.", ok: "List it" }))) return;
+    const r = settings.payerKey && settings.payer
+      ? await functionCall({ signerId: settings.payer, secretKey: settings.payerKey, receiverId: reg, method: "register", args: { treasury: settings.treasury, owner }, gasTgas: 30, deposit: NEAR(0.01) })
+      : await ownerSend(reg, [{ method: "register", args: { treasury: settings.treasury, owner }, gasTgas: 30, deposit: NEAR(0.01) }]);
+    $("#registryNote").textContent = `listed (tx ${r.hash})`; btn.hidden = true;
+  } catch (e) { $("#upgradeErr").textContent = e.message; $("#upgradeErr").hidden = false; }
+  finally { btn.disabled = false; }
+});
 // ----- one-off: deploy the public registry (console?deploy=registry[&network=testnet][&signer=key]) -----
 // The wallet funds the project root (bursar.near) through the registrar, a plain function call with a deposit; the root's
 // key, made here, then creates registry.bursar.near with the registry contract inside and no access key.
