@@ -9,6 +9,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="brand/icon-192.png">
+<meta name="theme-color" content="#0d0f0e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bursar">
 <link rel="stylesheet" href="style.css">
 <style>
   form { display: grid; grid-template-columns: 160px minmax(0, 1fr) auto; gap: 12px; align-items: end; }
@@ -138,5 +144,6 @@ async function load(e) {
 $("#f").addEventListener("submit", load);
 if ($("#treasury").value) load();
 </script>
+<script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
 </body>
 </html>
