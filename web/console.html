@@ -607,6 +607,8 @@
           <label><span>Owner key kind</span><select id="ownerKeyKind"><option value="">full access (downloaded keys)</option><option value="wallet">function-call key added by the wallet</option></select></label>
           <label><span>Payer account (set at creation)</span><input id="payer" placeholder="bursar-1a2b3c4d.testnet" autocomplete="off"></label>
           <label><span>Payer key (full access)</span><input id="payerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+          <label><span>Executor account <i class="help" tabindex="0" data-help="Settles cross-chain payments through NEAR Intents from this page. Its key can only call settle, mark_settled and mark_settlement_failed on the treasury; the contract pins where the USDC may go."></i></span><input id="executor" placeholder="executor.you.near" autocomplete="off"></label>
+          <label><span>Executor key (function-call)</span><input id="executorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
           <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
@@ -798,8 +800,8 @@ const override = async (name, label) => {
 };
 const rpcOverride = await override("rpc", "NEAR RPC node");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
-const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "inboxToken"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "executor", "executorKey", "inboxToken"];
+const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "executor", "executorKey", "inboxToken"];
 // Who signs owner-level actions here: the owner key, or an operator key limited to its role.
 const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
 const canAct = (perm) => !!settings.ownerKey || (!!settings.operatorKey && !!settings.operator && !!operatorRole()[perm]);
@@ -1601,11 +1603,21 @@ async function renderQr(text) {
 async function ownerSend(receiverId, acts) {
   if (settings.ownerKeyKind === "wallet") {
     const wallet = await ownerWallet(settings.owner);
-    const actions = acts.map((a) => a.transfer !== undefined ? { type: "Transfer", params: { deposit: String(a.transfer) } } : { type: "FunctionCall", params: { methodName: a.method, args: a.args, gas: String(TGAS(a.gasTgas)), deposit: String(a.deposit ?? 0n) } });
+    const actions = acts.map((a) =>
+      a.createAccount ? { type: "CreateAccount" }
+      : a.transfer !== undefined ? { type: "Transfer", params: { deposit: String(a.transfer) } }
+      : a.deploy ? { type: "DeployContract", params: { code: a.deploy } }
+      : a.addKey ? { type: "AddKey", params: { publicKey: a.addKey.pubStr, accessKey: { permission: { receiverId: a.addKey.receiverId, allowance: String(a.addKey.allowance), methodNames: a.addKey.methods } } } }
+      : { type: "FunctionCall", params: { methodName: a.method, args: a.args, gas: String(TGAS(a.gasTgas)), deposit: String(a.deposit ?? 0n) } });
     const r = await wallet.signAndSendTransaction({ network: settings.network, signerId: settings.owner, receiverId, actions });
     return { hash: r?.transaction?.hash || r?.transaction_outcome?.id || "" };
   }
-  return sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId, actions: acts.map((a) => a.transfer !== undefined ? A.transfer(a.transfer) : A.functionCall(a.method, a.args, a.gasTgas, a.deposit ?? 0n)) });
+  return sendTx({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId, actions: acts.map((a) =>
+    a.createAccount ? A.createAccount()
+    : a.transfer !== undefined ? A.transfer(a.transfer)
+    : a.deploy ? A.deployContract(a.deploy)
+    : a.addKey ? A.addFunctionCallKey(a.addKey.pub, a.addKey.allowance, a.addKey.receiverId, a.addKey.methods)
+    : A.functionCall(a.method, a.args, a.gasTgas, a.deposit ?? 0n)) });
 }
 async function topupRun(btn, fn) {
   const note = $("#topupNote"); $("#topupErr").hidden = true; btn.disabled = true;
@@ -1652,7 +1664,7 @@ function renderAttention() {
   attnPicked();
   $("#attnDaoRow").hidden = !(dao() && !!settings.ownerKey && held().some((p) => p.dao_proposal_id !== null));
   $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
-  $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}${p.status === "Settling" && settings.ownerKey ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-ghost small act" data-act="closeDelivered" data-id="${num(p.id)}">Mark delivered</button> <button type="button" class="btn-ghost small act" data-act="closeFailed" data-id="${num(p.id)}">Not delivered</button></div>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
+  $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}${p.status === "Queued" && settings.ownerKey && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB) ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-signal small act" data-act="settleNow" data-id="${num(p.id)}">Settle via Intents</button></div>` : ""}${p.status === "Settling" && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB) ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-signal small act" data-act="settleCheck" data-id="${num(p.id)}">Check status</button></div>` : ""}${p.status === "Settling" && settings.ownerKey ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-ghost small act" data-act="closeDelivered" data-id="${num(p.id)}">Mark delivered</button> <button type="button" class="btn-ghost small act" data-act="closeFailed" data-id="${num(p.id)}">Not delivered</button></div>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button.act"); if (!b) return;
@@ -1665,6 +1677,7 @@ document.addEventListener("click", async (e) => {
       if (act === "voteReject") { try { await functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: settings.treasury, method: "sync_dao_proposal", args: { id }, gasTgas: 100 }); } catch {} }
       await loadTreasury(); return;
     }
+    if (act === "settleNow" || act === "settleCheck") { await (act === "settleNow" ? settleNow(id) : settleCheck(id)); return; }
     if (act === "closeDelivered" || act === "closeFailed") {
       // the executor never confirmed this settlement: the owner says what happened, after checking the destination chain
       if (!settings.ownerKey) throw new Error("only the owner closes a settlement");
@@ -1690,6 +1703,72 @@ document.addEventListener("click", async (e) => {
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
   finally { b.disabled = false; }
 });
+// ---------- cross-chain settlement from the page (NEAR Intents 1-Click) ----------
+// The same steps as app/src/executor.ts, with the two people in the room: the owner registers the quote's deposit address
+// (after seeing it) and the executor key, limited to settle and the two marks, moves the queued payment.
+const settleNote = (id, text) => { $("#attnErr").hidden = true; const el = $("#attnBulkNote"); if (el) el.textContent = `#${id}: ${text}`; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const randomImplicit = () => toHex(crypto.getRandomValues(new Uint8Array(32)));
+async function oneClick(path, body) {
+  if (INTENTS_STUB) {
+    if (path === "/v0/quote") { const net = BigInt(body.amount); return { correlationId: `stub-${Date.now()}`, quote: { depositAddress: randomImplicit(), amountIn: net.toString(), amountOut: (net - net / 200n).toString(), timeEstimate: 5, deadline: new Date(Date.now() + 1200000).toISOString() } }; }
+    if (path.startsWith("/v0/status")) { const age = Date.now() - Number(sessionStorage.getItem("bursar.stubSettleAt") || 0); return age > 8000 ? { status: "SUCCESS", swapDetails: { destinationChainTxHashes: [{ hash: "0xstub" + randomImplicit().slice(0, 24) }] } } : { status: "PROCESSING" }; }
+    return { ok: true };
+  }
+  const r = await fetch(`${ONE_CLICK}${path}`, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`1Click ${path} ${r.status}: ${j.message || j.error || JSON.stringify(j).slice(0, 120)}`);
+  return j;
+}
+const executorSend = (method, args, gasTgas = 100) => sendTx({ signerId: settings.executor, secretKey: settings.executorKey, receiverId: settings.treasury, actions: [A.functionCall(method, args, gasTgas, 0n)] });
+async function settleNow(id) {
+  const p = state.payments.find((x) => x.id === id); const v = state.vendors.find(([vid]) => vid === p?.vendor_id)?.[1];
+  if (!p || !v || !("Chain" in v.payout)) throw new Error("not a queued cross-chain payment");
+  if (!settings.executor || !settings.executorKey) throw new Error("the executor account and key are not in Settings");
+  const { chain, address } = v.payout.Chain; const dest = USDC_ASSET[chain]; if (!dest) throw new Error(`no USDC asset id for ${chain}`);
+  const net = BigInt(p.amount) - BigInt(p.withheld || "0");
+  settleNote(id, "asking NEAR Intents for a quote...");
+  const q = await oneClick("/v0/quote", { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 50, originAsset: USDC_ASSET.near, depositType: "ORIGIN_CHAIN", destinationAsset: dest, amount: net.toString(), recipient: address, recipientType: "DESTINATION_CHAIN", refundTo: settings.treasury, refundType: "ORIGIN_CHAIN", deadline: new Date(Date.now() + 20 * 60000).toISOString(), referral: "bursar" });
+  const quote = q.quote || {}, deposit = quote.depositAddress;
+  if (!deposit || BigInt(quote.amountIn) !== net) throw new Error(`the quote does not match: deposit ${deposit}, amountIn ${quote.amountIn} for ${net}`);
+  const out = BigInt(quote.amountOut ?? quote.minAmountOut ?? "0");
+  if (out < net - net * 200n / 10000n) throw new Error(`the quote delivers ${usdc(out)} of ${usdc(net)}: fee over 2 percent, not sent`);
+  const yes = await ask({ eyebrow: "NEAR Intents", title: `Settle payment #${id} to ${chain}?`, rows: [["vendor receives", `${usdc(out)} at ${address}`], ["treasury sends", usdc(net)], ["deposit account", deposit], ["estimated time", `${quote.timeEstimate ?? "?"} s`]], note: "Three signatures: the owner registers this deposit account on the USDC contract and on the treasury (the contract will send USDC nowhere else), then the executor key calls settle. The outcome is checked here until the vendor's chain confirms.", ok: "Settle" });
+  if (!yes) { settleNote(id, "not sent"); return; }
+  settleNote(id, "registering the deposit account on the USDC contract...");
+  const usdcContract = state.roles?.[4];
+  const bounds = await view(usdcContract, "storage_balance_bounds").catch(() => ({ min: "1250000000000000000000" }));
+  const regd = await view(usdcContract, "storage_balance_of", { account_id: deposit }).catch(() => null);
+  if (!regd) await ownerSend(usdcContract, [{ method: "storage_deposit", args: { account_id: deposit, registration_only: true }, gasTgas: 30, deposit: BigInt(bounds.min) }]);
+  settleNote(id, "registering the deposit account on the treasury...");
+  await ownerCall("set_settlement_account", { account: deposit }, 30);
+  settleNote(id, "settle: the treasury sends the USDC to the deposit account...");
+  const r = await executorSend("settle", { id, quote_id: String(q.correlationId || "").slice(0, 128), deposit_address: deposit, recipient: v.payout }, 100);
+  try { sessionStorage.setItem("bursar.stubSettleAt", String(Date.now())); } catch {}
+  await oneClick("/v0/deposit/submit", { txHash: r?.hash, depositAddress: deposit, nearSenderAccount: settings.treasury }).catch(() => {});
+  await loadTreasury();
+  await settleCheck(id, deposit);
+}
+/** Ask 1Click how a settlement is doing; on a final answer, the executor key records it on the treasury. */
+async function settleCheck(id, deposit) {
+  const p = state.payments.find((x) => x.id === id); deposit = deposit || p?.deposit_address;
+  if (!deposit) throw new Error("no deposit address on this payment");
+  for (let i = 0; i < 90; i++) {
+    const s = await oneClick(`/v0/status?depositAddress=${encodeURIComponent(deposit)}`);
+    settleNote(id, `Intents says ${s.status}${i ? ` (${i * 10} s)` : ""}`);
+    if (s.status === "SUCCESS") {
+      const tx = s.swapDetails?.destinationChainTxHashes?.[0]?.hash ?? s.swapDetails?.destinationChainTxHashes?.[0] ?? "unknown";
+      await executorSend("mark_settled", { id, dest_tx: String(tx) }, 30);
+      settleNote(id, `delivered on ${p?.vendor_id ? "the vendor's chain" : "destination"}: ${tx}`); await loadTreasury(); return;
+    }
+    if (s.status === "REFUNDED" || s.status === "FAILED") {
+      await executorSend("mark_settlement_failed", { id }, 30);
+      settleNote(id, `${s.status}: the USDC came back to the treasury, the payment waits for a person in Attention`); await loadTreasury(); return;
+    }
+    await sleep(10000);
+  }
+  settleNote(id, "still processing after 15 minutes: press Check status later, or close it as the owner once you know");
+}
 function attnPicked() {
   const picked = Array.from(document.querySelectorAll(".attnPick:checked"));
   const n = picked.length, total = picked.reduce((a, c) => a + BigInt(c.dataset.amount || "0"), 0n);
@@ -2335,6 +2414,12 @@ addEventListener("hashchange", () => { route(); reflectSettings(); });
 
 // ---------- onboarding: this browser becomes the company ----------
 const TUSDC = "tusdc.bursar-b48563e6.testnet"; // throwaway NEP-141 with open mint, deployed by the README setup
+const USDC_MAINNET = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"; // native USDC on NEAR
+const USDC_OF = { testnet: TUSDC, mainnet: USDC_MAINNET };
+// NEAR Intents 1-Click: the USDC of each chain, as app/src/config.ts names them
+const USDC_ASSET = { near: "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", base: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", arb: "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near", sol: "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near", sui: "nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near" };
+const ONE_CLICK = "https://1click.chaindefuser.com";
+const INTENTS_STUB = q.get("intents") === "stub"; // tests on testnet: a pretend quote and status, the chain calls are real
 const DEMO_VENDORS = [
   // no tax ids here: the recorded readings predate them and must keep their outcomes; a judge sets one in Vendors to try the check
   { vendor_id: "acmehosting", name: "Acme Hosting", payout: { Near: { account: "acmehosting.bursar-b48563e6.testnet" } }, monthly_budget: "3000000000", tax_id: null },
@@ -2393,7 +2478,94 @@ async function registerTreasury(signer, treasury, owner, step) {
     step("registry", "ok", "listed in the Bursar registry: the explorer counts it, your wallet finds it at sign-in", t.hash);
   } catch (e) { step("registry", "fail", `could not list in the registry: ${e.message}`); }
 }
+/** The company's own account creates and pays for everything, signing each transaction: mainnet, or testnet with ?wizard=wallet.
+ *  Treasury, agent and executor are sub-accounts of the owner; no faucet, no payer, no vendors (the company adds its own). */
+async function createTreasuryWithWallet(company) {
+  const btn = $("#create"); btn.disabled = true;
+  $("#createErr").hidden = true; $("#created").hidden = true; $("#wizRetry").hidden = true;
+  const step = stepper($("#createSteps"));
+  try {
+    const wo = walletOwner();
+    const owner = wo?.account || settings.owner;
+    const network = wo?.network || settings.network || "testnet";
+    if (!owner) throw new Error("sign in with the wallet first (the sign-in page), or put the owner account and key in Settings");
+    $("#network").value = network; settings.network = network;
+    if (!settings.owner || settings.owner !== owner) { $("#owner").value = owner; settings.owner = owner; }
+    if (wo && settings.ownerKeyKind !== "wallet" && !settings.ownerKey) { $("#ownerKeyKind").value = "wallet"; settings.ownerKeyKind = "wallet"; }
+    let ob = null;
+    try { ob = JSON.parse(localStorage.getItem("bursar.onboarding") || "null"); } catch {}
+    if (ob && (ob.owner !== owner || ob.network !== network)) ob = null;
+    if (!ob) { ob = { owner, network, wallet: true, agentKey: newKey(), executorKey: newKey() }; try { localStorage.setItem("bursar.onboarding", JSON.stringify(ob)); } catch {} }
+    const { agentKey, executorKey } = ob;
+    agentKey.pub = keyOf(agentKey.secretKey).pub; executorKey.pub = keyOf(executorKey.secretKey).pub;
+    const treasury = `treasury.${owner}`, agent = `agent.${owner}`, executor = `executor.${owner}`;
+    const usdcContract = USDC_OF[network];
+    const need = NEAR(network === "mainnet" ? 7 : 6);
+    const bal = await nearBalance(owner);
+    if (bal < need) throw new Error(`${owner} has ${(Number(bal) / 1e24).toFixed(2)} NEAR; about ${network === "mainnet" ? 7 : 6} are needed: the contract's storage locks 4.8 on the treasury account, the rest funds the agent, the executor and the gas`);
+    if (await accountExists(treasury)) step("contract", "ok", `policy contract already live at ${treasury}`);
+    else {
+      step("contract", "wait", "fetching the policy contract (472 KB)");
+      const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
+      step("contract", "wait", `creating ${treasury} with the contract inside: the wallet signs one transaction`);
+      const caps = network === "mainnet" ? { per_payment_cap: "1000000000", daily_cap: "5000000000", approval_threshold: "500000000" } : { per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
+      const init = { owner, agent, executor, dao: null, usdc: usdcContract, ...caps };
+      const t1 = await ownerSend(treasury, [{ createAccount: true }, { transfer: NEAR(network === "mainnet" ? 6 : 5) }, { deploy: wasm }, { method: "new", args: init, gasTgas: 50 }]);
+      step("contract", "ok", `policy contract live at ${treasury}, owned by ${owner}, with no access key`, t1.hash);
+    }
+    if (company?.name) {
+      const have = await view(treasury, "get_company").catch(() => null);
+      if (have?.name === company.name) step("company", "ok", `${company.name} already on the contract`);
+      else {
+        step("company", "wait", `writing ${company.name} on the contract`);
+        const tc = await ownerSend(treasury, [{ method: "set_company", args: { name: company.name, description: company.description || "", country: company.country || null, tax_id: company.tax_id || null }, gasTgas: 30 }]);
+        step("company", "ok", `${company.name}${company.country ? `, ${company.country}` : ""} on the contract`, tc.hash);
+      }
+    }
+    if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
+    else {
+      step("agent", "wait", `creating ${agent}`);
+      const t2 = await ownerSend(agent, [{ createAccount: true }, { transfer: NEAR(0.2) }, { addKey: { pub: agentKey.pub, pubStr: agentKey.pubStr, allowance: NEAR(0.5), receiverId: treasury, methods: ["request_payment"] } }]);
+      step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`, t2.hash);
+    }
+    if (await accountExists(executor)) step("executor", "ok", `${executor} already exists`);
+    else {
+      step("executor", "wait", `creating ${executor}`);
+      const t3 = await ownerSend(executor, [{ createAccount: true }, { transfer: NEAR(0.3) }, { addKey: { pub: executorKey.pub, pubStr: executorKey.pubStr, allowance: NEAR(0.3), receiverId: treasury, methods: ["settle", "mark_settled", "mark_settlement_failed", "sync_dao_proposal"] } }]);
+      step("executor", "ok", `${executor} holds one key: settle, mark_settled, mark_settlement_failed on ${treasury}`, t3.hash);
+    }
+    const reg = await view(usdcContract, "storage_balance_of", { account_id: treasury }).catch(() => null);
+    if (reg) step("usdc", "ok", `${treasury} is registered on the USDC contract`);
+    else {
+      step("usdc", "wait", "registering the treasury on the USDC contract");
+      const bounds = await view(usdcContract, "storage_balance_bounds").catch(() => ({ min: "1250000000000000000000" }));
+      const t4 = await ownerSend(usdcContract, [{ method: "storage_deposit", args: { account_id: treasury, registration_only: true }, gasTgas: 30, deposit: BigInt(bounds.min) }]);
+      step("usdc", "ok", "registered: USDC can be deposited from Overview, Top up", t4.hash);
+    }
+    if (settings.ownerKey && settings.ownerKeyKind !== "wallet") await registerTreasury({ signerId: owner, secretKey: settings.ownerKey }, treasury, owner, step);
+    else if (REGISTRY[network]) step("registry", "ok", "the registry listing comes with the wallet key, next");
+    try { localStorage.removeItem("bursar.onboarding"); } catch {}
+    const wallet = settings.ownerKeyKind === "wallet" || !settings.ownerKey;
+    const label = company?.name || `${owner.split(".")[0]} treasury`;
+    const keep = { ownerKey: settings.ownerKey, ownerKeyKind: settings.ownerKeyKind };
+    for (const f of PROFILE_FIELDS) $("#" + f).value = "";
+    const fields = { network, treasury, agent, agentKey: agentKey.secretKey, executor, executorKey: executorKey.secretKey, owner, ownerKey: wallet ? "" : keep.ownerKey, ownerKeyKind: wallet ? "wallet" : "", payer: "", payerKey: "", label };
+    for (const [k, v] of Object.entries(fields)) $("#" + k).value = v;
+    saveSettings();
+    $("#createdKv").innerHTML = [["owner", owner], ["treasury", treasury], ["agent", agent], ["executor", executor]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${esc(v)}</span>`).join("");
+    const keys = { network, label, owner: { account_id: owner, note: "your account: the wallet signs for it" }, treasury: { account_id: treasury, note: "no access key: the contract alone governs this account" }, agent: { account_id: agent, public_key: agentKey.pubStr, private_key: agentKey.secretKey, note: "function-call key: request_payment on the treasury only" }, executor: { account_id: executor, public_key: executorKey.pubStr, private_key: executorKey.secretKey, note: "function-call key: settle, mark_settled, mark_settlement_failed on the treasury only" } };
+    $("#dlKeys").href = URL.createObjectURL(new Blob([JSON.stringify(keys, null, 2)], { type: "application/json" })); $("#dlKeys").download = `${treasury}-keys.json`;
+    $("#createdGo").hidden = wallet; $("#createdWallet").hidden = !wallet; $("#createdNote").hidden = !wallet; $("#createdKeysNote").hidden = wallet;
+    if (wallet) $("#createdWallet").onclick = () => connectWalletKey(treasury, owner, label, () => wizPane("wizReading"));
+    $("#created").hidden = false;
+    step("done", "ok", wallet ? "created; connect the wallet key to sign in as the owner, then add your vendors and deposit USDC from Overview" : "created; add your vendors and deposit USDC from Overview");
+    wizPane("wizCreated");
+  } catch (e) {
+    $("#createErr").textContent = e.message; $("#createErr").hidden = false; $("#wizRetry").hidden = false;
+  } finally { btn.disabled = false; }
+}
 async function createTreasury(company) {
+  if (walletOwner()?.network === "mainnet" || q.get("wizard") === "wallet") return createTreasuryWithWallet(company);
   const btn = $("#create"); btn.disabled = true;
   $("#createErr").hidden = true; $("#created").hidden = true; $("#wizRetry").hidden = true;
   const step = stepper($("#createSteps"));

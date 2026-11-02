@@ -524,12 +524,14 @@ impl Bursar {
         self.emit("vendor_payout_confirmed", &vendor_id);
     }
 
-    /// Where the executor may send queued cross-chain payments: the Intents deposit account (or its sub-accounts).
-    /// Unset, nothing is settled: the executor cannot pick a destination on its own.
+    /// Where the executor may send queued cross-chain payments: the Intents deposit account (or its sub-accounts),
+    /// or the one-off implicit account (64 hex characters) a 1Click quote names as its deposit address, registered by the
+    /// owner after seeing the quote. Unset, nothing is settled: the executor cannot pick a destination on its own.
     pub fn set_settlement_account(&mut self, account: Option<AccountId>) {
         self.assert_owner();
         if let Some(a) = &account {
-            require!(a.as_str().contains('.'), "a top-level name would make every account a valid deposit address");
+            let implicit = a.as_str().len() == 64 && a.as_str().bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+            require!(implicit || a.as_str().contains('.'), "a top-level name would make every account a valid deposit address");
         }
         match &account {
             Some(a) => env::storage_write(SETTLEMENT_KEY, a.as_bytes()),
@@ -2515,6 +2517,19 @@ mod tests {
         testing_env!(ctx(accounts(2)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(a, "qa3".into(), deposit(), pay.clone()); }));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn a_quotes_implicit_deposit_address_can_be_the_settlement_account() {
+        let mut c = setup();
+        testing_env!(ctx(accounts(0)).build());
+        let implicit: AccountId = "7edc23480a02bf440881022d5274c80d9fd53064cff1202c0d98af2bbdba43fd".parse().unwrap();
+        c.set_settlement_account(Some(implicit.clone()));
+        assert_eq!(c.get_settlement_account(), Some(implicit));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_settlement_account(Some("near".parse().unwrap()))));
+        assert!(r.is_err(), "a top-level name is still refused");
+        c.set_settlement_account(Some(intents()));
+        assert_eq!(c.get_settlement_account(), Some(intents()));
     }
 
     #[test]
