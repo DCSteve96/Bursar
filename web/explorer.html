@@ -98,7 +98,7 @@ async function mapLimit(items, n, fn) {
 }
 const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
 // The public list of treasuries (contracts/registry). Entries are hints: each treasury's owner is read from the contract itself.
-const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "registry.badfrog6063.near" };
 const DEC = 6;
 const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
@@ -144,7 +144,7 @@ async function load() {
     const reg = REGISTRY[network];
     if (!reg) throw new Error(`no registry on ${network} yet: Bursar runs on testnet for the hackathon`);
     const entries = [];
-    for (let from = 0; ; from += 100) { const page = await view(reg, "list", { from, limit: 100 }); entries.push(...page); if (page.length < 100) break; }
+    for (let from = 0; ; from += 100) { const page = await view(reg, "list", { from, limit: 100 }).catch((e) => { if (/does not exist|UNKNOWN_ACCOUNT|doesn't exist/i.test(e.message)) return []; throw e; }); entries.push(...page); if (page.length < 100) break; }
     const builds = await knownBuilds(); let unknownCode = 0, unread = 0, done = 0;
     const companies = (await mapLimit(entries, 4, async ([treasury, e]) => {
       try {

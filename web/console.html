@@ -879,7 +879,7 @@ const hasFullAccess = () => !!settings.ownerKey && settings.ownerKeyKind !== "wa
 /** Who creates accounts and attaches deposits: the owner's full-access key, or the payer account kept from creation (a wallet owner). */
 const funder = () => hasFullAccess() ? { signerId: settings.owner, secretKey: settings.ownerKey } : settings.payer && settings.payerKey ? { signerId: settings.payer, secretKey: settings.payerKey } : null;
 // The public list of treasuries the explorer and the sign-in page read (contracts/registry).
-const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "registry.badfrog6063.near" };
 function saveSettings() {
   const before = vaultPlain();
   for (const f of FIELDS) { settings[f] = $("#" + f).value.trim(); try { localStorage.setItem("bursar." + f, settings[f]); } catch {} }
@@ -2542,8 +2542,13 @@ async function createTreasuryWithWallet(company) {
       const t4 = await ownerSend(usdcContract, [{ method: "storage_deposit", args: { account_id: treasury, registration_only: true }, gasTgas: 30, deposit: BigInt(bounds.min) }]);
       step("usdc", "ok", "registered: USDC can be deposited from Overview, Top up", t4.hash);
     }
-    if (settings.ownerKey && settings.ownerKeyKind !== "wallet") await registerTreasury({ signerId: owner, secretKey: settings.ownerKey }, treasury, owner, step);
-    else if (REGISTRY[network]) step("registry", "ok", "the registry listing comes with the wallet key, next");
+    if (REGISTRY[network]) {
+      try {
+        const got = await view(REGISTRY[network], "get", { treasury }).catch(() => null);
+        if (got && got.owner === owner) step("registry", "ok", "listed in the Bursar registry");
+        else { step("registry", "wait", "listing the treasury in the Bursar registry"); const tr = await ownerSend(REGISTRY[network], [{ method: "register", args: { treasury, owner }, gasTgas: 30, deposit: NEAR(0.01) }]); step("registry", "ok", "listed in the Bursar registry: the explorer counts it, your wallet finds it at sign-in", tr.hash); }
+      } catch (e) { step("registry", "fail", `could not list in the registry: ${e.message}`); }
+    }
     try { localStorage.removeItem("bursar.onboarding"); } catch {}
     const wallet = settings.ownerKeyKind === "wallet" || !settings.ownerKey;
     const label = company?.name || `${owner.split(".")[0]} treasury`;
@@ -2678,6 +2683,20 @@ async function createTreasury(company) {
     $("#createErr").textContent = e.message; $("#createErr").hidden = false; $("#wizRetry").hidden = false;
   } finally { btn.disabled = false; }
 }
+// ----- one-off: deploy the public registry as a sub-account of the signed-in owner (console?deploy=registry) -----
+async function deployRegistry() {
+  const wo = walletOwner(); const owner = settings.owner || wo?.account; const network = settings.network || wo?.network || "testnet";
+  if (!owner) { alert("sign in with the wallet first"); return; }
+  if (!settings.ownerKeyKind && !settings.ownerKey) { $("#ownerKeyKind").value = "wallet"; $("#owner").value = owner; $("#network").value = network; saveSettings(); }
+  const reg = `registry.${owner}`;
+  if (!(await ask({ eyebrow: "Registry", title: `Deploy the Bursar registry at ${reg}?`, rows: [["network", network], ["cost", "2 NEAR, locked as the contract's storage on that account"]], note: "One transaction: the account is created with the registry contract inside and no access key. The pages of this site name it, so every treasury created from here lists itself in it.", ok: "Deploy" }))) return;
+  try {
+    const wasm = new Uint8Array(await (await fetch("contracts/bursar_registry.wasm")).arrayBuffer());
+    const r = await ownerSend(reg, [{ createAccount: true }, { transfer: NEAR(2) }, { deploy: wasm }, { method: "new", args: {}, gasTgas: 30 }]);
+    alert(`registry live at ${reg} (tx ${r.hash})`);
+  } catch (e) { alert(`not deployed: ${e.message}`); }
+}
+if (q.get("deploy") === "registry") setTimeout(deployRegistry, 1500);
 // ----- the wizard -----
 const wiz = $("#wiz");
 const wizPane = (id) => { for (const p of ["wizCompany", "wizCreate", "wizCreated", "wizReading"]) $("#" + p).hidden = p !== id; };

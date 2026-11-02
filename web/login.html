@@ -125,7 +125,7 @@ async function rpcPost(network, params) {
   throw new Error(`the NEAR RPC did not answer (${last?.message}). Check the connection, a VPN or an ad blocker, then reload.`);
 }
 // The public list of treasuries (contracts/registry). Entries are hints: the owner is checked on the treasury itself.
-const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "" };
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "registry.badfrog6063.near" };
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const b58 = (u8) => { let n = 0n; for (const b of u8) n = n * 256n + BigInt(b); let s = ""; while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; } for (const b of u8) { if (b !== 0) break; s = "1" + s; } return s; };
 const concat = (a, b) => { const u = new Uint8Array(a.length + b.length); u.set(a); u.set(b, a.length); return u; };
@@ -214,7 +214,7 @@ async function afterIdentify(account) {
   try {
     // the registry lists the treasuries an account owns; without one (mainnet, for now) the one the console names after the
     // owner, treasury.<account>, is looked up directly, so a company created from the browser is found again
-    const listed = REGISTRY[network] ? await view(network, REGISTRY[network], "of", { owner: account }) : [];
+    const listed = REGISTRY[network] ? await view(network, REGISTRY[network], "of", { owner: account }).catch(() => []) : [];
     const hints = [...new Set([...listed, `treasury.${account}`])].filter((t) => t.length <= 64);
     const mine = []; const builds = await knownBuilds(); let strangers = 0;
     await Promise.all(hints.map(async (t) => {
