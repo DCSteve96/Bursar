@@ -14,6 +14,8 @@ ap.add_argument("--near-vendor-legal", default="legalpartners.testnet")
 ap.add_argument("--near-vendor-consultant", default="consultant.testnet")
 ap.add_argument("--base-address", default="0x4f1ac0de9b2b3c4d5e6f708192a3b4c5d6e7f801")
 ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "samples"))
+# --mainnet-demo: only two small invoices (10 USDC on Base, 5 USDC on NEAR) for a real payment with real USDC; same vendors, same layout
+ap.add_argument("--mainnet-demo", action="store_true")
 # Tax ids printed on the invoices: the vendors' (what `bursar setup` records for them) and the buyer's. Fictional.
 VAT = {"Acme Hosting": "PT509876543", "DesignCo": "NL862345678B01", "Legal Partners LLP": "IT09876543210", "Studio Bianchi Consulting": "IT05555555555"}
 BUYER_VAT = "IT01234567890"
@@ -99,6 +101,17 @@ def invoice(path, vendor, vendor_line2, email, number, date, due, items, total, 
 
 
 # 1. Normal, vendor on NEAR, under threshold -> Paid
+if a.mainnet_demo:
+    invoice(os.path.join(a.out, "m1-designco-2001.pdf"), "DesignCo", "Prinsengracht 220, Amsterdam", "invoices@designco.example",
+            "DC-2001", "2026-11-02", "2026-11-16",
+            [("Icon set, 12 icons", "10.00")], "10.00",
+            [f"Pay to base address: {a.base_address}", "Token: USDC on Base"], subtotal="10.00", tax="0.00")
+    invoice(os.path.join(a.out, "m2-acme-hosting-2002.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
+            "AH-2002", "2026-11-02", "2026-11-16",
+            [("Backup storage, November", "5.00")], "5.00",
+            [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"], subtotal="5.00", tax="0.00")
+    print("written to", a.out); raise SystemExit(0)
+
 invoice(os.path.join(a.out, "01-acme-hosting-0923.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
         "AH-0923", "2026-11-01", "2026-11-15",
         [("Dedicated server EU-West, November", "420.00"), ("Backup storage 2 TB", "60.00")], "480.00",
