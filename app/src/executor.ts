@@ -22,7 +22,10 @@ async function quoteFor(p: Payment, v: Vendor) {
   const { chain, address } = v.payout.Chain;
   const dest = USDC_ASSET[chain];
   if (!dest) throw new Error(`no USDC asset id for chain ${chain}`);
+  // Since 27 October 2026 1Click only swaps confidentially: a quote needs the partner key (ONE_CLICK_JWT) and is asked
+  // as a confidential swap; the deposit flow is the same. Without a key every pair answers "not available".
   return OneClickService.getQuote({
+    ...(config.oneClickJwt ? { confidentiality: "basic" } : {}),
     dry: false,
     swapType: QuoteRequest.swapType.EXACT_INPUT, // the contract sends exactly the net amount to the deposit address
     slippageTolerance: 50,

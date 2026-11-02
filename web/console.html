@@ -609,6 +609,7 @@
           <label><span>Payer key (full access)</span><input id="payerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>Executor account <i class="help" tabindex="0" data-help="Settles cross-chain payments through NEAR Intents from this page. Its key can only call settle, mark_settled and mark_settlement_failed on the treasury; the contract pins where the USDC may go."></i></span><input id="executor" placeholder="executor.you.near" autocomplete="off"></label>
           <label><span>Executor key (function-call)</span><input id="executorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
+          <label><span>NEAR Intents API key <i class="help" tabindex="0" data-help="A partner key from partners.near-intents.org. Since 27 October 2026 1Click quotes only confidential swaps, and those need a key; without one every pair answers 'not available'. Stays in this browser; it is sent only to 1Click, as X-API-Key.">?</i></span><input id="intentsKey" type="password" placeholder="JWT from partners.near-intents.org" autocomplete="off"></label>
           <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
           <label><span>Operator key (limited to the role)</span><input id="operatorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>Operator role</span><input id="operatorRole" placeholder='{"approve":true}' autocomplete="off"></label>
@@ -802,7 +803,7 @@ const override = async (name, label) => {
 };
 const rpcOverride = await override("rpc", "NEAR RPC node");
 
-const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "executor", "executorKey", "inboxToken"];
+const FIELDS = ["network", "treasury", "agent", "agentKey", "aiKey", "model", "owner", "ownerKey", "readMode", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "executor", "executorKey", "inboxToken", "intentsKey"];
 const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ownerKey", "label", "operator", "operatorKey", "operatorRole", "ownerKeyKind", "payer", "payerKey", "executor", "executorKey", "inboxToken"];
 // Who signs owner-level actions here: the owner key, or an operator key limited to its role.
 const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
@@ -902,7 +903,7 @@ $("#save").addEventListener("click", saveSettings);
 // read the recorded samples below, which need no key at all.
 const DEMO = { network: "testnet", treasury: "treasury.bursar-b48563e6.testnet", agent: "agent.bursar-b48563e6.testnet", model: "Qwen/Qwen3-VL-30B-A3B-Instruct", label: "README demo (read-only)", owner: "", ownerKey: "", agentKey: "" };
 $("#demo").addEventListener("click", () => { for (const [k, v] of Object.entries(DEMO)) $("#" + k).value = v; saveSettings(); location.hash = "#overview"; });
-$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey", "operatorKey", "payerKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
+$("#forget").addEventListener("click", () => { for (const f of ["agentKey", "aiKey", "ownerKey", "operatorKey", "payerKey", "intentsKey"]) { $("#" + f).value = ""; try { localStorage.removeItem("bursar." + f); } catch {} settings[f] = ""; } });
 
 // ---------- small codecs ----------
 const te = new TextEncoder(), td = new TextDecoder();
@@ -1743,9 +1744,14 @@ async function oneClick(path, body) {
     if (path.startsWith("/v0/status")) { const age = Date.now() - Number(sessionStorage.getItem("bursar.stubSettleAt") || 0); return age > 8000 ? { status: "SUCCESS", swapDetails: { destinationChainTxHashes: [{ hash: "0xstub" + randomImplicit().slice(0, 24) }] } } : { status: "PROCESSING" }; }
     return { ok: true };
   }
-  const r = await fetch(`${ONE_CLICK}${path}`, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`1Click ${path} ${r.status}: ${j.message || j.error || JSON.stringify(j).slice(0, 120)}`);
+  // Since 27 October 2026 1Click only swaps confidentially: a quote needs the partner key, and a public quote answers
+  // "not available" for every pair. With a key the quote is asked as a confidential swap (same deposit flow).
+  const headers = { "content-type": "application/json", ...(settings.intentsKey ? { "X-API-Key": settings.intentsKey } : {}) };
+  const send = (b) => fetch(`${ONE_CLICK}${path}`, b ? { method: "POST", headers, body: JSON.stringify(b) } : { headers });
+  let r = await send(path === "/v0/quote" && settings.intentsKey ? { ...body, confidentiality: "basic" } : body);
+  let j = await r.json().catch(() => ({}));
+  if (!r.ok && path === "/v0/quote" && settings.intentsKey && body && !body.confidentiality) { r = await send(body); j = await r.json().catch(() => ({})); }
+  if (!r.ok) throw new Error(`1Click ${path} ${r.status}: ${j.message || j.error || JSON.stringify(j).slice(0, 120)}${r.status === 400 && /not available/i.test(j.message || "") && !settings.intentsKey ? ". Since 27 October 2026 1Click quotes need a partner key: get one at partners.near-intents.org and paste it in Settings as NEAR Intents API key" : ""}`);
   return j;
 }
 const executorSend = (method, args, gasTgas = 100) => sendTx({ signerId: settings.executor, secretKey: settings.executorKey, receiverId: settings.treasury, actions: [A.functionCall(method, args, gasTgas, 0n)] });
@@ -2868,7 +2874,7 @@ async function showDecision(id, hash, signedBy) {
 // ---------- vault: the owner's secrets, encrypted with a key only the owner's wallet can derive, kept on the contract ----------
 // The wallet signs one fixed message (NEP-413, deterministic for ed25519); sha256 of the signature is the AES-GCM key.
 // Nothing here can be opened without that wallet; the contract stores an opaque string (set_vault, owner only).
-const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "inboxToken", "label", "aiKey", "readMode"];
+const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "inboxToken", "label", "aiKey", "readMode", "intentsKey"];
 const vaultKeys = {}; // treasury -> CryptoKey, for this tab
 /** The AES key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature (getWallet is called only then).
  *  `salt` is the vault's own random salt (v2 blobs): the signed message is unique to this vault, so a signature obtained
@@ -2896,7 +2902,7 @@ async function vaultKey(getWallet, salt = "") {
 }
 const vaultSalt = (blob) => (typeof blob === "string" && blob.startsWith("v2:") ? blob.split(":")[1] : "");
 function vaultPlain() { return JSON.stringify(Object.fromEntries(VAULT_FIELDS.map((f) => [f, settings[f] || ""]))); }
-const vaultHasSecrets = () => !!(settings.agentKey || settings.inboxToken || settings.payerKey || settings.aiKey);
+const vaultHasSecrets = () => !!(settings.agentKey || settings.inboxToken || settings.payerKey || settings.aiKey || settings.intentsKey);
 let vaultOnChain; // undefined: not read yet; null: none; false: contract too old; string: the blob
 async function readVault() {
   if (!settings.treasury) return (vaultOnChain = null);
