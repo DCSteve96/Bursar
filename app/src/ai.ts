@@ -156,7 +156,7 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
   const bodyFor = (m: string) => JSON.stringify({ model: m, temperature: 0, messages: [{ role: "system", content: SYSTEM }, { role: "user", content }], response_format: { type: "json_object" }, stream: false });
   let requestBody = bodyFor(model);
   // The gateway answers 502 now and then ("upstream request failed"): retry a few times before giving up. When the
-  // chosen model keeps failing and another is configured (NEAR_AI_MODEL_FALLBACK), it takes over with its own attestation.
+  // chosen model fails and another is configured (NEAR_AI_MODEL_FALLBACK), it takes over with its own attestation.
   const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530];
   let r!: Response;
   let responseBody = "";
@@ -169,9 +169,9 @@ export async function readInvoice(pngPages: Buffer[], textFallback?: string): Pr
     });
     responseBody = await r.text();
     if (r.ok || !TRANSIENT.includes(r.status)) break;
-    if (!switched && attempt >= 1 && config.aiModelFallback && config.aiModelFallback !== model) {
+    if (!switched && config.aiModelFallback && config.aiModelFallback !== model) {
       switched = true; model = config.aiModelFallback; requestBody = bodyFor(model);
-      console.error(`[ai] ${config.aiModel} answered ${r.status} twice: switching to ${model}`);
+      console.error(`[ai] ${config.aiModel} answered ${r.status}: switching to ${model}`);
       attestation = await fetchAttestation(nonce, model).catch((e) => ({ error: String(e) }) as AttestationReport);
       continue;
     }

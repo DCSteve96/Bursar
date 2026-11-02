@@ -581,7 +581,7 @@ Richiesta di Stefano, decisa cosi': Telegram per il caso comune, le eccezioni in
 
 Primo tentativo su mainnet: `Qwen/Qwen3-VL-30B-A3B-Instruct` rispondeva 502 "upstream request failed" al gateway NEAR AI (diretto e via relay), `z-ai/glm-5.3-flash` rispondeva in un secondo. Il modello era un campo nascosto della console: Stefano non poteva cambiarlo.
 
-- Console: `#model` è una select in Settings (Qwen3-VL, glm-5.3-flash). `readInTee` chiede l'attestazione per modello; se il modello scelto fallisce due volte con uno status transitorio, passa all'altro (`MODEL_FALLBACK`), richiede l'attestazione con lo stesso nonce e scrive nella ricevuta il modello che ha risposto davvero. La riga "model" di This treasury rimanda a Settings.
+- Console: `#model` è una select in Settings (Qwen3-VL, glm-5.3-flash). `readInTee` chiede l'attestazione per modello; se il modello scelto fallisce con uno status transitorio (un 524 dell'edge arriva dopo 100 s, quindi al primo errore), passa all'altro (`MODEL_FALLBACK`), richiede l'attestazione con lo stesso nonce e scrive nella ricevuta il modello che ha risposto davvero. La riga "model" di This treasury rimanda a Settings.
 - Agente: `NEAR_AI_MODEL_FALLBACK` (default `z-ai/glm-5.3-flash`), stessa logica in `readInvoice`; `fetchAttestation(nonce, model)`.
 - Da ricordare: il verificatore controlla il modello della ricevuta, quindi un fallback non rompe `bursar verify`.
 
