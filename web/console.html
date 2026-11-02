@@ -604,7 +604,7 @@
         <button id="removeProfile" type="button" class="btn-ghost">Remove from this browser</button>
       </div>
       <div class="kv" id="vaultKv" style="margin-top:20px"></div>
-      <div class="actions" style="margin-top:10px;align-items:center;gap:8px 12px"><button id="vaultSave" type="button" class="btn-ghost">Save to the vault</button><button id="vaultUnlock" type="button" class="btn-ghost" hidden>Unlock with the wallet</button><button id="vaultAsk" type="button" class="btn-ghost" hidden>Ask to admit this device</button><span class="muted" style="font-size:13px;max-width:60ch;display:inline-flex;align-items:center">The vault keeps the agent key, the Telegram inbox token and the labels on the contract, encrypted with a key only your wallet can derive. Any browser, after signing in with the same wallet, gets them back; a device whose wallet key is new (the phone app) asks to be admitted and one that holds the vault admits it with one transaction. <i class="help" tabindex="0" data-help="How it works: the wallet signs one fixed message (no transaction, no cost); the signature is turned into an encryption key; the secrets are encrypted in this browser and stored on your contract with set_vault, owner only. Nobody can read the vault without your wallet, Bursar included. If you change the wallet's key, the vault cannot be opened any more: keep the keys backup file too.">?</i></span><span id="vaultErr" class="err" hidden></span></div>
+      <div class="actions" style="margin-top:10px;align-items:center;gap:8px 12px"><button id="vaultSave" type="button" class="btn-ghost">Save to the vault</button><button id="vaultUnlock" type="button" class="btn-ghost" hidden>Unlock with the wallet</button><button id="vaultAsk" type="button" class="btn-ghost" hidden>Ask to admit this device</button><button id="execReplace" type="button" class="btn-ghost" hidden>Replace the executor from this device</button><span class="muted" style="font-size:13px;max-width:60ch;display:inline-flex;align-items:center">The vault keeps the agent key, the Telegram inbox token and the labels on the contract, encrypted with a key only your wallet can derive. Any browser, after signing in with the same wallet, gets them back; a device whose wallet key is new (the phone app) asks to be admitted and one that holds the vault admits it with one transaction. <i class="help" tabindex="0" data-help="How it works: the wallet signs one fixed message (no transaction, no cost); the signature is turned into an encryption key; the secrets are encrypted in this browser and stored on your contract with set_vault, owner only. Nobody can read the vault without your wallet, Bursar included. If you change the wallet's key, the vault cannot be opened any more: keep the keys backup file too.">?</i></span><span id="vaultErr" class="err" hidden></span></div>
       <p class="muted" style="font-size:13px;margin:12px 0 0;max-width:80ch">Forget keys clears the keys from this browser and leaves the treasury untouched on chain; a wallet owner gets them back from the vault, anyone else from the keys backup file. Remove takes the company out of the switcher; the contract and its USDC stay where they are.</p>
       <details class="adv" id="advanced" style="margin-top:20px">
         <summary>Advanced: connection details</summary>
@@ -1657,7 +1657,7 @@ async function ownerSend(receiverId, acts) {
       a.createAccount ? { type: "CreateAccount" }
       : a.transfer !== undefined ? { type: "Transfer", params: { deposit: String(a.transfer) } }
       : a.deploy ? { type: "DeployContract", params: { code: a.deploy } }
-      : a.addKey ? { type: "AddKey", params: { publicKey: a.addKey.pubStr, accessKey: { permission: { receiverId: a.addKey.receiverId, allowance: String(a.addKey.allowance), methodNames: a.addKey.methods } } } }
+      : a.addKey ? { type: "AddKey", params: { publicKey: a.addKey.pubStr, accessKey: { permission: { receiverId: a.addKey.receiverId, ...(a.addKey.allowance == null ? {} : { allowance: String(a.addKey.allowance) }), methodNames: a.addKey.methods } } } }
       : { type: "FunctionCall", params: { methodName: a.method, args: a.args, gas: String(TGAS(a.gasTgas)), deposit: String(a.deposit ?? 0n) } });
     const r = await wallet.signAndSendTransaction({ network: settings.network, signerId: settings.owner, receiverId, actions });
     return { hash: r?.transaction?.hash || r?.transaction_outcome?.id || "" };
@@ -2604,7 +2604,7 @@ async function createTreasuryWithWallet(company) {
     if (await accountExists(executor)) step("executor", "ok", `${executor} already exists`);
     else {
       step("executor", "wait", `creating ${executor}`);
-      const t3 = await send(executor, [A.createAccount(), A.transfer(NEAR(0.2)), A.addFunctionCallKey(executorKey.pub, NEAR(0.3), treasury, ["settle", "mark_settled", "mark_settlement_failed", "sync_dao_proposal"])]);
+      const t3 = await send(executor, [A.createAccount(), A.transfer(NEAR(0.2)), A.addFunctionCallKey(executorKey.pub, null, treasury, ["settle", "mark_settled", "mark_settlement_failed", "sync_dao_proposal"])]);
       step("executor", "ok", `${executor} holds one key: settle, mark_settled, mark_settlement_failed on ${treasury}`, t3.hash);
     }
     const reg = await view(usdcContract, "storage_balance_of", { account_id: treasury }).catch(() => null);
@@ -3048,6 +3048,21 @@ async function vaultAdmit(id, yes) {
   await ownerCall("set_vault", { blob: next }, 20);
   vaultOnChain = next; renderVault();
 }
+/** No executor key in this browser and no device to admit it from: the owner creates a new executor here and tells the contract.
+ *  Two signatures: the account with one key limited to settling on this treasury, then set_roles. The old executor keeps its NEAR. */
+const EXECUTOR_METHODS = ["settle", "mark_settled", "mark_settlement_failed", "sync_dao_proposal"];
+async function replaceExecutor() {
+  if (!settings.owner || !settings.ownerKey || !settings.treasury) throw new Error("sign in as the owner first");
+  const owner = settings.owner, treasury = settings.treasury;
+  const acct = `exec-${toHex(crypto.getRandomValues(new Uint8Array(3)))}.${owner}`, key = newKey();
+  const yes = await ask({ eyebrow: "Executor", title: "Replace the executor from this device?", rows: [["new executor", acct], ["funded with", `0.2 NEAR from ${owner}`], ["its key", `settle and the marks on ${treasury}, nothing else`], ["old executor", `${state.roles?.[2] || "none"}: keeps its NEAR, loses the role`]], note: "Two signatures: the wallet creates the account with one function-call key, then tells the contract who the executor is. The key stays in this browser: save the vault or download the keys backup after.", ok: "Replace" });
+  if (!yes) return;
+  await ownerSend(acct, [{ createAccount: true }, { transfer: NEAR(0.2) }, { addKey: { pubStr: key.pubStr, pub: key.pub, receiverId: treasury, allowance: null, methods: EXECUTOR_METHODS } }]);
+  await ownerSend(treasury, [{ method: "set_roles", args: { executor: acct }, gasTgas: 30 }]);
+  $("#executor").value = acct; $("#executorKey").value = key.secretKey; saveSettings();
+  await loadTreasury(); vaultAutoSave(); renderVault();
+}
+$("#execReplace").addEventListener("click", () => withVaultButton($("#execReplace"), $("#vaultErr"), replaceExecutor));
 /** Forget a wallet key's wrap (a lost phone): the device that holds the vault removes it; the newcomer must ask again. */
 async function vaultRevoke(id) {
   const cur = vaultParse(vaultOnChain); if (!cur || cur.v !== 3 || !vaultCK[settings.treasury]) throw new Error("open the vault in this browser first");
@@ -3087,6 +3102,7 @@ async function renderVault() {
   $("#vaultUnlock").hidden = !canUnlock; $("#vaultAsk").hidden = !askable; $("#vaultAsk").textContent = waiting ? "Ask again" : "Ask to admit this device";
   $("#vaultUnlockTop").hidden = false; $("#vaultAskTop").hidden = !askable; $("#vaultAskTop").textContent = waiting ? "Ask again" : "Ask to admit this device";
   $("#vaultBarText").textContent = pending && !holds ? "A device asks to be admitted to this company's vault. Unlock it here to answer." : waiting ? "This device asked to be admitted to the vault. Admit it on the device that holds the vault (Settings, Keys), then unlock here." : askable ? "This wallet key is not admitted to the vault yet. Ask, then admit this device from the one that holds the vault." : "This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.";
+  $("#execReplace").hidden = !(settings.owner && settings.ownerKey) || !!settings.executorKey || !state.roles;
   bar.hidden = !canUnlock;
 }
 async function withVaultButton(btn, errEl, fn) {
