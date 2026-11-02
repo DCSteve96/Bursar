@@ -1748,10 +1748,12 @@ async function oneClick(path, body) {
   // "not available" for every pair. With a key the quote is asked as a confidential swap (same deposit flow).
   const headers = { "content-type": "application/json", ...(settings.intentsKey ? { "X-API-Key": settings.intentsKey } : {}) };
   const send = (b) => fetch(`${ONE_CLICK}${path}`, b ? { method: "POST", headers, body: JSON.stringify(b) } : { headers });
+  const msg = (r, j) => `${r.status}: ${j.message || j.error || JSON.stringify(j).slice(0, 120)}`;
   let r = await send(path === "/v0/quote" && settings.intentsKey ? { ...body, confidentiality: "basic" } : body);
   let j = await r.json().catch(() => ({}));
-  if (!r.ok && path === "/v0/quote" && settings.intentsKey && body && !body.confidentiality) { r = await send(body); j = await r.json().catch(() => ({})); }
-  if (!r.ok) throw new Error(`1Click ${path} ${r.status}: ${j.message || j.error || JSON.stringify(j).slice(0, 120)}${r.status === 400 && /not available/i.test(j.message || "") && !settings.intentsKey ? ". Since 27 October 2026 1Click quotes need a partner key: get one at partners.near-intents.org and paste it in Settings as NEAR Intents API key" : ""}`);
+  let first = "";
+  if (!r.ok && path === "/v0/quote" && settings.intentsKey && body && !body.confidentiality) { first = `confidential quote ${msg(r, j)}; public quote `; r = await send(body); j = await r.json().catch(() => ({})); }
+  if (!r.ok) throw new Error(`1Click ${path} ${first}${msg(r, j)}${r.status === 400 && /not available/i.test(j.message || "") && !settings.intentsKey ? ". Since 27 October 2026 1Click quotes need a partner key: get one at partners.near-intents.org and paste it in Settings as NEAR Intents API key" : ""}`);
   return j;
 }
 const executorSend = (method, args, gasTgas = 100) => sendTx({ signerId: settings.executor, secretKey: settings.executorKey, receiverId: settings.treasury, actions: [A.functionCall(method, args, gasTgas, 0n)] });
