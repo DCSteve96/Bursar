@@ -292,7 +292,7 @@
     <div class="actions"><button type="button" class="btn-signal" id="wFinish">Open my treasury</button><button type="button" class="btn-ghost" id="wBackup">Download a backup of the keys</button></div>
   </div>
 </dialog>
-<div id="vaultBar" class="vaultbar" hidden><span>This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.</span><button type="button" class="btn-signal small" id="vaultUnlockTop">Unlock with the wallet</button><span class="err" id="vaultBarErr" hidden></span></div>
+<div id="vaultBar" class="vaultbar" hidden><span id="vaultBarText">This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.</span><button type="button" class="btn-signal small" id="vaultUnlockTop">Unlock with the wallet</button><button type="button" class="btn-ghost small" id="vaultAskTop" hidden>Ask to admit this device</button><span class="err" id="vaultBarErr" hidden></span></div>
 
 <!-- ============ START: a new treasury ============ -->
 <section class="band view" id="start">
@@ -604,7 +604,7 @@
         <button id="removeProfile" type="button" class="btn-ghost">Remove from this browser</button>
       </div>
       <div class="kv" id="vaultKv" style="margin-top:20px"></div>
-      <div class="actions" style="margin-top:10px;align-items:center;gap:8px 12px"><button id="vaultSave" type="button" class="btn-ghost">Save to the vault</button><button id="vaultUnlock" type="button" class="btn-ghost" hidden>Unlock with the wallet</button><span class="muted" style="font-size:13px;max-width:60ch;display:inline-flex;align-items:center">The vault keeps the agent key, the Telegram inbox token and the labels on the contract, encrypted with a key only your wallet can derive. Any browser, after signing in with the same wallet, gets them back. <i class="help" tabindex="0" data-help="How it works: the wallet signs one fixed message (no transaction, no cost); the signature is turned into an encryption key; the secrets are encrypted in this browser and stored on your contract with set_vault, owner only. Nobody can read the vault without your wallet, Bursar included. If you change the wallet's key, the vault cannot be opened any more: keep the keys backup file too.">?</i></span><span id="vaultErr" class="err" hidden></span></div>
+      <div class="actions" style="margin-top:10px;align-items:center;gap:8px 12px"><button id="vaultSave" type="button" class="btn-ghost">Save to the vault</button><button id="vaultUnlock" type="button" class="btn-ghost" hidden>Unlock with the wallet</button><button id="vaultAsk" type="button" class="btn-ghost" hidden>Ask to admit this device</button><span class="muted" style="font-size:13px;max-width:60ch;display:inline-flex;align-items:center">The vault keeps the agent key, the Telegram inbox token and the labels on the contract, encrypted with a key only your wallet can derive. Any browser, after signing in with the same wallet, gets them back; a device whose wallet key is new (the phone app) asks to be admitted and one that holds the vault admits it with one transaction. <i class="help" tabindex="0" data-help="How it works: the wallet signs one fixed message (no transaction, no cost); the signature is turned into an encryption key; the secrets are encrypted in this browser and stored on your contract with set_vault, owner only. Nobody can read the vault without your wallet, Bursar included. If you change the wallet's key, the vault cannot be opened any more: keep the keys backup file too.">?</i></span><span id="vaultErr" class="err" hidden></span></div>
       <p class="muted" style="font-size:13px;margin:12px 0 0;max-width:80ch">Forget keys clears the keys from this browser and leaves the treasury untouched on chain; a wallet owner gets them back from the vault, anyone else from the keys backup file. Remove takes the company out of the switcher; the contract and its USDC stay where they are.</p>
       <details class="adv" id="advanced" style="margin-top:20px">
         <summary>Advanced: connection details</summary>
@@ -2502,6 +2502,7 @@ function reflectWalletOwner() {
 /** The wallet adds a key limited to this treasury to the browser (NEAR Connect: Meteor, HOT, Intear, Nightly and the others). The key is generated here. */
 /** The wallet signed in as `owner`, through NEAR Connect (session reused, picker otherwise). */
 async function ownerWallet(owner) {
+  if (location.protocol !== "https:" && window.__bursarWalletStub) return window.__bursarWalletStub(owner); // test runner only: a page served over http or file
   const [{ NearConnector }, { registerMeteorExtension }] = await Promise.all([import("https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js"), import("./meteor.js")]);
   const connector = new NearConnector({ network: settings.network, footerBranding: null });
   await registerMeteorExtension().catch((e) => console.warn("Meteor extension bridge:", e));
@@ -2894,19 +2895,23 @@ async function showDecision(id, hash, signedBy) {
 
 
 
-// ---------- vault: the owner's secrets, encrypted with a key only the owner's wallet can derive, kept on the contract ----------
-// The wallet signs one fixed message (NEP-413, deterministic for ed25519); sha256 of the signature is the AES-GCM key.
-// Nothing here can be opened without that wallet; the contract stores an opaque string (set_vault, owner only).
+// ---------- vault: the owner's secrets, encrypted on the contract; one content key, wrapped once per wallet key ----------
+// v3: a random content key encrypts the secrets. Every wallet key that may open the vault gets the content key wrapped
+// with a key derived from its NEP-413 signature over a fixed message (deterministic for ed25519). A device whose wallet
+// key has no wrap yet (the phone app, another browser) asks to be admitted: it leaves an ECDH public key on the contract
+// (set_vault, owner only); a device that holds the content key admits it with one transaction, and from then on the
+// newcomer's own signature opens the vault. v1 and v2 vaults (one wallet key as the AES key) are read and rewritten as v3.
 const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "inboxToken", "label", "aiKey", "readMode", "intentsKey"];
-const vaultKeys = {}; // treasury -> CryptoKey, for this tab
-/** The AES key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature (getWallet is called only then).
- *  `salt` is the vault's own random salt (v2 blobs): the signed message is unique to this vault, so a signature obtained
- *  elsewhere for the same treasury opens nothing. Vaults written before salts (v1) are still read without one. */
-async function vaultKey(getWallet, salt = "") {
+const vaultKeys = {}; // treasury:salt -> { raw, pub }, for this tab
+const vaultCK = new Proxy({}, { get: (o, t) => { if (!(t in o)) { try { const h = sessionStorage.getItem(`bursar.vaultCK.${t}`); if (h) o[t] = fromHex(h); } catch {} } return o[t]; }, set: (o, t, v) => { o[t] = v; try { sessionStorage.setItem(`bursar.vaultCK.${t}`, toHex(v)); } catch {} return true; } }); // treasury -> content key, once this tab opened or wrote the vault (kept for the session)
+/** The wallet-derived key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature
+ *  (getWallet is called only then). `salt` is the vault's own random salt: the signed message is unique to this vault,
+ *  so a signature obtained elsewhere for the same treasury opens nothing. Vaults written before salts (v1) sign without one. */
+async function vaultKeyRaw(getWallet, salt = "") {
   const t = settings.treasury, ck = salt ? `${t}:${salt}` : t;
   if (vaultKeys[ck]) return vaultKeys[ck];
-  let raw = null;
-  try { const h = sessionStorage.getItem(`bursar.vaultKey.${ck}`); if (h) raw = fromHex(h); } catch {}
+  let raw = null, pub = "";
+  try { const h = sessionStorage.getItem(`bursar.vaultKey.${ck}`); if (h) { raw = fromHex(h); pub = sessionStorage.getItem(`bursar.vaultPub.${ck}`) || ""; } } catch {}
   if (!raw) {
     const wallet = typeof getWallet === "function" ? await getWallet() : getWallet;
     const nonce = new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(`bursar vault nonce ${t}${salt ? " " + salt : ""}`)));
@@ -2916,72 +2921,172 @@ async function vaultKey(getWallet, salt = "") {
     const r = await wallet.signMessage({ network: settings.network, message, nonce, recipient: t });
     const sig = typeof r?.signature === "string" ? unb64(r.signature) : r?.signature ? new Uint8Array(r.signature) : null;
     if (!sig?.length) throw new Error("the wallet returned no signature");
+    pub = typeof r?.publicKey === "string" ? r.publicKey : "";
     const tag = te.encode(salt ? `bursar-vault-v2:${salt}:` : "bursar-vault-v1:");
     const all = new Uint8Array(tag.length + sig.length); all.set(tag); all.set(sig, tag.length);
     raw = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
-    try { sessionStorage.setItem(`bursar.vaultKey.${ck}`, toHex(raw)); } catch {}
+    try { sessionStorage.setItem(`bursar.vaultKey.${ck}`, toHex(raw)); sessionStorage.setItem(`bursar.vaultPub.${ck}`, pub); } catch {}
   }
-  return (vaultKeys[ck] = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]));
+  return (vaultKeys[ck] = { raw, pub });
 }
-const vaultSalt = (blob) => (typeof blob === "string" && blob.startsWith("v2:") ? blob.split(":")[1] : "");
+const aesKey = (raw) => crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+async function aesWrap(bytes, keyRaw) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aesKey(keyRaw), bytes)); return { iv: b64(iv), ct: b64(ct) }; }
+async function aesUnwrap(w, keyRaw) { return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(w.iv) }, await aesKey(keyRaw), unb64(w.ct))); }
+/** The name of a wallet key's wrap: a hash of its derived key, so the blob names no public key. */
+async function wrapId(raw) { return toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(`bursar-vault-wrap:${toHex(raw)}`)))).slice(0, 32); }
+/** Admission uses ECDH (P-256, every browser): the newcomer leaves a public key, the admitting device answers with an ephemeral one. */
+async function ecdhPair() { const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]); return { pub: b64(new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey))), priv: await crypto.subtle.exportKey("jwk", kp.privateKey) }; }
+async function ecdhSecret(privJwk, pubB64, salt) {
+  const priv = await crypto.subtle.importKey("jwk", privJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+  const pub = await crypto.subtle.importKey("raw", unb64(pubB64), { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: pub }, priv, 256));
+  const tag = te.encode(`bursar-vault-admit:${salt}:`); const all = new Uint8Array(tag.length + bits.length); all.set(tag); all.set(bits, tag.length);
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", all));
+}
+/** The blob as an object: v3 is JSON; v2 is `v2:salt:iv:ct`; v1 is `iv:ct`. */
+function vaultParse(blob) {
+  if (typeof blob !== "string" || !blob) return null;
+  if (blob.startsWith("v3:")) { try { const o = JSON.parse(blob.slice(3)); return { v: 3, salt: o.salt || "", iv: o.iv, ct: o.ct, wraps: o.wraps || {}, requests: o.requests || [] }; } catch { return null; } }
+  const parts = blob.split(":");
+  return blob.startsWith("v2:") ? { v: 2, salt: parts[1], iv: parts[2], ct: parts[3] } : { v: 1, salt: "", iv: parts[parts.length - 2], ct: parts[parts.length - 1] };
+}
+const vaultBlob = (o) => "v3:" + JSON.stringify({ salt: o.salt, iv: o.iv, ct: o.ct, wraps: o.wraps, requests: o.requests });
+const vaultSalt = (blob) => vaultParse(blob)?.salt || "";
 function vaultPlain() { return JSON.stringify(Object.fromEntries(VAULT_FIELDS.map((f) => [f, settings[f] || ""]))); }
 const vaultHasSecrets = () => !!(settings.agentKey || settings.inboxToken || settings.payerKey || settings.aiKey || settings.intentsKey);
 let vaultOnChain; // undefined: not read yet; null: none; false: contract too old; string: the blob
+let vaultAsk = false; // the last unlock failed because this wallet key is not admitted yet
 async function readVault() {
   if (!settings.treasury) return (vaultOnChain = null);
   try { vaultOnChain = (await view(settings.treasury, "get_vault")) || null; }
   catch (e) { vaultOnChain = /MethodNotFound|doesn't exist|does not exist|CompilationError/i.test(e.message || "") ? false : null; }
   return vaultOnChain;
 }
+const vaultReqKey = () => `bursar.vaultReq.${settings.treasury}`;
+const readVaultReq = () => { try { return JSON.parse(localStorage.getItem(vaultReqKey()) || "null"); } catch { return null; } };
+async function markVaultSaved(at) { try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at, plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))) })); } catch {} }
+/** Write the secrets of this browser to the contract. A vault this tab has not opened cannot be overwritten blindly: open it first. */
 async function vaultSave(wallet) {
   if (!settings.treasury || !settings.owner || !settings.ownerKey) throw new Error("only the owner, signed in, can write the vault");
   if (settings.ownerKeyKind !== "wallet") throw new Error("the vault is locked by a wallet signature: sign in with the wallet to use it");
+  const t = settings.treasury, cur = vaultParse(vaultOnChain);
   // a vault keeps its salt across saves (the session key stays valid); a first vault, or a v1 one, gets a fresh salt
-  const salt = vaultSalt(vaultOnChain) || toHex(crypto.getRandomValues(new Uint8Array(16)));
-  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)), salt);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, te.encode(JSON.stringify({ v: 2, owner: settings.owner, saved_at: new Date().toISOString(), data: JSON.parse(vaultPlain()) }))));
-  const blob = `v2:${salt}:${b64(iv)}:${b64(ct)}`;
+  const salt = cur?.salt || toHex(crypto.getRandomValues(new Uint8Array(16)));
+  const { raw } = await vaultKeyRaw(wallet || (() => ownerWallet(settings.owner)), salt);
+  const id = await wrapId(raw);
+  let ck = vaultCK[t];
+  if (!ck && cur?.v === 3) throw new Error("this browser has not opened the vault: unlock it first, then save");
+  if (!ck) ck = crypto.getRandomValues(new Uint8Array(32)); // a new vault, or an old one this wallet key owned: from now on it admits other devices
+  const wraps = cur?.v === 3 ? { ...cur.wraps } : {};
+  wraps[id] = { kind: "sig", ...(await aesWrap(ck, raw)) };
+  const at = new Date().toISOString();
+  const enc = await aesWrap(te.encode(JSON.stringify({ v: 3, owner: settings.owner, saved_at: at, data: JSON.parse(vaultPlain()) })), ck);
+  const blob = vaultBlob({ salt, iv: enc.iv, ct: enc.ct, wraps, requests: (cur?.v === 3 ? cur.requests : []).filter((r) => r.id !== id) });
   await ownerCall("set_vault", { blob }, 20);
-  vaultOnChain = blob;
-  try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at: new Date().toISOString(), plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))) })); } catch {}
+  vaultOnChain = blob; vaultCK[t] = ck; vaultAsk = false;
+  await markVaultSaved(at);
   renderVault();
 }
+/** Open the vault with this wallet's signature and put its secrets in this browser (never over ones already here). */
 async function vaultUnlock(wallet) {
   const blob = vaultOnChain || await readVault();
   if (!blob) throw new Error("this contract holds no vault yet");
-  const parts = blob.split(":"), salt = vaultSalt(blob), [ivB, ctB] = parts.slice(-2);
-  const key = await vaultKey(wallet || (() => ownerWallet(settings.owner)), salt);
-  let plain;
-  try { plain = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(ivB) }, key, unb64(ctB)))); }
-  catch { throw new Error("the vault did not open with this wallet's signature: it was locked by another wallet key"); }
+  const t = settings.treasury, cur = vaultParse(blob);
+  if (!cur) throw new Error("the vault on the contract could not be read");
+  const { raw } = await vaultKeyRaw(wallet || (() => ownerWallet(settings.owner)), cur.salt);
+  let plain, rewrite = false;
+  if (cur.v === 3) {
+    const id = await wrapId(raw), w = cur.wraps[id];
+    let ck = null;
+    if (w?.kind === "sig") ck = await aesUnwrap(w, raw).catch(() => null);
+    else if (w?.kind === "ecdh") { const req = readVaultReq(); if (req?.id === id) ck = await aesUnwrap(w, await ecdhSecret(req.priv, w.epk, cur.salt)).catch(() => null); rewrite = !!ck; }
+    if (!ck) {
+      vaultAsk = true; renderVault();
+      const asked = cur.requests.some((r) => r.id === id);
+      const e = new Error(w ? "this device was admitted, but the key it asked with is gone from this browser: ask again" : asked ? "this device asked to be admitted and still waits: open the vault on the device that holds it and admit this one there" : "this wallet key is not admitted to the vault yet: ask a device that holds the vault to admit this one");
+      e.vaultAsk = true; throw e;
+    }
+    plain = JSON.parse(td.decode(await aesUnwrap({ iv: cur.iv, ct: cur.ct }, ck)));
+    vaultCK[t] = ck;
+  } else {
+    try { plain = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(cur.iv) }, await aesKey(raw), unb64(cur.ct)))); }
+    catch { throw new Error("the vault did not open with this wallet's signature: it was locked by another wallet key. Open it once on the device that locked it, and it will admit other devices from then on."); }
+    rewrite = true; // an old vault is rewritten as v3 with this wallet key as its first wrap
+  }
+  vaultAsk = false;
   for (const f of VAULT_FIELDS) if (plain.data?.[f] && !settings[f]) $("#" + f).value = plain.data[f];
   saveSettings();
-  // a vault from before salts is rewritten with one (a second wallet signature, once)
-  if (!salt) vaultSave(wallet).catch((e) => console.warn("vault:", e.message));
-  try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at: plain.saved_at, plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))) })); } catch {}
+  await markVaultSaved(plain.saved_at);
+  if (rewrite) { try { await vaultSave(wallet); try { localStorage.removeItem(vaultReqKey()); } catch {} } catch (e) { console.warn("vault:", e.message); } }
   renderVault();
   return plain;
+}
+/** This device's wallet key is not in the vault: leave a request on the contract for a device that holds it. */
+async function vaultRequestAdmission(wallet) {
+  const blob = vaultOnChain || await readVault();
+  const cur = vaultParse(blob);
+  if (!cur) throw new Error("this contract holds no vault yet");
+  if (cur.v !== 3) throw new Error("this vault was locked by one wallet key only: open it once on that device, then ask again");
+  const { raw, pub } = await vaultKeyRaw(wallet || (() => ownerWallet(settings.owner)), cur.salt);
+  const id = await wrapId(raw);
+  let req = readVaultReq();
+  if (!req || req.id !== id) { const kp = await ecdhPair(); req = { id, pub: kp.pub, priv: kp.priv }; try { localStorage.setItem(vaultReqKey(), JSON.stringify(req)); } catch { throw new Error("this browser cannot keep the request's key: storage is blocked"); } }
+  const requests = cur.requests.filter((r) => r.id !== id).concat([{ id, wallet: pub, ek: req.pub, at: new Date().toISOString() }]);
+  const next = vaultBlob({ ...cur, requests });
+  await ownerCall("set_vault", { blob: next }, 20);
+  vaultOnChain = next; renderVault();
+}
+/** A device that holds the content key answers a request: wrap the key for the newcomer (yes) or drop the request (no). */
+async function vaultAdmit(id, yes) {
+  const t = settings.treasury, cur = vaultParse(vaultOnChain), ck = vaultCK[t];
+  if (!cur || cur.v !== 3) throw new Error("no vault to admit to");
+  if (!ck) throw new Error("open the vault in this browser first");
+  const req = cur.requests.find((r) => r.id === id); if (!req) return;
+  const wraps = { ...cur.wraps };
+  if (yes) { const kp = await ecdhPair(); wraps[id] = { kind: "ecdh", epk: kp.pub, ...(await aesWrap(ck, await ecdhSecret(kp.priv, req.ek, cur.salt))) }; }
+  const next = vaultBlob({ ...cur, wraps, requests: cur.requests.filter((r) => r.id !== id) });
+  await ownerCall("set_vault", { blob: next }, 20);
+  vaultOnChain = next; renderVault();
+}
+/** Forget a wallet key's wrap (a lost phone): the device that holds the vault removes it; the newcomer must ask again. */
+async function vaultRevoke(id) {
+  const cur = vaultParse(vaultOnChain); if (!cur || cur.v !== 3 || !vaultCK[settings.treasury]) throw new Error("open the vault in this browser first");
+  const wraps = { ...cur.wraps }; delete wraps[id];
+  const next = vaultBlob({ ...cur, wraps }); await ownerCall("set_vault", { blob: next }, 20); vaultOnChain = next; renderVault();
 }
 /** Settings block and the top notice. Called after the treasury loads and after every save. */
 async function renderVault() {
   const kv = $("#vaultKv"), bar = $("#vaultBar"); if (!kv) return;
-  if (!crypto.subtle) { kv.innerHTML = `<span class="k">vault on chain</span><span class="v">needs https: the browser exposes encryption only on a secure page.</span>`; $("#vaultSave").hidden = true; $("#vaultUnlock").hidden = true; bar.hidden = true; return; }
+  if (!crypto.subtle) { kv.innerHTML = `<span class="k">vault on chain</span><span class="v">needs https: the browser exposes encryption only on a secure page.</span>`; $("#vaultSave").hidden = true; $("#vaultUnlock").hidden = true; $("#vaultAsk").hidden = true; bar.hidden = true; return; }
   const walletOwner = settings.ownerKeyKind === "wallet" && !!settings.ownerKey && !!settings.owner;
   if (vaultOnChain === undefined) await readVault();
-  let saved = null; try { saved = JSON.parse(localStorage.getItem(`bursar.vaultSaved.${settings.treasury}`) || "null"); } catch {}
+  const cur = vaultParse(vaultOnChain), t = settings.treasury, holds = !!vaultCK[t];
+  let saved = null; try { saved = JSON.parse(localStorage.getItem(`bursar.vaultSaved.${t}`) || "null"); } catch {}
   const plainHash = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain()))));
   const behind = vaultHasSecrets() && (!saved || saved.plain !== plainHash);
-  const canUnlock = walletOwner && !!vaultOnChain && (!vaultHasSecrets() || behind && !saved);
+  const myReq = readVaultReq(), waiting = !!(cur?.v === 3 && myReq && cur.requests.some((r) => r.id === myReq.id));
+  const pending = cur?.v === 3 && cur.requests.length > 0 && !waiting;
+  const canUnlock = walletOwner && !!vaultOnChain && !holds && (!vaultHasSecrets() || behind && !saved || pending);
+  const askable = canUnlock && cur?.v === 3 && (vaultAsk || waiting);
   let status;
   if (vaultOnChain === false) status = "not available: this treasury was created before the vault existed. Keep the keys backup file.";
   else if (!walletOwner) status = settings.ownerKey ? "the vault is for wallet owners; with full keys in this browser, keep the keys backup file." : "sign in as the owner with your wallet to use it.";
   else if (!vaultOnChain) status = vaultHasSecrets() ? "nothing saved yet: this browser holds secrets the contract does not." : "nothing to save yet.";
-  else if (canUnlock) status = "the contract holds a vault; this browser has not opened it.";
+  else if (pending && !holds) status = `${cur.requests.length} device${cur.requests.length === 1 ? "" : "s"} ask${cur.requests.length === 1 ? "s" : ""} to be admitted: unlock the vault here to answer.`;
+  else if (waiting) status = "this device asked to be admitted. Open the vault on the device that holds it (Settings, Keys) and admit this one there; then unlock here.";
+  else if (canUnlock) status = cur?.v === 3 ? `the contract holds a vault opened by ${Object.keys(cur.wraps).length} wallet key${Object.keys(cur.wraps).length === 1 ? "" : "s"}; this browser has not opened it.` : "the contract holds a vault; this browser has not opened it.";
   else status = behind ? `saved ${saved?.at ? new Date(saved.at).toLocaleString() : "earlier"}, this browser has newer secrets.` : `saved ${saved?.at ? new Date(saved.at).toLocaleString() : "on chain"}, up to date.`;
-  kv.innerHTML = `<span class="k">vault on chain</span><span class="v">${esc(status)}</span>`;
-  $("#vaultSave").hidden = !walletOwner || vaultOnChain === false; $("#vaultSave").disabled = !behind && !!vaultOnChain;
-  $("#vaultUnlock").hidden = !canUnlock;
+  let rows = `<span class="k">vault on chain</span><span class="v">${esc(status)}</span>`;
+  if (cur?.v === 3 && holds) {
+    const ids = Object.keys(cur.wraps);
+    rows += `<span class="k">admitted keys</span><span class="v">${ids.length}: ${ids.map((id) => `<span class="mono">${esc(id.slice(0, 8))}</span>${ids.length > 1 ? ` <button type="button" class="btn-ghost small vact" data-vact="revoke" data-id="${esc(id)}">forget</button>` : ""}`).join(", ")} <span class="muted">(one per wallet key or device that opened the vault)</span></span>`;
+    for (const r of cur.requests) rows += `<span class="k">asks to be admitted</span><span class="v"><span class="mono">${esc((r.wallet || r.id).slice(0, 24))}</span> on ${esc(r.at ? new Date(r.at).toLocaleString() : "unknown date")} <span class="actions" style="display:inline-flex;gap:6px;margin-left:8px"><button type="button" class="btn-signal small vact" data-vact="admit" data-id="${esc(r.id)}">Admit</button><button type="button" class="btn-ghost small vact" data-vact="refuse" data-id="${esc(r.id)}">Refuse</button></span><br><span class="muted">Admit only a device you hold: it gets every secret in this vault.</span></span>`;
+  }
+  kv.innerHTML = rows;
+  $("#vaultSave").hidden = !walletOwner || vaultOnChain === false; $("#vaultSave").disabled = (!behind && !!vaultOnChain) || (cur?.v === 3 && !holds);
+  $("#vaultUnlock").hidden = !canUnlock; $("#vaultAsk").hidden = !askable; $("#vaultAsk").textContent = waiting ? "Ask again" : "Ask to admit this device";
+  $("#vaultUnlockTop").hidden = false; $("#vaultAskTop").hidden = !askable; $("#vaultAskTop").textContent = waiting ? "Ask again" : "Ask to admit this device";
+  $("#vaultBarText").textContent = pending && !holds ? "A device asks to be admitted to this company's vault. Unlock it here to answer." : waiting ? "This device asked to be admitted to the vault. Admit it on the device that holds the vault (Settings, Keys), then unlock here." : askable ? "This wallet key is not admitted to the vault yet. Ask, then admit this device from the one that holds the vault." : "This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.";
   bar.hidden = !canUnlock;
 }
 async function withVaultButton(btn, errEl, fn) {
@@ -2992,10 +3097,20 @@ async function withVaultButton(btn, errEl, fn) {
 $("#vaultSave").addEventListener("click", () => withVaultButton($("#vaultSave"), $("#vaultErr"), () => vaultSave()));
 $("#vaultUnlock").addEventListener("click", () => withVaultButton($("#vaultUnlock"), $("#vaultErr"), () => vaultUnlock()));
 $("#vaultUnlockTop").addEventListener("click", () => withVaultButton($("#vaultUnlockTop"), $("#vaultBarErr"), () => vaultUnlock()));
+$("#vaultAsk").addEventListener("click", () => withVaultButton($("#vaultAsk"), $("#vaultErr"), () => vaultRequestAdmission()));
+$("#vaultAskTop").addEventListener("click", () => withVaultButton($("#vaultAskTop"), $("#vaultBarErr"), () => vaultRequestAdmission()));
+$("#vaultKv").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.vact"); if (!b) return;
+  const { vact, id } = b.dataset;
+  if (vact === "admit" && !(await ask({ eyebrow: "Vault", title: "Admit this device?", rows: [["request", id.slice(0, 8)]], note: "The device gets every secret in this vault: the agent key, the inbox token, the API keys. Admit only a device you hold.", ok: "Admit" }))) return;
+  if (vact === "revoke" && !(await ask({ eyebrow: "Vault", title: "Forget this wallet key?", rows: [["key", id.slice(0, 8)]], note: "That device can no longer open the vault; it can ask again. Secrets it already holds stay there.", ok: "Forget", danger: true }))) return;
+  await withVaultButton(b, $("#vaultErr"), () => vact === "admit" ? vaultAdmit(id, true) : vact === "refuse" ? vaultAdmit(id, false) : vaultRevoke(id));
+});
 /** After a change that created a secret (Telegram token, agent key), write the vault when this tab can do so without a prompt. */
 function vaultAutoSave() {
-  const salt = vaultSalt(vaultOnChain), ck = salt ? `${settings.treasury}:${salt}` : settings.treasury;
+  const salt = vaultSalt(vaultOnChain), ck = salt ? `${settings.treasury}:${salt}` : settings.treasury, cur = vaultParse(vaultOnChain);
   let known = !!vaultKeys[ck]; try { known = known || !!sessionStorage.getItem(`bursar.vaultKey.${ck}`); } catch {}
+  if (cur?.v === 3 && !vaultCK[settings.treasury]) return; // a vault this tab has not opened is never overwritten blindly
   if (settings.ownerKeyKind !== "wallet" || !settings.ownerKey || !known || vaultOnChain === false) return;
   vaultSave().catch((e) => console.warn("vault:", e.message));
 }
