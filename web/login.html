@@ -231,8 +231,7 @@ async function afterIdentify(account) {
       $("#have").hidden = false;
       $("#list").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && !b.disabled) openTreasury(b.dataset.t, b.dataset.l, account); });
     } else {
-      if (network !== "testnet") $("#noneText").textContent = "This account owns no Bursar treasury. On mainnet, creation runs from the CLI for now (bursar setup); on testnet the console creates it for free.";
-      $("#createGo").disabled = network !== "testnet";
+      if (network !== "testnet") $("#noneText").textContent = "This account owns no Bursar treasury. Create it now: your wallet signs four transactions (the treasury account with the contract inside, the agent, the executor, the USDC registration). About 7 NEAR, of which 4.8 stay locked as the contract's storage on your own treasury account; then you add your vendors and deposit USDC from Overview.";
       $("#none").hidden = false;
       $("#createGo").addEventListener("click", () => {
         try { localStorage.setItem("bursar.walletOwner", JSON.stringify({ network, account })); } catch {}
