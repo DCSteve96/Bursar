@@ -212,12 +212,14 @@ async function afterIdentify(account) {
   $("#title").textContent = "Welcome"; $("#lead").textContent = "Signed in with your NEAR wallet.";
   $("#acct").textContent = account; $("#acctNet").textContent = `NEAR ${network}`; $("#av").textContent = account.slice(0, 2).toUpperCase();
   try {
-    if (!REGISTRY[network]) throw new Error(`no registry on ${network} yet`);
-    const hints = await view(network, REGISTRY[network], "of", { owner: account });
+    // the registry lists the treasuries an account owns; without one (mainnet, for now) the one the console names after the
+    // owner, treasury.<account>, is looked up directly, so a company created from the browser is found again
+    const listed = REGISTRY[network] ? await view(network, REGISTRY[network], "of", { owner: account }) : [];
+    const hints = [...new Set([...listed, `treasury.${account}`])].filter((t) => t.length <= 64);
     const mine = []; const builds = await knownBuilds(); let strangers = 0;
     await Promise.all(hints.map(async (t) => {
       try {
-        const [hash, roles] = await Promise.all([codeHash(network, t), view(network, t, "get_roles")]);
+        const [hash, roles] = await Promise.all([codeHash(network, t), view(network, t, "get_roles")]); // an account that does not exist fails here and is skipped
         if (!builds[hash]) { strangers++; console.warn(`${t} is registered under this account but its code is not a Bursar build: ignored`); return; }
         if (roles[0] !== account) return;
         let company = null; try { company = await view(network, t, "get_company"); } catch {}
