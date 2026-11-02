@@ -581,7 +581,7 @@ Richiesta di Stefano, decisa cosi': Telegram per il caso comune, le eccezioni in
 
 Primo tentativo su mainnet: `Qwen/Qwen3-VL-30B-A3B-Instruct` rispondeva 502 "upstream request failed" al gateway NEAR AI (diretto e via relay), `z-ai/glm-5.3-flash` rispondeva in un secondo. Il modello era un campo nascosto della console: Stefano non poteva cambiarlo.
 
-- Console: `#model` è una select in Settings (Qwen3-VL, glm-5.3-flash). `readInTee` chiede l'attestazione per modello; se il modello scelto fallisce due volte con uno status transitorio, passa all'altro (`MODEL_FALLBACK`), richiede l'attestazione con lo stesso nonce e scrive nella ricevuta il modello che ha risposto davvero. La riga "model" di This treasury rimanda a Settings.
+- Console: `#model` è una select in Settings (Qwen3-VL, glm-5.3-flash). `readInTee` chiede l'attestazione per modello; se il modello scelto fallisce con uno status transitorio (un 524 dell'edge arriva dopo 100 s, quindi al primo errore), passa all'altro (`MODEL_FALLBACK`), richiede l'attestazione con lo stesso nonce e scrive nella ricevuta il modello che ha risposto davvero. La riga "model" di This treasury rimanda a Settings.
 - Agente: `NEAR_AI_MODEL_FALLBACK` (default `z-ai/glm-5.3-flash`), stessa logica in `readInvoice`; `fetchAttestation(nonce, model)`.
 - Da ricordare: il verificatore controlla il modello della ricevuta, quindi un fallback non rompe `bursar verify`.
 
@@ -592,3 +592,5 @@ Primo Request payment su mainnet: `NotEnoughBalance`, agente con 0.1 NEAR, costo
 Misure su testnet (bulktreasury): request_payment pagata su NEAR brucia circa 10 TGas in tutto (contratto 5.3, ft_transfer 1.8, callback 1.9), con 50 TGas allegati; hold 4.4 TGas. Percorso DAO: 30 (proposta) + 30 (callback) statici + 6 propri, quindi 100 TGas bastano con margine.
 
 Cambiato: console e agente allegano 100 TGas; la chiave dell'agente creata dal wizard non ha allowance (può chiamare solo request_payment, il tetto reale è il saldo dell'agente). La chiave mainnet di `agent.bursar-8ccac085.near` ha ancora allowance 0.3 NEAR: bastano per la demo (circa 6 richieste), poi va aggiunta una chiave nuova dal wallet.
+
+Correzione dopo il secondo tentativo di Stefano: con 100 TGas il costo anticipato era 0.1009 NEAR, cioè esattamente dieci volte il prezzo base (1e9 yocto per gas), lineare nel gas. La console ora allega 60 TGas senza DAO (0.06 NEAR anticipati) e 100 con DAO, e prima di firmare con la chiave dell'agente confronta il saldo con il costo anticipato: se manca, propone di ricaricare l'agente dal payer (o dal proprietario con chiave piena) con un dialogo, altrimenti dice quanti NEAR mandargli. Il wizard finanzia l'agente con 0.2 NEAR.

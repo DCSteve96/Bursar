@@ -1182,8 +1182,8 @@ async function readInTee(pngPages, textFallback, step) {
   step("model", "wait", `asking ${model} inside the enclave`);
   // The gateway answers 502 now and then, 524 when the model takes longer than its edge allows, and an
   // error response carries no CORS headers, so the browser reports it as a network error: retry on all.
-  // When the chosen model keeps failing, the other one takes over, with its own attestation for the same nonce.
-  const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530], TRIES = 6, SWITCH_AT = 2;
+  // When the chosen model fails, the other one takes over, with its own attestation for the same nonce.
+  const TRANSIENT = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530], TRIES = 6, SWITCH_AT = 1; // a 524 from the edge takes 100 s to arrive: switch at the first failure
   let r = null, responseBody = "", lastErr = "", switched = false;
   for (let attempt = 0; attempt < TRIES; attempt++) {
     try {
@@ -1470,7 +1470,20 @@ $("#submit").addEventListener("click", async () => {
       : settings.owner && settings.ownerKey ? { signerId: settings.owner, secretKey: settings.ownerKey, how: settings.ownerKeyKind === "wallet" ? "signed by the owner's wallet key" : "signed by the owner's key" }
       : settings.operator && settings.operatorKey ? { signerId: settings.operator, secretKey: settings.operatorKey, how: "signed by a collaborator's key" } : null;
     if (!signer) throw new Error("no key in this browser can ask the contract: sign in with your wallet, or set the agent key in Settings");
-    const { hash, value } = await functionCall({ signerId: signer.signerId, secretKey: signer.secretKey, receiverId: settings.treasury, method: "request_payment", args: { claim: current.claim }, gasTgas: 100 }); // a paid invoice burns about 10 TGas, a DAO proposal about 70; the network charges the attached gas at a pessimistic price until the refund, so less attached means less NEAR the agent needs to hold
+    // A paid invoice burns about 10 TGas, a DAO proposal about 70. The network charges the attached gas up front at ten
+    // times the base price and refunds the difference, so the agent only needs what one request costs up front.
+    const gasTgas = dao() ? 100 : 60;
+    if (signer.signerId === settings.agent) {
+      const upfront = BigInt(gasTgas) * 10n ** 21n + NEAR(0.01), have = await nearBalance(settings.agent).catch(() => null);
+      if (have !== null && have < upfront) {
+        const f = funder();
+        const need = Number((upfront - have) / 10n ** 21n) / 1000 + 0.1;
+        if (!f) throw new Error(`the agent ${settings.agent} holds ${(Number(have / 10n ** 21n) / 1000).toFixed(3)} NEAR and a request needs about ${(Number(upfront / 10n ** 21n) / 1000).toFixed(3)} NEAR up front (refunded after): send it ${need.toFixed(2)} NEAR from your wallet`);
+        if (!(await ask({ eyebrow: "Agent", title: `Top up the agent with ${need.toFixed(2)} NEAR?`, rows: [["from", f.signerId], ["to", settings.agent], ["why", `it holds ${(Number(have / 10n ** 21n) / 1000).toFixed(3)} NEAR; a request needs about ${(Number(upfront / 10n ** 21n) / 1000).toFixed(3)} NEAR up front, refunded after`]], note: "The agent pays the gas of its own requests. The NEAR comes from the account whose key this browser holds for funding.", ok: "Top up" }))) throw new Error("request not sent: the agent needs NEAR for gas");
+        await sendTx({ signerId: f.signerId, secretKey: f.secretKey, receiverId: settings.agent, actions: [A.transfer(NEAR(need))] });
+      }
+    }
+    const { hash, value } = await functionCall({ signerId: signer.signerId, secretKey: signer.secretKey, receiverId: settings.treasury, method: "request_payment", args: { claim: current.claim }, gasTgas });
     await showDecision(Number(value), hash, signer.how);
     loadTreasury();
   } catch (e) {
@@ -2555,7 +2568,7 @@ async function createTreasuryWithWallet(company) {
     if (await accountExists(agent)) step("agent", "ok", `${agent} already exists`);
     else {
       step("agent", "wait", `creating ${agent}`);
-      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.1)), A.addFunctionCallKey(agentKey.pub, null, treasury, ["request_payment"])]);
+      const t2 = await send(agent, [A.createAccount(), A.transfer(NEAR(0.2)), A.addFunctionCallKey(agentKey.pub, null, treasury, ["request_payment"])]);
       step("agent", "ok", `${agent} holds one key: request_payment on ${treasury}, nothing else`, t2.hash);
     }
     if (await accountExists(executor)) step("executor", "ok", `${executor} already exists`);
