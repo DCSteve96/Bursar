@@ -125,7 +125,7 @@ async function rpcPost(network, params) {
   throw new Error(`the NEAR RPC did not answer (${last?.message}). Check the connection, a VPN or an ad blocker, then reload.`);
 }
 // The public list of treasuries (contracts/registry). Entries are hints: the owner is checked on the treasury itself.
-const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "registry.badfrog6063.near" };
+const REGISTRY = { testnet: "registry.bursar-b48563e6.testnet", mainnet: "registry.bursar.near" };
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const b58 = (u8) => { let n = 0n; for (const b of u8) n = n * 256n + BigInt(b); let s = ""; while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; } for (const b of u8) { if (b !== 0) break; s = "1" + s; } return s; };
 const concat = (a, b) => { const u = new Uint8Array(a.length + b.length); u.set(a); u.set(b, a.length); return u; };
