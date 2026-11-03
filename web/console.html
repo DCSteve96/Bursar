@@ -108,6 +108,12 @@
   /* the page's own confirm: same dialog as the wizard, one question, two buttons */
   dialog.ask { width: min(520px, calc(100vw - 32px)); } .ask h3 { font-size: 22px; margin: 6px 0 14px; } .ask .kv { margin: 0 0 14px; } .ask .kv .v { overflow-wrap: anywhere; }
   .ask p.muted { margin: 0; } .ask .actions { justify-content: flex-end; } .ask .btn-danger { background: var(--blocked-light); color: #fff; border-color: var(--blocked-light); }
+  .autosettle { display: flex; align-items: center; gap: 16px; padding: 14px 18px; margin: 0 0 14px; background: var(--paper); border: 1px solid var(--line-light); border-radius: 4px; }
+  .autosettle .t { flex: 1; min-width: 200px; } .autosettle .t b { display: block; font-size: 15px; margin-bottom: 2px; } .autosettle .muted { font-size: 13px; line-height: 1.45; }
+  .autosettle.on { border-color: var(--signal); background: var(--mint); color: var(--fg-light); }
+  .toggle { flex: none; width: 48px; height: 28px; border-radius: 14px; border: 0; background: #b9b5aa; position: relative; cursor: pointer; padding: 0; transition: background 0.15s; }
+  .toggle[aria-checked="true"] { background: var(--signal); } .toggle .knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: left 0.15s; } .toggle[aria-checked="true"] .knob { left: 23px; }
+  .toggle:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
   .vaultbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 24px; background: var(--mint); color: var(--fg-light); font-size: 14px; border-bottom: 1px solid var(--line-light); } .vaultbar .btn-signal { padding: 8px 14px; font-size: 14px; }
   /* analytics: charts drawn as inline SVG, no library */
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 24px; }
@@ -482,7 +488,10 @@
     <h3 class="heading-sm" style="margin:40px 0 12px">Refused by policy</h3>
     <div class="wrap"><table id="attnBlocked"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>reason</th><th>flags</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Cross-chain, waiting for the executor</h3>
-    <p class="muted" id="autoSettleRow" hidden style="margin:0 0 12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px"><label style="display:inline-flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="autoSettle"> <span>Settle queued payments while this page is open</span></label><span id="autoSettleNote" style="font-size:13px">This browser acts as the executor: it asks 1Click for a quote and sends it to the contract, which checks everything. Nothing is confirmed by hand. The same loop runs on a server with <span class="mono">npm run executor</span>.</span></p>
+    <div id="autoSettleRow" class="autosettle" hidden>
+      <button type="button" id="autoSettle" class="toggle" role="switch" aria-checked="false" aria-labelledby="autoSettleTitle"><span class="knob"></span></button>
+      <div class="t"><b id="autoSettleTitle">Automatic settlement is off</b><div class="muted" id="autoSettleNote">Queued payments wait for you to press Settle via Intents on each one.</div></div>
+    </div>
     <div class="wrap"><table id="attnQueued"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>destination</th></tr></thead><tbody></tbody></table></div>
   </div>
 </section>
@@ -1716,10 +1725,17 @@ async function autoSettleTick() {
   catch (e) { $("#attnErr").textContent = `#${next.id}: ${e.message}${autoTried[next.id] >= 3 ? " (three attempts: left for a person)" : ""}`; $("#attnErr").hidden = false; }
   finally { autoBusy = false; }
 }
-$("#autoSettle").addEventListener("change", () => { try { localStorage.setItem(`bursar.autoSettle.${settings.treasury}`, $("#autoSettle").checked ? "1" : "0"); } catch {} if ($("#autoSettle").checked) autoSettleTick(); });
+function renderAutoSettle() {
+  const on = autoSettleOn(); const row = $("#autoSettleRow");
+  row.hidden = !(settings.executor && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB)); row.classList.toggle("on", on);
+  $("#autoSettle").setAttribute("aria-checked", on ? "true" : "false");
+  $("#autoSettleTitle").textContent = on ? "Automatic settlement is on" : "Automatic settlement is off";
+  $("#autoSettleNote").textContent = on ? "While this page is open it acts as the executor: every 30 seconds it takes the next queued payment, asks 1Click for a quote, checks the signature and sends it to the contract, which checks everything again before moving the USDC. Nothing is confirmed by hand. The same loop runs on a server with npm run executor." : "Queued payments wait for you to press Settle via Intents on each one. Turn this on and the page settles them by itself while it stays open.";
+}
+$("#autoSettle").addEventListener("click", () => { const on = !autoSettleOn(); try { localStorage.setItem(`bursar.autoSettle.${settings.treasury}`, on ? "1" : "0"); } catch {} renderAutoSettle(); if (on) autoSettleTick(); });
 setInterval(() => { if (!document.hidden) autoSettleTick(); }, 30000);
 function renderAttention() {
-  $("#autoSettleRow").hidden = !(settings.executor && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB)); $("#autoSettle").checked = autoSettleOn();
+  renderAutoSettle();
   if (autoSettleOn()) setTimeout(autoSettleTick, 500);
   const canApprove = canAct("approve") && !(state.roles?.[3]);
   // bulk: approve or cancel the picked rows in one transaction (no DAO), or vote them one by one (council)
