@@ -3200,7 +3200,7 @@ async function renderVault() {
   const pending = cur?.v === 3 && cur.requests.length > 0 && !waiting;
   // another device wrote the vault since this browser last opened or saved it: its secrets may be newer than ours
   const blobNow = typeof vaultOnChain === "string" ? toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultOnChain)))).slice(0, 32) : "";
-  const elsewhere = !!(saved?.blob && blobNow && saved.blob !== blobNow);
+  const elsewhere = !!(saved && blobNow && saved.blob !== blobNow); // a record without a blob hash is from before this check: offer the unlock once, it records the hash
   const canUnlock = walletOwner && !!vaultOnChain && (!holds || elsewhere) && (!vaultHasSecrets() || behind && !saved || pending || elsewhere);
   const askable = canUnlock && cur?.v === 3 && (vaultAsk || waiting);
   let status;
