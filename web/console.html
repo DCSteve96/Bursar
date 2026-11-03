@@ -691,10 +691,10 @@
         <div class="actions" style="margin-top:16px"><button id="lSave" type="button" class="btn-inverse">Save limits</button></div>
       </div>
       <div class="card">
-        <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Cross-chain settlement <i class="help" tabindex="0" data-help="Vendors on other chains are paid through NEAR Intents: the executor gets a quote and sends the USDC to the deposit account Intents gives it. The contract only lets it send to this account or its sub-accounts. Empty, nothing cross-chain is settled.">?</i></div>
-        <label><span>Intents deposit account the executor may pay</span><input id="sAcct" autocomplete="off" placeholder="intents.near"></label>
-        <p class="muted" id="sAcctNow"></p>
-        <div class="actions" style="margin-top:16px"><button id="sAcctSave" type="button" class="btn-inverse">Save settlement account</button></div>
+        <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Ownership <i class="help" tabindex="0" data-help="Ownership moves in two steps: the owner offers it to an account, and that account accepts from its own sign-in. A wallet talked into one signature gives nothing away; an offer can be withdrawn until it is accepted.">?</i></div>
+        <p class="muted" id="ownNow"></p>
+        <label id="ownNewRow"><span>Offer the treasury to</span><input id="ownNew" autocomplete="off" placeholder="new-owner.near"></label>
+        <div class="actions" style="margin-top:16px"><button id="ownOffer" type="button" class="btn-inverse" hidden>Offer ownership</button><button id="ownCancel" type="button" class="btn-ghost" hidden>Withdraw the offer</button><button id="ownAccept" type="button" class="btn-signal" hidden>Accept ownership</button></div>
       </div>
       <div class="card">
         <div class="eyebrow muted" style="margin-bottom:16px;display:flex;align-items:center">Contract build <i class="help" tabindex="0" data-help="The policy contract this treasury runs, recognised by its code hash among Bursar's builds. The owner upgrades it from here: the wallet signs, the contract deploys the new code onto itself and keeps every payment.">?</i></div>
@@ -1561,7 +1561,7 @@ async function loadTreasury() {
     state = { stats, limits, roles, vendors, payments, orders, company, operators };
     // contracts from before the audit lack these views: then nothing is shown
     state.vstate = Object.fromEntries(await Promise.all(vendors.map(async ([id]) => [id, await view(t, "vendor_state", { vendor_id: id }).catch(() => null)])));
-    state.settlement = await view(t, "get_settlement_account").catch(() => undefined);
+    state.offer = await view(t, "get_ownership_offer").catch(() => undefined); // undefined: a build before two-step ownership
     state.inFlight = await view(t, "get_in_flight").catch(() => null);
     state.codeHash = await rpc("query", { request_type: "view_account", finality: "final", account_id: t }).then((a) => a.code_hash).catch(() => null);
     // what the token really holds: USDC sent with a plain transfer is in the account but not on the contract's books
@@ -1761,7 +1761,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const randomImplicit = () => toHex(crypto.getRandomValues(new Uint8Array(32)));
 async function oneClick(path, body) {
   if (INTENTS_STUB) {
-    if (path === "/v0/quote") { const net = BigInt(body.amount); return { correlationId: `stub-${Date.now()}`, quote: { depositAddress: randomImplicit(), amountIn: net.toString(), amountOut: (net - net / 200n).toString(), timeEstimate: 5, deadline: new Date(Date.now() + 1200000).toISOString() } }; }
+    if (path === "/v0/quote") {
+      const net = BigInt(body.amount), out = (net - net / 200n).toString();
+      const resp = { correlationId: `stub-${Date.now()}`, quoteRequest: { ...body }, quote: { amountIn: net.toString(), amountInFormatted: "x", amountInUsd: "x", minAmountIn: net.toString(), amountOut: out, amountOutFormatted: "x", amountOutUsd: "x", minAmountOut: out, depositAddress: randomImplicit(), deadline: new Date(Date.now() + 1200000).toISOString(), timeEstimate: 5 }, timestamp: new Date().toISOString() };
+      resp.signature = "ed25519:" + b58encode(ed25519.sign(quoteMessage(signedPayload(resp)), STUB_SEED));
+      return resp;
+    }
     if (path.startsWith("/v0/status")) { const age = Date.now() - Number(sessionStorage.getItem("bursar.stubSettleAt") || 0); return age > 8000 ? { status: "SUCCESS", swapDetails: { destinationChainTxHashes: [{ hash: "0xstub" + randomImplicit().slice(0, 24) }] } } : { status: "PROCESSING" }; }
     return { ok: true };
   }
@@ -1778,35 +1783,59 @@ async function oneClick(path, body) {
   return j;
 }
 const executorSend = (method, args, gasTgas = 100) => sendTx({ signerId: settings.executor, secretKey: settings.executorKey, receiverId: settings.treasury, actions: [A.functionCall(method, args, gasTgas, 0n)] });
+/** The bytes 1Click signed for a quote: its request merged with its answer and a timestamp, keys sorted
+ *  (json-stable-stringify), the fields its SDK keeps. The contract hashes exactly this string. */
+const QUOTE_REQ = ["dry", "swapType", "slippageTolerance", "originAsset", "depositType", "destinationAsset", "amount", "refundTo", "refundType", "recipient", "recipientType", "deadline"];
+const QUOTE_REQ_OPT = ["quoteWaitingTimeMs", "referral", "virtualChainRecipient", "virtualChainRefundRecipient", "customRecipientMsg"];
+const QUOTE_OUT = ["amountIn", "amountInFormatted", "amountInUsd", "minAmountIn", "amountOut", "amountOutFormatted", "amountOutUsd", "minAmountOut"];
+const QUOTE_OUT_OPT = ["depositAddress", "depositMemo", "deadline", "timeWhenInactive", "timeEstimate", "refundFee", "withdrawFee"];
+function stableStringify(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => (x === undefined ? "null" : stableStringify(x))).join(",")}]`;
+  return `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(",")}}`;
+}
+function signedPayload(resp) {
+  const r = resp?.quoteRequest, q = resp?.quote;
+  if (!r || !q || typeof resp.timestamp !== "string") return null;
+  const o = {};
+  for (const k of QUOTE_REQ) o[k] = r[k];
+  for (const k of QUOTE_REQ_OPT) o[k] = r[k] ? r[k] : undefined;
+  for (const k of QUOTE_OUT) o[k] = q[k];
+  if (!r.dry) for (const k of QUOTE_OUT_OPT) o[k] = q[k] || undefined;
+  o.timestamp = resp.timestamp;
+  return stableStringify(o);
+}
+const quoteMessage = (payload) => te.encode(b58encode(sha256(te.encode(payload))));
+const STUB_SEED = new Uint8Array(32).fill(7); // the test signer the contract's own tests use; set on a testnet treasury with set_quote_signer
 async function settleNow(id) {
   const p = state.payments.find((x) => x.id === id); const v = state.vendors.find(([vid]) => vid === p?.vendor_id)?.[1];
   if (!p || !v || !("Chain" in v.payout)) throw new Error("not a queued cross-chain payment");
   if (!settings.executor || !settings.executorKey) throw new Error("the executor account and key are not in Settings");
   const { chain, address } = v.payout.Chain; const dest = USDC_ASSET[chain]; if (!dest) throw new Error(`no USDC asset id for ${chain}`);
   const net = BigInt(p.amount) - BigInt(p.withheld || "0");
+  let signer = await view(settings.treasury, "get_quote_signer").catch(() => null);
+  if (!signer) throw new Error("this treasury runs a build from before signed quotes: upgrade it from Settings, Contract build, then settle");
+  if (INTENTS_STUB) { const stubPub = b64(ed25519.getPublicKey(STUB_SEED)); if (signer !== stubPub) { settleNote(id, "stub: pointing the treasury at the test quote signer..."); await ownerCall("set_quote_signer", { public_key: stubPub }, 30); signer = stubPub; } }
   settleNote(id, "asking NEAR Intents for a quote...");
-  const q = await oneClick("/v0/quote", { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 50, originAsset: USDC_ASSET.near, depositType: "ORIGIN_CHAIN", destinationAsset: dest, amount: net.toString(), recipient: address, recipientType: "DESTINATION_CHAIN", refundTo: settings.treasury, refundType: "ORIGIN_CHAIN", deadline: new Date(Date.now() + 20 * 60000).toISOString(), referral: "bursar" });
+  // the origin asset is this treasury's own USDC contract (the contract checks it): on mainnet the Circle USDC, on testnet the test token
+  const q = await oneClick("/v0/quote", { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 50, originAsset: `nep141:${state.roles[4]}`, depositType: "ORIGIN_CHAIN", destinationAsset: dest, amount: net.toString(), recipient: address, recipientType: "DESTINATION_CHAIN", refundTo: settings.treasury, refundType: "ORIGIN_CHAIN", deadline: new Date(Date.now() + 20 * 60000).toISOString(), referral: "bursar" });
   const quote = q.quote || {}, deposit = quote.depositAddress;
   if (!deposit || BigInt(quote.amountIn) !== net) throw new Error(`the quote does not match: deposit ${deposit}, amountIn ${quote.amountIn} for ${net}`);
-  const out = BigInt(quote.amountOut ?? quote.minAmountOut ?? "0");
-  if (out < net - net * 200n / 10000n) throw new Error(`the quote delivers ${usdc(out)} of ${usdc(net)}: fee over 2 percent, not sent`);
-  const yes = await ask({ eyebrow: "NEAR Intents", title: `Settle payment #${id} to ${chain}?`, rows: [["vendor receives", `${usdc(out)} at ${address}`], ["treasury sends", usdc(net)], ["deposit account", deposit], ["estimated time", `${quote.timeEstimate ?? "?"} s`]], note: "Three signatures: the owner registers this deposit account on the USDC contract and on the treasury (the contract will send USDC nowhere else), then the executor key calls settle. The outcome is checked here until the vendor's chain confirms.", ok: "Settle" });
+  const out = BigInt(quote.amountOut ?? quote.minAmountOut ?? "0"), floor = BigInt(quote.minAmountOut ?? "0");
+  if (floor < net - net * 200n / 10000n) throw new Error(`the quote guarantees ${usdc(floor)} of ${usdc(net)}: fee over 2 percent, not sent`);
+  // the same check the contract makes, before paying for a transaction: 1Click's signature over the quote
+  const payload = signedPayload(q); if (!payload) throw new Error("the quote carries no signed payload");
+  let sigBytes; try { sigBytes = b58decode(String(q.signature || "").replace(/^ed25519:/, "")); } catch { throw new Error("the quote carries no readable signature"); }
+  if (!ed25519.verify(sigBytes, quoteMessage(payload), unb64(signer))) throw new Error("the quote's signature does not verify against the treasury's quote signer");
+  const yes = await ask({ eyebrow: "NEAR Intents", title: `Settle payment #${id} to ${chain}?`, rows: [["vendor receives", `${usdc(out)} at ${address}`], ["at least", usdc(floor)], ["treasury sends", usdc(net)], ["deposit account", deposit], ["signed by", "1Click, checked here and by the contract"], ["estimated time", `${quote.timeEstimate ?? "?"} s`]], note: "The contract checks 1Click's signature, that the quote pays the vendor's recorded address for exactly this amount in USDC on the vendor's chain, registers the deposit account on the token itself and sends the USDC, in one transaction signed by the executor's key. Your wallet signs nothing.", ok: "Settle" });
   if (!yes) { settleNote(id, "not sent"); return; }
-  settleNote(id, "registering the deposit account on the USDC contract...");
-  const usdcContract = state.roles?.[4];
-  const bounds = await view(usdcContract, "storage_balance_bounds").catch(() => ({ min: "1250000000000000000000" }));
-  const regd = await view(usdcContract, "storage_balance_of", { account_id: deposit }).catch(() => null);
-  if (!regd) await ownerSend(usdcContract, [{ method: "storage_deposit", args: { account_id: deposit, registration_only: true }, gasTgas: 30, deposit: BigInt(bounds.min) }]);
-  settleNote(id, "registering the deposit account on the treasury...");
-  await ownerCall("set_settlement_account", { account: deposit }, 30);
-  settleNote(id, "settle: the treasury sends the USDC to the deposit account...");
-  const r = await executorSend("settle", { id, quote_id: String(q.correlationId || "").slice(0, 128), deposit_address: deposit, recipient: v.payout }, 100);
+  settleNote(id, "settle: the contract checks the quote and sends the USDC to the deposit account...");
+  const r = await executorSend("settle", { id, payload, signature: b64(sigBytes) }, 100);
   try { sessionStorage.setItem("bursar.stubSettleAt", String(Date.now())); } catch {}
   await oneClick("/v0/deposit/submit", { txHash: r?.hash, depositAddress: deposit, nearSenderAccount: settings.treasury }).catch(() => {});
   await loadTreasury();
   await settleCheck(id, deposit);
 }
-/** Ask 1Click how a settlement is doing; on a final answer, the executor key records it on the treasury. */
 async function settleCheck(id, deposit) {
   const p = state.payments.find((x) => x.id === id); deposit = deposit || p?.deposit_address;
   if (!deposit) throw new Error("no deposit address on this payment");
@@ -2102,8 +2131,11 @@ function renderSettings() {
     $("#upgradeBtn").hidden = !(settings.ownerKey && current && state.codeHash !== current);
     renderRegistryRow();
   });
-  $("#sAcctNow").textContent = state.settlement === undefined ? "This contract was deployed before settlement accounts existed: redeploy it to use one." : state.settlement ? `Now: ${state.settlement}` : "None set: queued cross-chain payments wait.";
-  if (state.settlement && !$("#sAcct").value) $("#sAcct").value = state.settlement;
+  {
+    const offer = state.offer || null, isOwner = !!settings.ownerKey && state.roles?.[0] === settings.owner, isOffered = !!offer && offer === settings.owner && !!settings.ownerKey && !isOwner;
+    $("#ownNow").textContent = state.offer === undefined ? "This contract was deployed before two-step ownership: upgrade it from Contract build below." : offer ? `Offered to ${offer}. It becomes the owner when it accepts; until then nothing changes.` : `Owned by ${state.roles?.[0] ?? "nobody"}. Ownership moves in two steps: you offer, the new owner accepts from its own sign-in.`;
+    $("#ownNewRow").hidden = !isOwner || !!offer; $("#ownOffer").hidden = !isOwner || !!offer; $("#ownCancel").hidden = !(isOwner && offer); $("#ownAccept").hidden = !isOffered;
+  }
   const { limits, roles, company, operators } = state;
   $("#cName").value = company?.name || ""; $("#cDesc").value = company?.description || ""; $("#cCountry").value = company?.country || ""; $("#cCountry")._showFlag?.(); $("#cTax").value = company?.tax_id || "";
   $("#lCap").value = Number(BigInt(limits.per_payment_cap) / 1000000n); $("#lDay").value = Number(BigInt(limits.daily_cap) / 1000000n); $("#lThr").value = Number(BigInt(limits.approval_threshold) / 1000000n); $("#lStrict").value = String(!!limits.require_orders);
@@ -2169,7 +2201,9 @@ $("#upgradeBtn").addEventListener("click", async () => {
   } catch (e) { $("#upgradeErr").textContent = /MethodNotFound|does not exist/i.test(e.message) ? "This contract predates the upgrade method: deploy once with the treasury key (near deploy), then upgrades happen here." : e.message; $("#upgradeErr").hidden = false; }
   finally { b.disabled = false; }
 });
-$("#sAcctSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { const v = $("#sAcct").value.trim(); await ownerCall("set_settlement_account", { account: v || null }); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
+$("#ownOffer").addEventListener("click", async () => { $("#sErr").hidden = true; try { const v = $("#ownNew").value.trim(); if (!v) throw new Error("name the account to offer the treasury to"); if (!(await ask({ eyebrow: "Ownership", title: `Offer the treasury to ${v}?`, rows: [["from", settings.owner], ["to", v]], note: "Nothing changes until that account accepts. You can withdraw the offer before then. Once accepted, you are no longer the owner: check the account twice.", ok: "Offer", danger: true }))) return; await ownerCall("offer_ownership", { new_owner: v }); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
+$("#ownCancel").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("cancel_ownership_offer", {}); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
+$("#ownAccept").addEventListener("click", async () => { $("#sErr").hidden = true; try { if (!(await ask({ eyebrow: "Ownership", title: "Accept this treasury?", rows: [["treasury", settings.treasury], ["you", settings.owner]], note: "Your wallet signs one transaction; from then on you are the owner: funds, vendors, limits and keys answer to you.", ok: "Accept" }))) return; await ownerCall("accept_ownership", {}); await loadTreasury(); } catch (e) { $("#sErr").textContent = e.message; $("#sErr").hidden = false; } });
 $("#lSave").addEventListener("click", async () => { $("#sErr").hidden = true; try { if (!$("#lDay").value.trim() || Number($("#lDay").value.replace(",", ".")) === 0) { if (!(await ask({ eyebrow: "Limits", title: "Save without a daily cap?", note: "The agent could pay, every day, up to five invoices under the threshold for every vendor.", ok: "Save anyway", danger: true }))) return; } await ownerCall("set_limits", { per_payment_cap: toUnits($("#lCap").value || "0"), daily_cap: toUnits($("#lDay").value || "0"), approval_threshold: toUnits($("#lThr").value || "0") }); if (String(!!state.limits.require_orders) !== $("#lStrict").value) await ownerCall("set_order_policy", { require_orders: $("#lStrict").value === "true" }); await loadTreasury(); } catch (e) { onErr(e); } });
 $("#opAdd").addEventListener("click", async () => { $("#sErr").hidden = true; try { await ownerCall("add_operator", { account: $("#opAccount").value.trim(), role: { approve: $("#opApprove").checked, manage_vendors: $("#opVendors").checked, manage_orders: $("#opOrders").checked } }); $("#opAccount").value = ""; await loadTreasury(); } catch (e) { onErr(e); } });
 // ---------- governance: a Sputnik DAO for the company, from the console ----------
@@ -2618,9 +2652,11 @@ async function createTreasuryWithWallet(company) {
     const roles = await view(treasury, "get_roles");
     if (roles[0] === owner) step("owner", "ok", `${treasury} is owned by ${owner}`);
     else {
-      step("owner", "wait", `handing the treasury to ${owner}`);
-      const t6 = await send(treasury, [A.functionCall("transfer_ownership", { new_owner: owner }, 30)]);
-      step("owner", "ok", `${treasury} is owned by ${owner}; the payer ${payer} keeps a little NEAR for invites`, t6.hash);
+      step("owner", "wait", `offering the treasury to ${owner}`);
+      const t6 = await send(treasury, [A.functionCall("offer_ownership", { new_owner: owner }, 30)]);
+      step("owner", "wait", `your wallet accepts the treasury: one signature`, t6.hash);
+      const t7 = await ownerSend(treasury, [{ method: "accept_ownership", args: {}, gasTgas: 30 }]);
+      step("owner", "ok", `${treasury} is owned by ${owner}; the payer ${payer} keeps a little NEAR for invites`, t7.hash);
     }
     await registerTreasury({ signerId: payer, secretKey: payerKey.secretKey }, treasury, owner, step);
     try { localStorage.removeItem("bursar.onboarding"); } catch {}
@@ -2728,9 +2764,11 @@ async function createTreasury(company) {
       const roles = await view(treasury, "get_roles");
       if (roles[0] === owner) step("owner", "ok", `${treasury} is owned by ${owner}`);
       else {
-        step("owner", "wait", `handing the treasury to ${owner}`);
-        const t6 = await send(treasury, [A.functionCall("transfer_ownership", { new_owner: owner }, 30)]);
-        step("owner", "ok", `${treasury} is owned by ${owner}; the payer ${root} is only the executor and the agent's parent`, t6.hash);
+        step("owner", "wait", `offering the treasury to ${owner}`);
+        const t6 = await send(treasury, [A.functionCall("offer_ownership", { new_owner: owner }, 30)]);
+        step("owner", "wait", `your wallet accepts the treasury: one signature`, t6.hash);
+        const t7 = await ownerSend(treasury, [{ method: "accept_ownership", args: {}, gasTgas: 30 }]);
+        step("owner", "ok", `${treasury} is owned by ${owner}; the payer ${root} is only the executor and the agent's parent`, t7.hash);
       }
     }
     await registerTreasury({ signerId: root, secretKey: rootKey.secretKey }, treasury, owner, step);
@@ -2901,7 +2939,7 @@ async function showDecision(id, hash, signedBy) {
 // key has no wrap yet (the phone app, another browser) asks to be admitted: it leaves an ECDH public key on the contract
 // (set_vault, owner only); a device that holds the content key admits it with one transaction, and from then on the
 // newcomer's own signature opens the vault. v1 and v2 vaults (one wallet key as the AES key) are read and rewritten as v3.
-const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "inboxToken", "label", "aiKey", "readMode", "intentsKey"];
+const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "executor", "executorKey", "inboxToken", "label", "aiKey", "readMode", "intentsKey"];
 const vaultKeys = {}; // treasury:salt -> { raw, pub }, for this tab
 const vaultCK = new Proxy({}, { get: (o, t) => { if (!(t in o)) { try { const h = sessionStorage.getItem(`bursar.vaultCK.${t}`); if (h) o[t] = fromHex(h); } catch {} } return o[t]; }, set: (o, t, v) => { o[t] = v; try { sessionStorage.setItem(`bursar.vaultCK.${t}`, toHex(v)); } catch {} return true; } }); // treasury -> content key, once this tab opened or wrote the vault (kept for the session)
 /** The wallet-derived key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature
@@ -2953,7 +2991,7 @@ function vaultParse(blob) {
 const vaultBlob = (o) => "v3:" + JSON.stringify({ salt: o.salt, iv: o.iv, ct: o.ct, wraps: o.wraps, requests: o.requests });
 const vaultSalt = (blob) => vaultParse(blob)?.salt || "";
 function vaultPlain() { return JSON.stringify(Object.fromEntries(VAULT_FIELDS.map((f) => [f, settings[f] || ""]))); }
-const vaultHasSecrets = () => !!(settings.agentKey || settings.inboxToken || settings.payerKey || settings.aiKey || settings.intentsKey);
+const vaultHasSecrets = () => !!(settings.agentKey || settings.inboxToken || settings.payerKey || settings.executorKey || settings.aiKey || settings.intentsKey);
 let vaultOnChain; // undefined: not read yet; null: none; false: contract too old; string: the blob
 let vaultAsk = false; // the last unlock failed because this wallet key is not admitted yet
 async function readVault() {

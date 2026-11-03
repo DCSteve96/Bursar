@@ -30,7 +30,7 @@ Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb ex
 ## Struttura
 
 ```
-contracts/policy      contratto di policy, Rust, near-sdk 5 (65 unit test); build-hashes.py genera web/contracts/builds.json, da rilanciare dopo ogni ricompilazione del wasm
+contracts/policy      contratto di policy, Rust, near-sdk 5 (67 unit test); build-hashes.py genera web/contracts/builds.json, da rilanciare dopo ogni ricompilazione del wasm
 contracts/test-usdc   NEP-141 usa e getta per testnet, con mint aperto
 contracts/registry    registro pubblico delle tesorerie (explorer e login lo leggono, 7 unit test)
 app/src/              TypeScript, near-api-js 7
