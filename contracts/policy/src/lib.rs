@@ -78,8 +78,6 @@ const DAO_TODAY_KEY: &[u8] = b"dao_today";
 const DAO_PROPOSALS_PER_DAY: u32 = 10;
 /// The NEAR the account must keep above its storage stake before it opens a DAO proposal (bond + headroom).
 const NEAR_HEADROOM: u128 = 500_000_000_000_000_000_000_000;
-/// The Intents account the executor may send queued payments to (raw storage: `set_settlement_account`).
-const SETTLEMENT_KEY: &[u8] = b"settle_to";
 /// Per payment: the vendor payout the claim was checked against (`b"ps"` + id), the DAO a proposal was opened on
 /// (`b"pd"` + id). Per vendor: a payout set by an operator and not yet confirmed by the owner (`b"pu"` + vendor),
 /// and the open order ids (`b"vo"` + vendor). Raw storage, no migration for deployed contracts.
@@ -100,7 +98,7 @@ const ORDERS_INDEXED_KEY: &[u8] = b"orders_indexed";
 const NEAR_FLOOR: u128 = 50_000_000_000_000_000_000_000;
 /// Gas `upgrade` keeps back from what it attaches to `migrate`: the deploy action's fees (about 14 MGas per byte of code),
 /// the function call's own fees and the end of the current execution. 15 TGas was a few TGas short at 471 KB; 40 leaves room.
-const UPGRADE_RESERVE: u64 = 40_000_000_000_000;
+const UPGRADE_RESERVE: u64 = 60_000_000_000_000; // the deploy action of a 500 KB build costs about 36 TGas, charged from what is left
 /// Stored holds and autopays keep this much of the agent's receipt reference and flags; the transaction has the rest.
 const STORED_REF: usize = 192;
 const STORED_FLAGS: usize = 8;
@@ -113,6 +111,25 @@ const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_DAO_PROPOSAL: Gas = Gas::from_tgas(30);
 const GAS_DAO_VIEW: Gas = Gas::from_tgas(10);
 const GAS_CALLBACK: Gas = Gas::from_tgas(30);
+const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
+/// What a NEP-141 token asks to register one account (USDC: 0.00125 NEAR). The treasury pays it for the deposit account.
+const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
+/// Raw storage key of the ed25519 key that signs 1Click quotes, when the owner replaced the built-in one.
+const QUOTE_SIGNER_KEY: &[u8] = b"quote_signer";
+/// 1Click's quote-signing key, raw (`ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc`, the SDK's `ONE_CLICK_MANAGER_PUB_KEY`).
+const ONE_CLICK_SIGNER: [u8; 32] = [12, 183, 233, 73, 227, 135, 30, 207, 40, 74, 80, 184, 231, 116, 171, 41, 179, 247, 178, 54, 62, 57, 140, 239, 29, 242, 233, 68, 87, 183, 233, 67];
+/// USDC on each chain a vendor can live on, by 1Click asset id (mainnet).
+const USDC_ASSETS: &[(&str, &str)] = &[
+    ("base", "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near"),
+    ("arb", "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near"),
+    ("eth", "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near"),
+    ("sol", "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near"),
+    ("sui", "nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near"),
+];
+/// The most a settlement may lose to the swap: 2 percent of the net amount, checked on the quote's floor.
+const MAX_FEE_BPS: u128 = 200;
+/// Raw storage key of a pending ownership offer (two-step transfer).
+const OFFER_KEY: &[u8] = b"owner_offer";
 const DAY_NS: u64 = 86_400_000_000_000;
 const EVENT_STANDARD: &str = "bursar";
 const EVENT_VERSION: &str = "1.0.0";
@@ -330,6 +347,39 @@ pub struct Stats {
     pub withheld_due: U128,
 }
 
+/// A top-level field of the flat JSON object 1Click signed, as text: the content of a string, or a bare number or
+/// boolean. The keys are unique and the values carry no escapes (ids, amounts, dates); a payload with a backslash
+/// is refused before this runs. No JSON parser: the contract stays small and the check stays readable.
+fn json_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let pat = format!("\"{key}\":");
+    let rest = &json[json.find(&pat)? + pat.len()..];
+    match rest.strip_prefix('"') {
+        Some(r) => Some(&r[..r.find('"')?]),
+        None => Some(rest[..rest.find([',', '}'])?].trim()),
+    }
+}
+
+/// Seconds since the epoch of an ISO timestamp `YYYY-MM-DDTHH:MM:SS[.fff]Z`, or None.
+fn iso_seconds(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[b.len() - 1] != b'Z' {
+        return None;
+    }
+    let num = |from: usize, to: usize| s.get(from..to)?.parse::<i64>().ok();
+    let (y, m, d, hh, mm, ss) = (num(0, 4)?, num(5, 7)?, num(8, 10)?, num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    // days from civil (Howard Hinnant)
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(days * 86_400 + hh * 3_600 + mm * 60 + ss).ok()
+}
+
 // ---------- external contracts ----------
 
 #[allow(dead_code)]
@@ -527,21 +577,28 @@ impl Bursar {
     /// Where the executor may send queued cross-chain payments: the Intents deposit account (or its sub-accounts),
     /// or the one-off implicit account (64 hex characters) a 1Click quote names as its deposit address, registered by the
     /// owner after seeing the quote. Unset, nothing is settled: the executor cannot pick a destination on its own.
-    pub fn set_settlement_account(&mut self, account: Option<AccountId>) {
+    /// The key that signs 1Click quotes, raw 32 bytes in base64. The built-in one is 1Click's; the owner can replace it
+    /// if 1Click rotates keys, or set a key of its own on testnet. `None` goes back to the built-in one.
+    pub fn set_quote_signer(&mut self, public_key: Option<Base64VecU8>) {
         self.assert_owner();
-        if let Some(a) = &account {
-            let implicit = a.as_str().len() == 64 && a.as_str().bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
-            require!(implicit || a.as_str().contains('.'), "a top-level name would make every account a valid deposit address");
+        match public_key {
+            Some(k) => {
+                require!(k.0.len() == 32, "not an ed25519 public key");
+                env::storage_write(QUOTE_SIGNER_KEY, &k.0);
+            }
+            None => {
+                env::storage_remove(QUOTE_SIGNER_KEY);
+            }
         }
-        match &account {
-            Some(a) => env::storage_write(SETTLEMENT_KEY, a.as_bytes()),
-            None => env::storage_remove(SETTLEMENT_KEY),
-        };
-        self.emit("settlement_account_set", account.as_ref().map(|a| a.as_str()).unwrap_or(""));
+        self.emit("quote_signer_set", "");
     }
 
-    pub fn get_settlement_account(&self) -> Option<AccountId> {
-        env::storage_read(SETTLEMENT_KEY).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
+    pub fn get_quote_signer(&self) -> Base64VecU8 {
+        Base64VecU8(self.quote_signer().to_vec())
+    }
+
+    fn quote_signer(&self) -> [u8; 32] {
+        env::storage_read(QUOTE_SIGNER_KEY).and_then(|r| r.try_into().ok()).unwrap_or(ONE_CLICK_SIGNER)
     }
 
     pub fn set_limits(&mut self, per_payment_cap: U128, daily_cap: U128, approval_threshold: U128) {
@@ -572,12 +629,33 @@ impl Bursar {
 
     /// Hand the treasury to another account. Used when a payer account bootstraps a treasury for a
     /// wallet owner, and to move a company to new keys.
-    pub fn transfer_ownership(&mut self, new_owner: AccountId) {
+    /// Ownership moves in two steps: the owner offers, the new owner accepts. A wallet talked into one signature
+    /// gives nothing away; the offer can be withdrawn until it is accepted.
+    pub fn offer_ownership(&mut self, new_owner: AccountId) {
         self.assert_owner();
+        require!(new_owner != self.owner, "already the owner");
         require!(new_owner != self.agent && new_owner != self.executor && new_owner != env::current_account_id(), "the agent, the executor and the treasury itself cannot own the treasury");
-        self.operators.remove(&new_owner);
-        self.owner = new_owner.clone();
-        self.emit("owner_changed", new_owner.as_str());
+        env::storage_write(OFFER_KEY, new_owner.as_bytes());
+        self.emit("owner_offered", new_owner.as_str());
+    }
+
+    pub fn cancel_ownership_offer(&mut self) {
+        self.assert_owner();
+        env::storage_remove(OFFER_KEY);
+        self.emit("owner_offer_cancelled", "");
+    }
+
+    pub fn accept_ownership(&mut self) {
+        let offer = self.get_ownership_offer().unwrap_or_else(|| crate::fail("no ownership offer"));
+        require!(env::predecessor_account_id() == offer, "the offer is for another account");
+        env::storage_remove(OFFER_KEY);
+        self.operators.remove(&offer);
+        self.owner = offer.clone();
+        self.emit("owner_changed", offer.as_str());
+    }
+
+    pub fn get_ownership_offer(&self) -> Option<AccountId> {
+        env::storage_read(OFFER_KEY).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
     }
 
     // ----- operators: the owner delegates parts of its power, on chain, revocably -----
@@ -985,35 +1063,78 @@ impl Bursar {
 
     /// The executor got an Intents quote whose recipient it reports here.
     /// Funds move only if that recipient is exactly the vendor's recorded payout.
-    pub fn settle(&mut self, id: u64, quote_id: String, deposit_address: AccountId, recipient: Payout) -> Promise {
+    /// Settle a queued cross-chain payment on a quote 1Click signed: the contract checks the signature, that the quote
+    /// pays the vendor's recorded address in USDC on the vendor's chain for exactly the net amount, that the swap keeps
+    /// at least 98 percent of it, and that the quote has not expired; then it registers the one-off deposit account on
+    /// the token (the treasury pays the storage) and sends the USDC there, in one receipt. Nobody registers anything by
+    /// hand, and the executor cannot name a destination: 1Click did, under its signature, for the vendor's address.
+    pub fn settle(&mut self, id: u64, payload: String, signature: Base64VecU8) -> Promise {
         require!(env::predecessor_account_id() == self.executor, "only the executor");
-        require!(quote_id.len() <= 128, "quote_id too long");
+        require!(payload.len() <= 4096, "payload too long");
         require!(!self.paused, "paused");
         let mut p = self.payments.get(&id).cloned().unwrap_or_else(|| crate::fail("unknown payment"));
         require!(p.status == Status::Queued, "not queued");
         let v = self.vendors.get(&p.vendor_id).unwrap_or_else(|| crate::fail("unknown vendor"));
         require!(v.active, "vendor deactivated by the owner");
-        require!(v.payout.same_as(&recipient), "recipient does not match vendor payout");
-        require!(matches!(v.payout, Payout::Chain { .. }), "near vendors are paid directly");
+        let (chain, address) = match &v.payout {
+            Payout::Chain { chain, address } => (chain.clone(), address.clone()),
+            Payout::Near { .. } => crate::fail("near vendors are paid directly"),
+        };
         if let Some(seen) = self.payout_snapshot(id) {
             require!(v.payout.same_as(&seen), "the vendor's payout changed since this claim was checked");
         }
         require!(!self.is_unconfirmed(&p.vendor_id), "the vendor's payout was set by an operator: the owner must confirm it first");
-        // the USDC goes to the Intents deposit account the owner registered, or to one of its sub-accounts, never elsewhere
-        let settlement = self.get_settlement_account().unwrap_or_else(|| crate::fail("no settlement account set: the owner registers the Intents deposit account first"));
-        require!(deposit_address == settlement || deposit_address.as_str().ends_with(&format!(".{settlement}")), "deposit address is not the registered settlement account");
+        // the signature: ed25519 by 1Click over the base58 sha256 of exactly these bytes
+        let digest = env::sha256(payload.as_bytes());
+        let message = bs58::encode(&digest).into_string();
+        let sig: [u8; 64] = signature.0.try_into().unwrap_or_else(|_| crate::fail("bad signature length"));
+        require!(env::ed25519_verify(&sig, message.as_bytes(), &self.quote_signer()), "the quote is not signed by 1Click");
+        // the quote must be the swap this payment needs, and nothing else
+        require!(!payload.contains('\\'), "the quote could not be read");
+        let field = |k: &str| json_field(&payload, k).unwrap_or_else(|| crate::fail("the quote could not be read"));
         let net = p.amount - p.withheld;
+        require!(field("dry") == "false", "a dry quote has no deposit address");
+        require!(field("swapType") == "EXACT_INPUT", "the quote must be EXACT_INPUT");
+        require!(field("originAsset") == format!("nep141:{}", self.usdc), "the quote does not spend this treasury's USDC");
+        let want = USDC_ASSETS.iter().find(|(c, _)| *c == chain).map(|(_, a)| *a).unwrap_or_else(|| crate::fail("no USDC asset known for the vendor's chain"));
+        require!(field("destinationAsset") == want, "the quote does not deliver USDC on the vendor's chain");
+        require!(field("depositType") == "ORIGIN_CHAIN" && field("refundType") == "ORIGIN_CHAIN" && field("recipientType") == "DESTINATION_CHAIN", "the quote must deposit from NEAR, refund to NEAR and pay the destination chain");
+        require!(field("refundTo") == env::current_account_id().as_str(), "refunds must come back to the treasury");
+        require!(field("recipient").eq_ignore_ascii_case(&address), "the quote does not pay the vendor's recorded address");
+        require!(field("amountIn").parse::<u128>().ok() == Some(net), "the quote amount is not this payment's net amount");
+        let floor: u128 = field("minAmountOut").parse().unwrap_or(0);
+        require!(floor >= net - net * MAX_FEE_BPS / 10_000, "the swap would keep less than 98 percent of the payment");
+        let deadline = iso_seconds(field("deadline")).unwrap_or_else(|| crate::fail("the quote deadline could not be read"));
+        require!(deadline > env::block_timestamp() / 1_000_000_000 + 60, "the quote has expired");
+        let dep = json_field(&payload, "depositAddress").unwrap_or_else(|| crate::fail("the quote names no deposit address"));
+        require!(dep.len() == 64 && dep.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "the deposit address is not an implicit account");
+        let deposit: AccountId = dep.parse().unwrap_or_else(|_| crate::fail("bad deposit address"));
         require!(p.amount <= self.spendable(), "insufficient balance");
         require!(self.in_flight() == 0, "a transfer is in flight: ask again in a few seconds");
+        require!(env::account_balance().as_yoctonear() >= NEAR_FLOOR.saturating_add(STORAGE_DEPOSIT.as_yoctonear()), "the treasury needs NEAR to register the deposit account");
         self.balance -= net;
         self.withheld_due += p.withheld;
         p.status = Status::Settling;
-        p.quote_id = Some(quote_id.clone());
-        p.deposit_address = Some(deposit_address.to_string());
+        p.quote_id = Some(message.clone());
+        p.deposit_address = Some(deposit.to_string());
         p.updated_at = env::block_timestamp();
-        self.payments.insert(id, p.clone());
-        self.emit("payment_settling", &format!("{id}:{quote_id}"));
-        self.ft_transfer(deposit_address, net, format!("bursar payment {id}"))
+        self.payments.insert(id, p);
+        self.emit("payment_settling", &format!("{id}:{message}"));
+        // one receipt on the token: register the deposit account (a no-op refund if it exists), then send; atomic
+        self.set_in_flight(self.in_flight() + net);
+        Promise::new(self.usdc.clone())
+            .function_call(
+                "storage_deposit".to_string(),
+                format!("{{\"account_id\":\"{deposit}\",\"registration_only\":true}}").into_bytes(), // the address is 64 hex chars: no escaping needed
+                STORAGE_DEPOSIT,
+                GAS_STORAGE_DEPOSIT,
+            )
+            .function_call(
+                "ft_transfer".to_string(),
+                format!("{{\"receiver_id\":\"{deposit}\",\"amount\":\"{net}\",\"memo\":\"bursar payment {id}\"}}").into_bytes(),
+                ONE_YOCTO,
+                GAS_FT_TRANSFER,
+            )
             .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_ft_transfer(Some(id), U128(net)))
     }
 
@@ -1754,39 +1875,9 @@ impl Bursar {
     #[init(ignore_state)]
     pub fn migrate() -> Self {
         let raw = env::storage_read(b"STATE").unwrap_or_else(|| crate::fail("no state to migrate"));
-        if let Ok(mut current) = near_sdk::borsh::from_slice::<Bursar>(&raw) {
-            current.index_once();
-            return current;
-        }
-        let mut old: legacy::Bursar = near_sdk::borsh::from_slice(&raw).unwrap_or_else(|_| crate::fail("unknown state layout"));
-        // vendors and payments change shape: take every entry out with the old shape, put it back with the new one
-        let vendor_keys: Vec<String> = old.vendors.iter().map(|(k, _)| k.clone()).collect();
-        let vendors: Vec<(String, legacy::Vendor)> = vendor_keys.into_iter().map(|k| { let v = old.vendors.remove(&k).unwrap(); (k, v) }).collect();
-        old.vendors.flush();
-        let payment_keys: Vec<u64> = old.payments.iter().map(|(k, _)| *k).collect();
-        let payments: Vec<(u64, legacy::Payment)> = payment_keys.into_iter().map(|k| { let p = old.payments.remove(&k).unwrap(); (k, p) }).collect();
-        old.payments.flush();
-        let legacy::Bursar { owner, agent, executor, dao, dao_bond, usdc, limits, invoice_index, orders, operators, company, next_order_id, next_id, balance, spent_today, day, paused, vendors: old_vendors, payments: old_payments } = old;
-        std::mem::forget(old_vendors);
-        std::mem::forget(old_payments);
-        let mut new = Bursar {
-            owner, agent, executor, dao, dao_bond, usdc, limits,
-            vendors: IterableMap::new(b"v"),
-            payments: IterableMap::new(b"p"),
-            invoice_index, orders, operators,
-            company: company.map(|c| Company { name: c.name, description: c.description, country: None, tax_id: None }),
-            next_order_id, next_id, balance, spent_today, day, paused,
-            withheld_due: 0,
-        };
-        for (k, v) in vendors {
-            new.vendors.insert(k, Vendor { name: v.name, payout: v.payout, monthly_budget: v.monthly_budget, spent_this_month: v.spent_this_month, month: v.month, active: v.active, tax_id: None, country: None, withholding_bps: 0 });
-        }
-        for (k, p) in payments {
-            new.payments.insert(k, Payment { id: p.id, vendor_id: p.vendor_id, invoice_number: p.invoice_number, amount: p.amount, status: p.status, reason: p.reason, invoice_hash: p.invoice_hash, attestation_ref: p.attestation_ref, flags: p.flags, created_at: p.created_at, updated_at: p.updated_at, quote_id: p.quote_id, deposit_address: p.deposit_address, dest_tx: p.dest_tx, dao_proposal_id: p.dao_proposal_id, order_id: p.order_id, withheld: 0 });
-        }
-        new.emit("migrated", "october-20-layout");
-        new.index_once();
-        new
+        let mut current: Bursar = near_sdk::borsh::from_slice(&raw).unwrap_or_else(|_| crate::fail("unknown state layout: builds before 20 October 2026 upgrade through build 17 first"));
+        current.index_once();
+        current
     }
 
     /// Contracts from before the per-vendor order index and the normalized invoice keys: build both once.
@@ -1862,68 +1953,6 @@ impl Bursar {
 }
 
 /// The stored layouts of the October 20 build, read once by `migrate` and never written again.
-mod legacy {
-    use super::*;
-    #[near(serializers = [borsh])]
-    #[derive(Clone)]
-    pub struct Vendor {
-        pub name: String,
-        pub payout: Payout,
-        pub monthly_budget: u128,
-        pub spent_this_month: u128,
-        pub month: u32,
-        pub active: bool,
-    }
-    #[near(serializers = [borsh])]
-    #[derive(Clone)]
-    pub struct Payment {
-        pub id: u64,
-        pub vendor_id: String,
-        pub invoice_number: String,
-        pub amount: u128,
-        pub status: Status,
-        pub reason: Option<String>,
-        pub invoice_hash: String,
-        pub attestation_ref: String,
-        pub flags: Vec<String>,
-        pub created_at: u64,
-        pub updated_at: u64,
-        pub quote_id: Option<String>,
-        pub deposit_address: Option<String>,
-        pub dest_tx: Option<String>,
-        pub dao_proposal_id: Option<u64>,
-        pub order_id: Option<u64>,
-    }
-    #[near(serializers = [borsh])]
-    #[derive(Clone)]
-    pub struct Company {
-        pub name: String,
-        pub description: String,
-    }
-    #[near(serializers = [borsh])]
-    pub struct Bursar {
-        pub owner: AccountId,
-        pub agent: AccountId,
-        pub executor: AccountId,
-        pub dao: Option<AccountId>,
-        pub dao_bond: NearToken,
-        pub usdc: AccountId,
-        pub limits: Limits,
-        pub vendors: IterableMap<String, Vendor>,
-        pub payments: IterableMap<u64, Payment>,
-        pub invoice_index: LookupSet<String>,
-        pub orders: IterableMap<u64, Order>,
-        pub operators: IterableMap<AccountId, Role>,
-        pub company: Option<Company>,
-        pub next_order_id: u64,
-        pub next_id: u64,
-        pub balance: u128,
-        pub spent_today: u128,
-        pub day: u64,
-        pub paused: bool,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2148,8 +2177,17 @@ mod tests {
     fn transfer_ownership_moves_every_owner_power() {
         let mut c = setup();
         testing_env!(ctx(accounts(0)).build());
-        c.transfer_ownership(accounts(5));
+        c.offer_ownership(accounts(5));
+        assert_eq!(c.get_roles().0, accounts(0), "an offer changes nothing yet");
+        assert_eq!(c.get_ownership_offer(), Some(accounts(5)));
+        testing_env!(ctx(accounts(4)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.accept_ownership()));
+        assert!(r.is_err(), "only the account the offer names can accept");
+        testing_env!(ctx(accounts(5)).build());
+        c.accept_ownership();
         assert_eq!(c.get_roles().0, accounts(5));
+        assert_eq!(c.get_ownership_offer(), None);
+        testing_env!(ctx(accounts(0)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_company("x".into(), "".into(), None, None)));
         assert!(r.is_err(), "the old owner is out");
         testing_env!(ctx(accounts(5)).build());
@@ -2277,11 +2315,14 @@ mod tests {
         let mut c = setup();
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, Payout::Chain { chain: "base".into(), address: "0xabc".into() }));
-        testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = c.settle(id, "q1".into(), accounts(5), Payout::Chain { chain: "base".into(), address: "0xevil".into() });
-        }));
-        assert!(r.is_err());
+        testing_env!(ctx(accounts(0)).build());
+        c.set_quote_signer(Some(test_signer()));
+        let payload = quote_payload("0xevil", 1_250_000_000, 1_240_000_000, DEP, LATER, "base");
+        let sig = sign_payload(&payload);
+        testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, payload, sig); }));
+        assert!(r.is_err(), "a signed quote for another address is not the vendor's");
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
     }
 
     fn as_self() -> VMContextBuilder {
@@ -2360,8 +2401,20 @@ mod tests {
     }
     const T0: u64 = 1_760_000_000_000_000_000;
     fn near(a: AccountId) -> Payout { Payout::Near { account: a } }
-    fn intents() -> AccountId { "intents.near".parse().unwrap() }
-    fn deposit() -> AccountId { "d1.intents.near".parse().unwrap() }
+    /// The executor settles `id` on a quote signed by the test key for the vendor's address and the net amount.
+    /// Leaves the context on the executor. Returns Err when the contract refused it.
+    fn settle_signed(c: &mut Bursar, id: u64) -> std::thread::Result<()> {
+        let p = c.get_payment(id).unwrap();
+        let v = c.get_vendor(p.vendor_id.clone()).unwrap();
+        let (chain, address) = match v.payout { Payout::Chain { chain, address } => (chain, address), _ => panic!("not a cross-chain vendor") };
+        let net = p.amount - p.withheld;
+        testing_env!(ctx(accounts(0)).build());
+        c.set_quote_signer(Some(test_signer()));
+        let payload = quote_payload(&address, net, net - net / 100, DEP, LATER, &chain);
+        let sig = sign_payload(&payload);
+        testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, payload, sig); }))
+    }
 
     #[test]
     fn audit_cancelling_yesterdays_hold_does_not_free_todays_cap() {
@@ -2409,12 +2462,11 @@ mod tests {
     fn audit_refunded_settlement_goes_back_to_the_queue() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(id, "q1".into(), deposit(), pay.clone());
+        let _ = settle_signed(&mut c, id);
         assert_eq!(c.get_stats().balance.0, 50_000_000_000 - 1_250_000_000);
         testing_env!(as_self().build());
         assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
@@ -2426,7 +2478,7 @@ mod tests {
         assert!(r.is_err(), "no refund on the account, no second chance");
         assert_eq!(c.get_payment(id).unwrap().status, Status::Settling);
         testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q2".into(), deposit(), pay.clone()); }));
+        let r = settle_signed(&mut c, id);
         assert!(r.is_err(), "still settling: cannot be paid twice");
         // the refund lands (plain transfer): now the token says so; the books take this payment's net back, and a
         // person decides whether it goes out again: on chain a refund and a deposit look the same
@@ -2437,7 +2489,7 @@ mod tests {
         assert_eq!(p.reason.as_deref(), Some("settlement_failed"));
         assert_eq!(c.get_stats().balance.0, 50_000_000_000);
         testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q2".into(), deposit(), pay.clone()); }));
+        let r = settle_signed(&mut c, id);
         assert!(r.is_err(), "the executor alone cannot send it again");
         testing_env!(ctx(accounts(0)).build());
         c.cancel_payment(id);
@@ -2485,17 +2537,16 @@ mod tests {
     fn audit3_two_refunds_are_both_taken_back_and_a_deposit_is_not_a_refund() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let a = c.request_payment(claim("design", "A", 1_250_000_000, pay.clone()));
         let b = c.request_payment(claim("design", "B", 1_000_000_000, pay.clone()));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(a, "qa".into(), deposit(), pay.clone());
+        let _ = settle_signed(&mut c, a);
         testing_env!(as_self().build());
         assert!(c.on_ft_transfer(Some(a), U128(1_250_000_000), Ok(())));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(b, "qb".into(), deposit(), pay.clone());
+        let _ = settle_signed(&mut c, b);
         testing_env!(as_self().build());
         assert!(c.on_ft_transfer(Some(b), U128(1_000_000_000), Ok(())));
         // both refunded: the token holds everything again; each callback takes back its own net only
@@ -2509,39 +2560,25 @@ mod tests {
         c.approve_payment(a);
         assert_eq!(c.get_payment(a).unwrap().status, Status::Queued);
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(a, "qa2".into(), deposit(), pay.clone());
+        let _ = settle_signed(&mut c, a);
         testing_env!(as_self().build());
         assert!(c.on_ft_transfer(Some(a), U128(1_250_000_000), Ok(())));
         assert!(c.on_settlement_failed(a, Ok(U128(50_000_000_000 + 2_000_000_000))), "a 2,000 deposit passes for the refund");
         assert_eq!(c.get_payment(a).unwrap().status, Status::Approval, "but a person decides, not the executor");
         testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(a, "qa3".into(), deposit(), pay.clone()); }));
+        let r = settle_signed(&mut c, a);
         assert!(r.is_err());
-    }
-
-    #[test]
-    fn a_quotes_implicit_deposit_address_can_be_the_settlement_account() {
-        let mut c = setup();
-        testing_env!(ctx(accounts(0)).build());
-        let implicit: AccountId = "7edc23480a02bf440881022d5274c80d9fd53064cff1202c0d98af2bbdba43fd".parse().unwrap();
-        c.set_settlement_account(Some(implicit.clone()));
-        assert_eq!(c.get_settlement_account(), Some(implicit));
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_settlement_account(Some("near".parse().unwrap()))));
-        assert!(r.is_err(), "a top-level name is still refused");
-        c.set_settlement_account(Some(intents()));
-        assert_eq!(c.get_settlement_account(), Some(intents()));
     }
 
     #[test]
     fn audit3_owner_closes_a_settlement_nobody_can_finish() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(id, "q1".into(), deposit(), pay.clone());
+        let _ = settle_signed(&mut c, id);
         testing_env!(as_self().build());
         assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
         // the refund was counted by a sync first: the token check can never pass again
@@ -2703,34 +2740,35 @@ mod tests {
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
-        testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q1".into(), accounts(2), pay.clone()); }));
-        assert!(r.is_err(), "no settlement account registered: nothing moves");
         testing_env!(ctx(accounts(0)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_settlement_account(Some("near".parse().unwrap()))));
-        assert!(r.is_err(), "a top-level name would allow every account");
-        c.set_settlement_account(Some("intents.near".parse().unwrap()));
-        testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q1".into(), accounts(2), pay.clone()); }));
-        assert!(r.is_err(), "the executor's own account is not the settlement account");
+        c.set_quote_signer(Some(test_signer()));
+        // the executor's own account, or any named account, as the deposit address: refused even under a valid signature
+        for dep in ["bob.near", "deposit1.intents.near", "7edc23480a02bf440881022d5274c80d9fd53064cff1202c0d98af2bbdba43fd.near"] {
+            let payload = quote_payload("0xabc", 1_250_000_000, 1_240_000_000, dep, LATER, "base");
+            let sig = sign_payload(&payload);
+            testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, payload, sig); }));
+            assert!(r.is_err(), "{dep}: only an implicit account 1Click derived can receive the USDC");
+        }
         assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
         assert_eq!(c.get_stats().balance.0, 50_000_000_000);
-        let _ = c.settle(id, "q1".into(), "deposit1.intents.near".parse().unwrap(), pay);
-        assert_eq!(c.get_payment(id).unwrap().status, Status::Settling);
+        assert!(settle_signed(&mut c, id).is_ok());
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Settling);
+        assert_eq!(p.deposit_address.as_deref(), Some(DEP));
     }
 
     #[test]
     fn audit_settle_honours_pause_and_deactivation() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "Q1", 1_000_000_000, pay.clone()));
         testing_env!(ctx(accounts(0)).build());
         c.set_paused(true);
         testing_env!(ctx(accounts(2)).build());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.settle(id, "q".into(), deposit(), pay.clone()); }));
+        let r = settle_signed(&mut c, id);
         assert!(r.is_err());
         assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
     }
@@ -2865,25 +2903,133 @@ mod tests {
         testing_env!(ctx(accounts(0)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.add_operator(accounts(5), Role::default())));
         assert!(r.is_err());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.transfer_ownership(accounts(1))));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.offer_ownership(accounts(1))));
         assert!(r.is_err(), "not to the agent");
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.transfer_ownership(accounts(2))));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.offer_ownership(accounts(2))));
         assert!(r.is_err(), "not to the executor");
         c.add_operator(accounts(3), Role { approve: true, manage_vendors: false, manage_orders: false });
-        c.transfer_ownership(accounts(3));
+        c.offer_ownership(accounts(3));
+        c.cancel_ownership_offer();
+        testing_env!(ctx(accounts(3)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.accept_ownership()));
+        assert!(r.is_err(), "a cancelled offer cannot be accepted");
+        testing_env!(ctx(accounts(0)).build());
+        c.offer_ownership(accounts(3));
+        testing_env!(ctx(accounts(3)).build());
+        c.accept_ownership();
         assert!(c.list_operators().is_empty(), "the new owner is no longer an operator");
+    }
+
+    // ----- settle_quote: a quote 1Click signed, checked by the contract -----
+    const TEST_SEED: [u8; 32] = [7u8; 32];
+    fn quote_payload(recipient: &str, amount_in: u128, min_out: u128, deposit: &str, deadline: &str, chain: &str) -> String {
+        let dest = USDC_ASSETS.iter().find(|(c, _)| *c == chain).map(|(_, a)| *a).unwrap_or("nep141:x");
+        // the exact shape 1Click signs: request fields + quote fields + timestamp, keys sorted (json-stable-stringify)
+        format!(
+            "{{\"amount\":\"{amount_in}\",\"amountIn\":\"{amount_in}\",\"amountInFormatted\":\"x\",\"amountInUsd\":\"x\",\"amountOut\":\"{min_out}\",\"amountOutFormatted\":\"x\",\"amountOutUsd\":\"x\",\"deadline\":\"{deadline}\",\"depositAddress\":\"{deposit}\",\"depositType\":\"ORIGIN_CHAIN\",\"destinationAsset\":\"{dest}\",\"dry\":false,\"minAmountIn\":\"{amount_in}\",\"minAmountOut\":\"{min_out}\",\"originAsset\":\"nep141:{usdc}\",\"recipient\":\"{recipient}\",\"recipientType\":\"DESTINATION_CHAIN\",\"refundTo\":\"{me}\",\"refundType\":\"ORIGIN_CHAIN\",\"slippageTolerance\":50,\"swapType\":\"EXACT_INPUT\",\"timeEstimate\":22,\"timestamp\":\"2026-11-02T18:40:00.000Z\",\"withdrawFee\":\"2400\"}}",
+            usdc = accounts(4), me = env::current_account_id()
+        )
+    }
+    fn sign_payload(payload: &str) -> Base64VecU8 {
+        use ed25519_dalek::Signer;
+        let key = ed25519_dalek::SigningKey::from_bytes(&TEST_SEED);
+        let message = bs58::encode(env::sha256(payload.as_bytes())).into_string();
+        Base64VecU8(key.sign(message.as_bytes()).to_bytes().to_vec())
+    }
+    fn test_signer() -> Base64VecU8 {
+        Base64VecU8(ed25519_dalek::SigningKey::from_bytes(&TEST_SEED).verifying_key().to_bytes().to_vec())
+    }
+    const DEP: &str = "b14472b888e01ed3280ea9fd390d138f655f98980f30a69160fea7704549ebc3";
+    const LATER: &str = "2026-11-03T12:00:00.000Z";
+
+    #[test]
+    fn iso_timestamps_parse() {
+        assert_eq!(iso_seconds("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(iso_seconds("2026-11-02T18:40:00.000Z"), Some(1_793_644_800));
+        assert_eq!(iso_seconds("2026-11-02T18:40:00"), None);
+        assert_eq!(iso_seconds("2026-13-02T18:40:00Z"), None);
+    }
+
+    #[test]
+    fn settle_quote_pays_the_deposit_address_1click_signed_for_the_vendor() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        assert_eq!(c.get_quote_signer().0, ONE_CLICK_SIGNER.to_vec(), "1Click's key by default");
+        c.set_quote_signer(Some(test_signer()));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Queued);
+        let payload = quote_payload("0xABC", 1_250_000_000, 1_240_000_000, DEP, LATER, "base");
+        let sig = sign_payload(&payload);
+        testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+        let _ = c.settle(id, payload.clone(), sig.clone());
+        let p = c.get_payment(id).unwrap();
+        assert_eq!(p.status, Status::Settling);
+        assert_eq!(p.deposit_address.as_deref(), Some(DEP), "the deposit address comes from the signed quote, not from the executor");
+        assert_eq!(c.in_flight(), 1_250_000_000);
+        testing_env!(as_self().build());
+        assert!(c.on_ft_transfer(Some(id), U128(1_250_000_000), Ok(())));
+        testing_env!(ctx(accounts(2)).build());
+        c.mark_settled(id, "0xdead".into());
+        assert_eq!(c.get_payment(id).unwrap().status, Status::Settled);
+        // replaying the same quote on another payment: not queued / amount differs
+        testing_env!(ctx(accounts(1)).build());
+        let id2 = c.request_payment(claim("design", "1108", 1_000_000_000, pay));
+        testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id2, payload, sig)));
+        assert!(r.is_err(), "a quote for another amount does not settle this payment");
+    }
+
+    #[test]
+    fn settle_quote_refuses_every_quote_that_is_not_the_vendors() {
+        let mut c = plain();
+        testing_env!(ctx(accounts(0)).build());
+        c.set_quote_signer(Some(test_signer()));
+        let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
+        testing_env!(ctx(accounts(1)).build());
+        let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay));
+        let good = quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, LATER, "base");
+        let cases: Vec<(&str, String, Base64VecU8)> = vec![
+            ("another recipient", quote_payload("0xdef", 1_250_000_000, 1_240_000_000, DEP, LATER, "base"), Base64VecU8(vec![])),
+            ("another amount", quote_payload("0xabc", 1_000_000_000, 990_000_000, DEP, LATER, "base"), Base64VecU8(vec![])),
+            ("fee over 2 percent", quote_payload("0xabc", 1_250_000_000, 1_200_000_000, DEP, LATER, "base"), Base64VecU8(vec![])),
+            ("another chain", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, LATER, "arb"), Base64VecU8(vec![])),
+            ("expired", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, "2025-10-01T00:00:00.000Z", "base"), Base64VecU8(vec![])), // the mock clock reads 9 October 2025
+            ("named deposit account", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, "attacker.near", LATER, "base"), Base64VecU8(vec![])),
+            ("unsigned", good.clone(), Base64VecU8(vec![1u8; 64])),
+            ("signed bytes differ", good.clone(), sign_payload(&good.replace("0xabc", "0xdef"))),
+        ];
+        for (what, payload, sig) in cases {
+            let sig = if sig.0.is_empty() { sign_payload(&payload) } else { sig };
+            testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id, payload.clone(), sig)));
+            assert!(r.is_err(), "{what}: must be refused");
+            assert_eq!(c.get_payment(id).unwrap().status, Status::Queued, "{what}: nothing moved");
+        }
+        // the owner's key wins: with 1Click's built-in key, a quote signed by the test key is refused
+        testing_env!(ctx(accounts(0)).build());
+        c.set_quote_signer(None);
+        testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id, good.clone(), sign_payload(&good))));
+        assert!(r.is_err(), "not 1Click's signature");
+        // and only the executor may call it
+        testing_env!(ctx(accounts(0)).build());
+        c.set_quote_signer(Some(test_signer()));
+        testing_env!(ctx(accounts(0)).account_balance(NearToken::from_near(2)).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id, good.clone(), sign_payload(&good))));
+        assert!(r.is_err(), "only the executor");
     }
 
     #[test]
     fn audit_mark_settled_waits_for_the_transfer() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
-        c.set_settlement_account(Some(intents()));
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay.clone()));
         testing_env!(ctx(accounts(2)).build());
-        let _ = c.settle(id, "q1".into(), deposit(), pay);
+        let _ = settle_signed(&mut c, id);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.mark_settled(id, "0xtx".into())));
         assert!(r.is_err(), "the deposit transfer has not landed");
         testing_env!(as_self().build());
@@ -2968,49 +3114,6 @@ mod tests {
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, 3);
         assert_eq!(c.list_payments(Some(4), None).len(), 0);
-    }
-
-    #[test]
-    fn migrate_reads_the_october_20_layout_and_is_idempotent() {
-        testing_env!(ctx(accounts(0)).build());
-        let mut old = legacy::Bursar {
-            owner: accounts(0), agent: accounts(1), executor: accounts(2), dao: None, dao_bond: NearToken::from_near(1), usdc: accounts(4),
-            limits: Limits { per_payment_cap: 5_000_000_000, daily_cap: 20_000_000_000, approval_threshold: 2_000_000_000, require_orders: false },
-            vendors: IterableMap::new(b"v"), payments: IterableMap::new(b"p"), invoice_index: LookupSet::new(b"i"), orders: IterableMap::new(b"o"), operators: IterableMap::new(b"r"),
-            company: Some(legacy::Company { name: "Northwind".into(), description: "demo".into() }), next_order_id: 1, next_id: 3, balance: 4_720_000_000, spent_today: 0, day: 0, paused: false,
-        };
-        old.vendors.insert("hosting".into(), legacy::Vendor { name: "Acme".into(), payout: near(accounts(5)), monthly_budget: 0, spent_this_month: 480_000_000, month: 202610, active: true });
-        old.vendors.insert("design".into(), legacy::Vendor { name: "DesignCo".into(), payout: Payout::Chain { chain: "base".into(), address: "0xabc".into() }, monthly_budget: 0, spent_this_month: 0, month: 202610, active: true });
-        for id in 1..3u64 { old.payments.insert(id, legacy::Payment { id, vendor_id: "hosting".into(), invoice_number: format!("AH-{id}"), amount: 480_000_000, status: Status::Paid, reason: None, invoice_hash: "h".into(), attestation_ref: "a".into(), flags: vec![], created_at: 1, updated_at: 1, quote_id: None, deposit_address: None, dest_tx: None, dao_proposal_id: None, order_id: None }); }
-        old.invoice_index.insert("hosting|ah-1".into());
-        // the mock writes cached entries only on flush
-        old.vendors.flush(); old.payments.flush();
-        env::state_write(&old);
-        std::mem::forget(old);
-        testing_env!(as_self().build());
-        let c = Bursar::migrate();
-        assert_eq!(c.list_vendors(None, None).len(), 2);
-        assert_eq!(c.get_vendor("hosting".into()).unwrap().spent_this_month, 480_000_000);
-        assert_eq!(c.get_vendor("hosting".into()).unwrap().withholding_bps, 0);
-        assert_eq!(c.list_payments(Some(0), None).len(), 2);
-        assert_eq!(c.get_payment(2).unwrap().invoice_number, "AH-2");
-        assert_eq!(c.get_company().unwrap().name, "Northwind");
-        assert_eq!(c.get_stats().balance.0, 4_720_000_000);
-        assert_eq!(c.get_stats().withheld_due.0, 0);
-        assert_eq!(c.get_stats().payments, 2);
-        let mut c = c;
-        c.vendors.flush(); c.payments.flush();
-        env::state_write(&c);
-        std::mem::forget(c);
-        // a second run finds the current layout and changes nothing
-        let c2 = Bursar::migrate();
-        assert_eq!(c2.list_payments(Some(0), None).len(), 2);
-        assert_eq!(c2.list_vendors(None, None).len(), 2);
-        // the old duplicate key is still honoured
-        testing_env!(ctx(accounts(1)).build());
-        let mut c2 = c2;
-        let id = c2.request_payment(claim("hosting", "AH-1", 100_000_000, near(accounts(5))));
-        assert_eq!(c2.get_payment(id).unwrap().reason.as_deref(), Some("duplicate_invoice"));
     }
 
     #[test]

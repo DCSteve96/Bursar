@@ -3,7 +3,9 @@
 // recipient before releasing USDC to the Intents deposit address. Intents 1-Click runs on mainnet only.
 // The contract moves exactly the net amount (invoice less withholding) to the deposit address, so the quote is
 // EXACT_INPUT on that net: the vendor receives it less the bridge fee, which is capped here at 2 percent.
-import { OpenAPI, OneClickService, QuoteRequest } from "@defuse-protocol/one-click-sdk-typescript";
+import { OpenAPI, OneClickService, QuoteRequest, verifyQuoteSignature } from "@defuse-protocol/one-click-sdk-typescript";
+import { base58 } from "@scure/base";
+import { signedPayload } from "./quote.js";
 import { config, USDC_ASSET } from "./config.js";
 import { call, view, txHash, type Payment, type Vendor } from "./near.js";
 import { getTransactionLastResult } from "near-api-js";
@@ -56,12 +58,13 @@ export async function settleQueued(): Promise<void> {
       if (BigInt(q.quote.amountIn) !== net) throw new Error(`quote takes ${q.quote.amountIn}, the contract sends ${net}`);
       if (amountOut < net - net * MAX_FEE_BPS / 10_000n) throw new Error(`quote delivers ${amountOut} of ${net}, fee over ${MAX_FEE_BPS} bps`);
       console.log(`[executor] #${p.id} ${net} -> ${(v.payout as any).Chain.chain}:${(v.payout as any).Chain.address} via ${deposit}, vendor receives ${amountOut}`);
-      const r = await call(config.executorAccount, "settle", {
-        id: p.id,
-        quote_id: q.correlationId,
-        deposit_address: deposit,
-        recipient: v.payout,
-      }, 60);
+      // The contract checks 1Click's signature over the quote and registers the deposit account itself: the executor
+      // passes the signed bytes and the signature, and names nothing. (A pre-check here saves a failed transaction.)
+      if (!verifyQuoteSignature(q as any)) throw new Error("the quote's signature does not verify against 1Click's key");
+      const payload = signedPayload(q);
+      if (!payload) throw new Error("the quote carries no signed payload");
+      const signature = Buffer.from(base58.decode(String(q.signature).replace(/^ed25519:/, ""))).toString("base64");
+      const r = await call(config.executorAccount, "settle_quote", { id: p.id, payload, signature }, 100);
       await OneClickService.submitDepositTx({ depositAddress: deposit, txHash: txHash(r) } as any).catch(() => {});
       tries.delete(p.id);
     } catch (e) {

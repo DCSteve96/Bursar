@@ -27,7 +27,6 @@ timeline
 - **Email inbox.** Vendors mail the invoice to the treasury's own address; it lands in the same inbox as Telegram, with the same approvals and the same outcomes. Nothing changes for the contract.
 - **Bulk approvals.** Many invoices waiting means one "approve selected" in the console, and "approve all" on Telegram with a summary before confirming. Each invoice stays a decision of its own on the contract, with its own limits.
 - **Installable app.** The console as a progressive web app: icon on the phone, push notifications for holds and outcomes, the same code.
-- **Two-step ownership.** Transferring a treasury takes an offer by the owner and an acceptance by the new owner, so a wallet cannot be talked into giving a company away in one signature.
 
 ## Q1 2027: larger companies
 

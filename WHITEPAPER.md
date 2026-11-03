@@ -59,7 +59,7 @@ Every payment carries the payout it was checked against and goes nowhere else. A
 
 ### 3.4 Cross-chain settlement
 
-For a vendor on another chain the executor asks NEAR Intents for a quote on exactly the net amount the contract will send, with the vendor's recorded address as recipient and a fee cap, and calls `settle`. The contract checks the recipient against the vendor record and moves the USDC to the registered Intents deposit account. The executor then watches the settlement and marks it settled with the destination transaction hash. A refunded settlement goes back in front of a person rather than being re-sent on the executor's own; one nobody can confirm is closed by the owner, delivered or not.
+For a vendor on another chain the executor asks NEAR Intents for a quote on exactly the net amount the contract will send, with the vendor's recorded address as recipient, and calls `settle` with the bytes 1Click signed and its signature. The contract verifies the signature against 1Click's key, checks that the quote pays the vendor's recorded address for exactly the net amount in USDC on the vendor's chain, that the swap keeps at least 98 percent of it and that it has not expired, then registers the one-off deposit account on the token and moves the USDC there, in one receipt. The executor names no destination and the owner signs nothing per payment. The executor then watches the settlement and marks it settled with the destination transaction hash. A refunded settlement goes back in front of a person rather than being re-sent on the executor's own; one nobody can confirm is closed by the owner, delivered or not.
 
 ### 3.5 Inboxes and approvals
 
@@ -70,9 +70,9 @@ Invoices reach the treasury by file drop, by a Telegram bot, or through an MCP s
 What Bursar trusts, and why it is acceptable:
 
 - **The enclave** for the confidentiality of the invoice and the integrity of the reading. The trust is checkable: attestation before every reading, a signed receipt after, independent verification by anyone. A wrong reading can still happen; it meets the policy, which cannot be persuaded.
-- **The contract** for the decision. It is public, small, unit-tested rule by rule (65 tests), and audited in three independent rounds with every finding reproduced by a test before its fix. Its builds are listed with their hashes, and the explorer and the sign-in page verify a treasury's code hash against that list.
-- **The owner's wallet** for the sensitive methods. The residual risk is a wallet talked into signing a transfer of ownership in one step; two-step ownership is on the roadmap.
-- **The executor** for the destination within the vendor record and for the amounts the contract queued, and nothing else.
+- **The contract** for the decision. It is public, small, unit-tested rule by rule (67 tests), and audited in three independent rounds with every finding reproduced by a test before its fix. Its builds are listed with their hashes, and the explorer and the sign-in page verify a treasury's code hash against that list.
+- **The owner's wallet** for the sensitive methods. Ownership moves in two steps, an offer by the owner and an acceptance by the new owner, so a wallet talked into one signature gives nothing away.
+- **The executor** for nothing but timing: it brings a quote 1Click signed, and the contract checks the quote's recipient, amount, asset and expiry itself.
 
 What Bursar does not trust: the agent (one method, no NEAR, no addresses), the relayer (verifies before paying gas, rate-limited), the Telegram relay (no keys, bound chats, signed pairing by the owner), the browser (secrets in a vault encrypted with a key only the owner's wallet can derive, stored on the contract), the registry (a hint, verified against the contract by every reader), the model's flags and tax ids (they can only add scrutiny, never remove a block).
 
@@ -94,8 +94,8 @@ The unit that scales is the invoice, and its marginal cost is cents of enclave t
 
 ## 8. What exists today
 
-The policy contract (Rust, near-sdk 5, 65 unit tests, three audit rounds), the registry of treasuries, the agent, relayer, executor and MCP server (TypeScript), the web console (wallet sign-in, roles, DAO, encrypted vault, analytics, reports, contract upgrades from the browser), the public explorer and dashboards, the Telegram inbox with approvals from the phone and trusted vendors, independent receipt verification, and a load test of 1,030 invoices from ten invented companies. Live on NEAR testnet; cross-chain settlement through NEAR Intents on mainnet. The README has the step for each.
+The policy contract (Rust, near-sdk 5, 67 unit tests, three audit rounds), the registry of treasuries, the agent, relayer, executor and MCP server (TypeScript), the web console (wallet sign-in, roles, DAO, encrypted vault, analytics, reports, contract upgrades from the browser), the public explorer and dashboards, the Telegram inbox with approvals from the phone and trusted vendors, independent receipt verification, and a load test of 1,030 invoices from ten invented companies. Live on NEAR testnet; cross-chain settlement through NEAR Intents on mainnet. The README has the step for each.
 
 ## 9. Limits
 
-Structured e-invoices are not parsed yet; the demo reads PDFs. Intents settlement is mainnet only. The verifier does not yet replay the enclave's event log or check GPU evidence, though the receipt keeps both. Ownership transfer is one step. Cloudflare KV behind the Telegram inbox is eventually consistent. Each of these is on the roadmap or stated in the README's honest limits, which is where they stay until they are gone.
+Structured e-invoices are not parsed yet; the demo reads PDFs. Intents settlement is mainnet only. The verifier does not yet replay the enclave's event log or check GPU evidence, though the receipt keeps both. Cloudflare KV behind the Telegram inbox is eventually consistent. Each of these is on the roadmap or stated in the README's honest limits, which is where they stay until they are gone.
