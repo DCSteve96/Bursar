@@ -629,7 +629,7 @@
           <label><span>Inbox token (Telegram) <i class="help" tabindex="0" data-help="Set when you connect the first Telegram chat. The agent needs it too, to read what you approve from Telegram: BURSAR_INBOX_TOKEN in its environment, with BURSAR_RELAY set to the relay URL.">?</i></span><input id="inboxToken" type="password" placeholder="set by Connect a Telegram chat" autocomplete="off"></label>
         </div>
         <div class="grid cols-3" style="margin-top:12px">
-          <label><span>Model in the enclave <i class="help" tabindex="0" data-help="The model that reads the invoices on NEAR AI Cloud. The receipt names it and the verifier checks it. When the chosen one does not answer, the other is tried."></i></span><select id="model"><option value="Qwen/Qwen3-VL-30B-A3B-Instruct">Qwen/Qwen3-VL-30B-A3B-Instruct</option><option value="z-ai/glm-5.3-flash">z-ai/glm-5.3-flash</option></select></label>
+          <label><span>Model in the enclave <i class="help" tabindex="0" data-help="The model that reads the invoices on NEAR AI Cloud. The receipt names it and the verifier checks it. When the chosen one does not answer, the other is tried."></i></span><select id="model"><option value="Qwen/Qwen3-VL-30B-A3B-Instruct">Qwen/Qwen3-VL-30B-A3B-Instruct</option><option value="z-ai/glm-5.3-flash">z-ai/glm-5.3-flash</option><option value="Qwen/Qwen3.8-27B">Qwen/Qwen3.8-27B</option></select></label>
         </div>
         <div class="actions" style="margin-top:16px;align-items:center">
           <button id="demo" type="button" class="btn-ghost">Use the README demo treasury</button>
@@ -1169,7 +1169,7 @@ function readingFlags(ex, text) {
 }
 const FLAG = { chat_vendor_mismatch: "it came from a chat linked to a different vendor", new_payment_details: "the invoice announces new payment details", urgency: "the invoice presses for immediate payment", mismatched_contact: "the contact details do not match the vendor", handwritten_or_altered: "the document looks altered", missing_invoice_number: "no invoice number", unreadable: "parts of the document are unreadable", no_text_layer: "a scan with no text layer: the amount cannot be cross-checked", amount_not_in_text: "the total the model read does not appear in the document's text", larger_amount_in_text: "a larger amount than the total appears in the document", totals_mismatch: "subtotal plus tax does not equal the total", low_confidence: "the model was not confident", currency_not_usdc: "the invoice is not in USDC" };
 const flagText = (f) => FLAG[f] ?? f;
-const MODEL_FALLBACK = { "Qwen/Qwen3-VL-30B-A3B-Instruct": "z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash": "Qwen/Qwen3-VL-30B-A3B-Instruct" };
+const MODEL_FALLBACK = { "Qwen/Qwen3-VL-30B-A3B-Instruct": "z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash": "Qwen/Qwen3.8-27B", "Qwen/Qwen3.8-27B": "z-ai/glm-5.3-flash" };
 const aiHeaders = () => useOwnKey() && settings.aiKey ? { Authorization: `Bearer ${settings.aiKey}`, "x-no-aliasing": "true" } : { "x-no-aliasing": "true" };
 const sha256hex = (s) => toHex(sha256(te.encode(s)));
 
