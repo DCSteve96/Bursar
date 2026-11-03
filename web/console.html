@@ -2941,6 +2941,7 @@ async function showDecision(id, hash, signedBy) {
 // newcomer's own signature opens the vault. v1 and v2 vaults (one wallet key as the AES key) are read and rewritten as v3.
 const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "executor", "executorKey", "inboxToken", "label", "aiKey", "readMode", "intentsKey"];
 const vaultKeys = {}; // treasury:salt -> { raw, pub }, for this tab
+const vaultMyId = new Proxy({}, { get: (o, t) => { if (!(t in o)) { try { o[t] = sessionStorage.getItem(`bursar.vaultMyId.${t}`) || ""; } catch {} } return o[t]; }, set: (o, t, v) => { o[t] = v; try { sessionStorage.setItem(`bursar.vaultMyId.${t}`, v); } catch {} return true; } }); // treasury -> the id of this browser's wrap
 const vaultCK = new Proxy({}, { get: (o, t) => { if (!(t in o)) { try { const h = sessionStorage.getItem(`bursar.vaultCK.${t}`); if (h) o[t] = fromHex(h); } catch {} } return o[t]; }, set: (o, t, v) => { o[t] = v; try { sessionStorage.setItem(`bursar.vaultCK.${t}`, toHex(v)); } catch {} return true; } }); // treasury -> content key, once this tab opened or wrote the vault (kept for the session)
 /** The wallet-derived key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature
  *  (getWallet is called only then). `salt` is the vault's own random salt: the signed message is unique to this vault,
@@ -2966,6 +2967,13 @@ async function vaultKeyRaw(getWallet, salt = "") {
     try { sessionStorage.setItem(`bursar.vaultKey.${ck}`, toHex(raw)); sessionStorage.setItem(`bursar.vaultPub.${ck}`, pub); } catch {}
   }
   return (vaultKeys[ck] = { raw, pub });
+}
+/** "Safari on iPhone", "Chrome on Mac": what the owner sees next to an admitted key. From the user agent, nothing more. */
+function deviceLabel() {
+  const ua = navigator.userAgent || "";
+  const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "a device";
+  const br = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "a browser";
+  return `${br} on ${os}`;
 }
 const aesKey = (raw) => crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 async function aesWrap(bytes, keyRaw) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aesKey(keyRaw), bytes)); return { iv: b64(iv), ct: b64(ct) }; }
@@ -3010,13 +3018,14 @@ async function vaultSave(wallet) {
   const t = settings.treasury, cur = vaultParse(vaultOnChain);
   // a vault keeps its salt across saves (the session key stays valid); a first vault, or a v1 one, gets a fresh salt
   const salt = cur?.salt || toHex(crypto.getRandomValues(new Uint8Array(16)));
-  const { raw } = await vaultKeyRaw(wallet || (() => ownerWallet(settings.owner)), salt);
+  const { raw, pub } = await vaultKeyRaw(wallet || (() => ownerWallet(settings.owner)), salt);
   const id = await wrapId(raw);
   let ck = vaultCK[t];
   if (!ck && cur?.v === 3) throw new Error("this browser has not opened the vault: unlock it first, then save");
   if (!ck) ck = crypto.getRandomValues(new Uint8Array(32)); // a new vault, or an old one this wallet key owned: from now on it admits other devices
   const wraps = cur?.v === 3 ? { ...cur.wraps } : {};
-  wraps[id] = { kind: "sig", ...(await aesWrap(ck, raw)) };
+  wraps[id] = { kind: "sig", ...(await aesWrap(ck, raw)), wallet: pub || wraps[id]?.wallet || "", label: wraps[id]?.label || deviceLabel(), at: wraps[id]?.at || new Date().toISOString() };
+  vaultMyId[t] = id;
   const at = new Date().toISOString();
   const enc = await aesWrap(te.encode(JSON.stringify({ v: 3, owner: settings.owner, saved_at: at, data: JSON.parse(vaultPlain()) })), ck);
   const blob = vaultBlob({ salt, iv: enc.iv, ct: enc.ct, wraps, requests: (cur?.v === 3 ? cur.requests : []).filter((r) => r.id !== id) });
@@ -3045,7 +3054,8 @@ async function vaultUnlock(wallet) {
       e.vaultAsk = true; throw e;
     }
     plain = JSON.parse(td.decode(await aesUnwrap({ iv: cur.iv, ct: cur.ct }, ck)));
-    vaultCK[t] = ck;
+    vaultCK[t] = ck; vaultMyId[t] = id;
+    if (!w.label) rewrite = true; // a wrap from before devices had names: rewrite it with this browser's name and key
   } else {
     try { plain = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(cur.iv) }, await aesKey(raw), unb64(cur.ct)))); }
     catch { throw new Error("the vault did not open with this wallet's signature: it was locked by another wallet key. Open it once on the device that locked it, and it will admit other devices from then on."); }
@@ -3069,7 +3079,7 @@ async function vaultRequestAdmission(wallet) {
   const id = await wrapId(raw);
   let req = readVaultReq();
   if (!req || req.id !== id) { const kp = await ecdhPair(); req = { id, pub: kp.pub, priv: kp.priv }; try { localStorage.setItem(vaultReqKey(), JSON.stringify(req)); } catch { throw new Error("this browser cannot keep the request's key: storage is blocked"); } }
-  const requests = cur.requests.filter((r) => r.id !== id).concat([{ id, wallet: pub, ek: req.pub, at: new Date().toISOString() }]);
+  const requests = cur.requests.filter((r) => r.id !== id).concat([{ id, wallet: pub, ek: req.pub, at: new Date().toISOString(), label: deviceLabel() }]);
   const next = vaultBlob({ ...cur, requests });
   await ownerCall("set_vault", { blob: next }, 20);
   vaultOnChain = next; renderVault();
@@ -3081,7 +3091,7 @@ async function vaultAdmit(id, yes) {
   if (!ck) throw new Error("open the vault in this browser first");
   const req = cur.requests.find((r) => r.id === id); if (!req) return;
   const wraps = { ...cur.wraps };
-  if (yes) { const kp = await ecdhPair(); wraps[id] = { kind: "ecdh", epk: kp.pub, ...(await aesWrap(ck, await ecdhSecret(kp.priv, req.ek, cur.salt))) }; }
+  if (yes) { const kp = await ecdhPair(); wraps[id] = { kind: "ecdh", epk: kp.pub, ...(await aesWrap(ck, await ecdhSecret(kp.priv, req.ek, cur.salt))), wallet: req.wallet || "", label: req.label || "", at: new Date().toISOString() }; }
   const next = vaultBlob({ ...cur, wraps, requests: cur.requests.filter((r) => r.id !== id) });
   await ownerCall("set_vault", { blob: next }, 20);
   vaultOnChain = next; renderVault();
@@ -3131,9 +3141,12 @@ async function renderVault() {
   else status = behind ? `saved ${saved?.at ? new Date(saved.at).toLocaleString() : "earlier"}, this browser has newer secrets.` : `saved ${saved?.at ? new Date(saved.at).toLocaleString() : "on chain"}, up to date.`;
   let rows = `<span class="k">vault on chain</span><span class="v">${esc(status)}</span>`;
   if (cur?.v === 3 && holds) {
-    const ids = Object.keys(cur.wraps);
-    rows += `<span class="k">admitted keys</span><span class="v">${ids.length}: ${ids.map((id) => `<span class="mono">${esc(id.slice(0, 8))}</span>${ids.length > 1 ? ` <button type="button" class="btn-ghost small vact" data-vact="revoke" data-id="${esc(id)}">forget</button>` : ""}`).join(", ")} <span class="muted">(one per wallet key or device that opened the vault)</span></span>`;
-    for (const r of cur.requests) rows += `<span class="k">asks to be admitted</span><span class="v"><span class="mono">${esc((r.wallet || r.id).slice(0, 24))}</span> on ${esc(r.at ? new Date(r.at).toLocaleString() : "unknown date")} <span class="actions" style="display:inline-flex;gap:6px;margin-left:8px"><button type="button" class="btn-signal small vact" data-vact="admit" data-id="${esc(r.id)}">Admit</button><button type="button" class="btn-ghost small vact" data-vact="refuse" data-id="${esc(r.id)}">Refuse</button></span><br><span class="muted">Admit only a device you hold: it gets every secret in this vault.</span></span>`;
+    const myId = vaultMyId[t] || "";
+    const ids = Object.keys(cur.wraps).sort((x, y) => (y === myId) - (x === myId));
+    const when = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+    const keyOf = (w) => w.wallet ? `<span class="mono">${esc(w.wallet.slice(0, 20))}...</span>` : "<span class=muted>wallet key not recorded</span>";
+    rows += `<span class="k">admitted devices</span><span class="v"><div style="display:grid;gap:6px">${ids.map((id) => { const w = cur.wraps[id]; return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px"><b>${esc(w.label || "a device")}${id === myId ? " (this browser)" : ""}</b> ${keyOf(w)} <span class="muted">${esc(when(w.at) || `wrap ${id.slice(0, 8)}`)}</span>${id !== myId ? `<button type="button" class="btn-ghost small vact" data-vact="revoke" data-id="${esc(id)}">forget</button>` : ""}</div>`; }).join("")}</div><span class="muted" style="font-size:13px">Each line is one wallet key that can open this vault. Forget a device you no longer hold; it can ask again.</span></span>`;
+    for (const r of cur.requests) rows += `<span class="k">asks to be admitted</span><span class="v"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px"><b>${esc(r.label || "a device")}</b> ${keyOf(r)} <span class="muted">${esc(when(r.at))}</span><span class="actions" style="display:inline-flex;gap:6px"><button type="button" class="btn-signal small vact" data-vact="admit" data-id="${esc(r.id)}">Admit</button><button type="button" class="btn-ghost small vact" data-vact="refuse" data-id="${esc(r.id)}">Refuse</button></span></div><span class="muted" style="font-size:13px">Admit only a device you hold: it gets every secret in this vault.</span></span>`;
   }
   kv.innerHTML = rows;
   $("#vaultSave").hidden = !walletOwner || vaultOnChain === false; $("#vaultSave").disabled = (!behind && !!vaultOnChain) || (cur?.v === 3 && !holds);
@@ -3156,8 +3169,10 @@ $("#vaultAskTop").addEventListener("click", () => withVaultButton($("#vaultAskTo
 $("#vaultKv").addEventListener("click", async (e) => {
   const b = e.target.closest("button.vact"); if (!b) return;
   const { vact, id } = b.dataset;
-  if (vact === "admit" && !(await ask({ eyebrow: "Vault", title: "Admit this device?", rows: [["request", id.slice(0, 8)]], note: "The device gets every secret in this vault: the agent key, the inbox token, the API keys. Admit only a device you hold.", ok: "Admit" }))) return;
-  if (vact === "revoke" && !(await ask({ eyebrow: "Vault", title: "Forget this wallet key?", rows: [["key", id.slice(0, 8)]], note: "That device can no longer open the vault; it can ask again. Secrets it already holds stay there.", ok: "Forget", danger: true }))) return;
+  const reqOf = vaultParse(vaultOnChain)?.requests?.find((r) => r.id === id);
+  if (vact === "admit" && !(await ask({ eyebrow: "Vault", title: `Admit ${reqOf?.label || "this device"}?`, rows: [["device", reqOf?.label || "unknown"], ["wallet key", reqOf?.wallet || "not recorded"], ["asked", reqOf?.at ? new Date(reqOf.at).toLocaleString() : ""]], note: "The device gets every secret in this vault: the agent key, the inbox token, the API keys. Admit only a device you hold.", ok: "Admit" }))) return;
+  const wrapOf = vaultParse(vaultOnChain)?.wraps?.[id];
+  if (vact === "revoke" && !(await ask({ eyebrow: "Vault", title: `Forget ${wrapOf?.label || "this device"}?`, rows: [["device", wrapOf?.label || "unknown"], ["wallet key", wrapOf?.wallet || "not recorded"]], note: "That device can no longer open the vault; it can ask again. Secrets it already holds stay there.", ok: "Forget", danger: true }))) return;
   await withVaultButton(b, $("#vaultErr"), () => vact === "admit" ? vaultAdmit(id, true) : vact === "refuse" ? vaultAdmit(id, false) : vaultRevoke(id));
 });
 /** After a change that created a secret (Telegram token, agent key), write the vault when this tab can do so without a prompt. */

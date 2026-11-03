@@ -110,6 +110,11 @@ if a.mainnet_demo:
             "AH-2002", "2026-11-02", "2026-11-16",
             [("Backup storage, November", "5.00")], "5.00",
             [f"Pay to NEAR account: {a.near_vendor}", "Token: USDC"], subtotal="5.00", tax="0.00")
+    # a third one for the settlement on a signed quote: the contract checks 1Click's signature, nobody registers anything
+    invoice(os.path.join(a.out, "m3-designco-2003.pdf"), "DesignCo", "Prinsengracht 220, Amsterdam", "invoices@designco.example",
+            "DC-2003", "2026-11-03", "2026-11-17",
+            [("Social banners, 3 sizes", "5.00")], "5.00",
+            [f"Pay to base address: {a.base_address}", "Token: USDC on Base"], subtotal="5.00", tax="0.00")
     print("written to", a.out); raise SystemExit(0)
 
 invoice(os.path.join(a.out, "01-acme-hosting-0923.pdf"), "Acme Hosting", "Rua das Flores 12, Lisboa", "billing@acmehosting.example",
