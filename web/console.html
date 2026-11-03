@@ -1718,6 +1718,7 @@ const autoTried = {}; let autoBusy = false;
 const autoSettleOn = () => { try { return localStorage.getItem(`bursar.autoSettle.${settings.treasury}`) === "1"; } catch { return false; } };
 async function autoSettleTick() {
   if (autoBusy || !autoSettleOn() || !settings.executorKey || !state.payments) return;
+  if (state.roles?.[2] && settings.executor !== state.roles[2]) { $("#attnErr").textContent = `automatic settlement is on, but the executor key in this browser is for ${settings.executor} and the treasury's executor is ${state.roles[2]}: get that key from the vault (admit this device from the one that holds it), or replace the executor from this device in Settings, Keys`; $("#attnErr").hidden = false; return; }
   const next = state.payments.filter((p) => p.status === "Queued" && (autoTried[p.id] ?? 0) < 3 && state.vendors.some(([vid, v]) => vid === p.vendor_id && "Chain" in v.payout))[0];
   if (!next) return;
   autoBusy = true; autoTried[next.id] = (autoTried[next.id] ?? 0) + 1;
@@ -1730,7 +1731,9 @@ function renderAutoSettle() {
   row.hidden = !(settings.executor && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB)); row.classList.toggle("on", on);
   $("#autoSettle").setAttribute("aria-checked", on ? "true" : "false");
   $("#autoSettleTitle").textContent = on ? "Automatic settlement is on" : "Automatic settlement is off";
-  $("#autoSettleNote").textContent = on ? "While this page is open it acts as the executor: every 30 seconds it takes the next queued payment, asks 1Click for a quote, checks the signature and sends it to the contract, which checks everything again before moving the USDC. Nothing is confirmed by hand. The same loop runs on a server with npm run executor." : "Queued payments wait for you to press Settle via Intents on each one. Turn this on and the page settles them by itself while it stays open.";
+  const staleExec = !!(state.roles?.[2] && settings.executor && settings.executor !== state.roles[2]);
+  $("#autoSettleTitle").textContent = staleExec ? "This browser cannot settle: its executor key is stale" : $("#autoSettleTitle").textContent;
+  $("#autoSettleNote").textContent = staleExec ? `The key here is for ${settings.executor}; the treasury's executor is ${state.roles[2]}. Open the vault on the device that holds that key and admit this one, or replace the executor from this device in Settings, Keys.` : on ? "While this page is open it acts as the executor: every 30 seconds it takes the next queued payment, asks 1Click for a quote, checks the signature and sends it to the contract, which checks everything again before moving the USDC. Nothing is confirmed by hand. The same loop runs on a server with npm run executor." : "Queued payments wait for you to press Settle via Intents on each one. Turn this on and the page settles them by itself while it stays open.";
 }
 $("#autoSettle").addEventListener("click", () => { const on = !autoSettleOn(); try { localStorage.setItem(`bursar.autoSettle.${settings.treasury}`, on ? "1" : "0"); } catch {} renderAutoSettle(); if (on) autoSettleTick(); });
 setInterval(() => { if (!document.hidden) autoSettleTick(); }, 30000);
@@ -1843,6 +1846,7 @@ async function settleNow(id, auto = false) {
   const p = state.payments.find((x) => x.id === id); const v = state.vendors.find(([vid]) => vid === p?.vendor_id)?.[1];
   if (!p || !v || !("Chain" in v.payout)) throw new Error("not a queued cross-chain payment");
   if (!settings.executor || !settings.executorKey) throw new Error("the executor account and key are not in Settings");
+  if (state.roles?.[2] && settings.executor !== state.roles[2]) throw new Error(`the executor key in this browser is for ${settings.executor}, but the treasury's executor is ${state.roles[2]}: get that key from the vault (admit this device from the one that holds it), or replace the executor from this device in Settings, Keys`);
   const { chain, address } = v.payout.Chain; const dest = USDC_ASSET[chain]; if (!dest) throw new Error(`no USDC asset id for ${chain}`);
   const net = BigInt(p.amount) - BigInt(p.withheld || "0");
   let signer = await view(settings.treasury, "get_quote_signer").catch(() => null);
@@ -3094,7 +3098,12 @@ async function vaultUnlock(wallet) {
     rewrite = true; // an old vault is rewritten as v3 with this wallet key as its first wrap
   }
   vaultAsk = false;
-  for (const f of VAULT_FIELDS) if (plain.data?.[f] && !settings[f]) $("#" + f).value = plain.data[f];
+  const roleIdx = { agent: 1, executor: 2 };
+  const stale = (role) => plain.data?.[role] && state.roles && plain.data[role] === state.roles[roleIdx[role]] && settings[role] !== state.roles[roleIdx[role]]; // this browser names an account the contract no longer uses; the vault names the current one
+  for (const f of VAULT_FIELDS) {
+    const role = f === "agentKey" ? "agent" : f === "executorKey" ? "executor" : f;
+    if (plain.data?.[f] && (!settings[f] || (roleIdx[role] !== undefined && stale(role)))) $("#" + f).value = plain.data[f];
+  }
   saveSettings();
   await markVaultSaved(plain.saved_at);
   if (rewrite) { try { await vaultSave(wallet); try { localStorage.removeItem(vaultReqKey()); } catch {} } catch (e) { console.warn("vault:", e.message); } }
