@@ -2572,7 +2572,7 @@ function reflectWalletOwner() {
 /** The wallet adds a key limited to this treasury to the browser (NEAR Connect: Meteor, HOT, Intear, Nightly and the others). The key is generated here. */
 /** The wallet signed in as `owner`, through NEAR Connect (session reused, picker otherwise). */
 async function ownerWallet(owner) {
-  if (location.protocol !== "https:" && window.__bursarWalletStub) return window.__bursarWalletStub(owner); // test runner only: a page served over http or file
+  if (location.protocol !== "https:" && window.__bursarWalletStub) { window.__bursarTest = { ed25519, sha256, b58decode, b58encode, nep413Hash }; return window.__bursarWalletStub(owner); } // test runner only: a page served over http or file
   const [{ NearConnector }, { registerMeteorExtension }] = await Promise.all([import("https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js"), import("./meteor.js")]);
   const connector = new NearConnector({ network: settings.network, footerBranding: null });
   await registerMeteorExtension().catch((e) => console.warn("Meteor extension bridge:", e));
@@ -2977,6 +2977,9 @@ async function showDecision(id, hash, signedBy) {
 // newcomer's own signature opens the vault. v1 and v2 vaults (one wallet key as the AES key) are read and rewritten as v3.
 const VAULT_FIELDS = ["agent", "agentKey", "payer", "payerKey", "executor", "executorKey", "inboxToken", "label", "aiKey", "readMode", "intentsKey"];
 const vaultKeys = {}; // treasury:salt -> { raw, pub }, for this tab
+let vaultQueue = Promise.resolve(); // vault writes run one after another
+const vaultWrite = (fn) => { const run = vaultQueue.then(fn, fn); vaultQueue = run.catch(() => {}); return run; };
+const autoAdmitted = {}; // request ids this tab is admitting by itself, so a re-render does not admit twice
 const vaultMyId = new Proxy({}, { get: (o, t) => { if (!(t in o)) { try { o[t] = sessionStorage.getItem(`bursar.vaultMyId.${t}`) || ""; } catch {} } return o[t]; }, set: (o, t, v) => { o[t] = v; try { sessionStorage.setItem(`bursar.vaultMyId.${t}`, v); } catch {} return true; } }); // treasury -> the id of this browser's wrap
 const vaultCK = new Proxy({}, { get: (o, t) => { if (!(t in o)) { try { const h = sessionStorage.getItem(`bursar.vaultCK.${t}`); if (h) o[t] = fromHex(h); } catch {} } return o[t]; }, set: (o, t, v) => { o[t] = v; try { sessionStorage.setItem(`bursar.vaultCK.${t}`, toHex(v)); } catch {} return true; } }); // treasury -> content key, once this tab opened or wrote the vault (kept for the session)
 /** The wallet-derived key for this treasury's vault: from this tab, from this session, or from a fresh wallet signature
@@ -3010,6 +3013,21 @@ function deviceLabel() {
   const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "a device";
   const br = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "a browser";
   return `${br} on ${os}`;
+}
+/** The bytes a NEAR wallet signs for signMessage (NEP-413): prefix 2^31 + 413, borsh of message, nonce, recipient, no callback. */
+const nep413Hash = (message, nonce, recipient) => sha256(new Borsh().uint(2147484061, 4).str(message).bytes(nonce).str(recipient).u8(0).out());
+const admissionText = (t, id, ek) => `Bursar vault admission for ${t}: device ${id} asks with key ${ek}. Signing this proves the request comes from a key of the owner's account. It moves nothing.`;
+/** Is a request signed by one of the owner account's own full-access keys? "own" | "unsigned" | "bad" | "limited". */
+async function requestVerdict(r) {
+  if (!r.sig || !r.wallet) return "unsigned";
+  try {
+    const nonce = sha256(te.encode(admissionText(settings.treasury, r.id, r.ek)));
+    if (!ed25519.verify(unb64(r.sig), nep413Hash(admissionText(settings.treasury, r.id, r.ek), nonce, settings.treasury), b58decode(r.wallet.replace(/^ed25519:/, "")))) return "bad";
+    const owner = state.roles?.[0]; if (!owner) return "bad";
+    const keys = await rpc("query", { request_type: "view_access_key_list", finality: "final", account_id: owner });
+    const k = (keys?.keys || []).find((x) => x.public_key === r.wallet);
+    return !k ? "bad" : k.access_key?.permission === "FullAccess" ? "own" : "limited";
+  } catch { return "bad"; }
 }
 const aesKey = (raw) => crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 async function aesWrap(bytes, keyRaw) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await aesKey(keyRaw), bytes)); return { iv: b64(iv), ct: b64(ct) }; }
@@ -3065,7 +3083,7 @@ async function vaultSave(wallet) {
   const at = new Date().toISOString();
   const enc = await aesWrap(te.encode(JSON.stringify({ v: 3, owner: settings.owner, saved_at: at, data: JSON.parse(vaultPlain()) })), ck);
   const blob = vaultBlob({ salt, iv: enc.iv, ct: enc.ct, wraps, requests: (cur?.v === 3 ? cur.requests : []).filter((r) => r.id !== id) });
-  await ownerCall("set_vault", { blob }, 20);
+  await vaultWrite(() => ownerCall("set_vault", { blob }, 20));
   vaultOnChain = blob; vaultCK[t] = ck; vaultAsk = false;
   await markVaultSaved(at);
   renderVault();
@@ -3120,21 +3138,31 @@ async function vaultRequestAdmission(wallet) {
   const id = await wrapId(raw);
   let req = readVaultReq();
   if (!req || req.id !== id) { const kp = await ecdhPair(); req = { id, pub: kp.pub, priv: kp.priv }; try { localStorage.setItem(vaultReqKey(), JSON.stringify(req)); } catch { throw new Error("this browser cannot keep the request's key: storage is blocked"); } }
-  const requests = cur.requests.filter((r) => r.id !== id).concat([{ id, wallet: pub, ek: req.pub, at: new Date().toISOString(), label: deviceLabel() }]);
+  // a second signature, over this request: a device that holds the vault admits it by itself when the key is one of the owner account's own
+  let sig = "";
+  try {
+    const w = typeof wallet === "function" ? await wallet() : wallet || await ownerWallet(settings.owner);
+    const text = admissionText(settings.treasury, id, req.pub), nonce = sha256(te.encode(text));
+    const r = await w.signMessage({ network: settings.network, message: text, nonce, recipient: settings.treasury });
+    const bytes = typeof r?.signature === "string" ? unb64(r.signature) : r?.signature ? new Uint8Array(r.signature) : null;
+    if (bytes?.length === 64 && (!pub || !r?.publicKey || r.publicKey === pub)) sig = b64(bytes);
+  } catch (e) { console.warn("admission signature:", e.message); }
+  const requests = cur.requests.filter((r) => r.id !== id).concat([{ id, wallet: pub, ek: req.pub, at: new Date().toISOString(), label: deviceLabel(), sig }]);
   const next = vaultBlob({ ...cur, requests });
-  await ownerCall("set_vault", { blob: next }, 20);
+  await vaultWrite(() => ownerCall("set_vault", { blob: next }, 20));
   vaultOnChain = next; renderVault();
 }
 /** A device that holds the content key answers a request: wrap the key for the newcomer (yes) or drop the request (no). */
 async function vaultAdmit(id, yes) {
-  const t = settings.treasury, cur = vaultParse(vaultOnChain), ck = vaultCK[t];
+  const t = settings.treasury, ck = vaultCK[t];
+  const cur = vaultParse(await readVault()); // fresh: another tab or device may have written the vault since this page read it
   if (!cur || cur.v !== 3) throw new Error("no vault to admit to");
   if (!ck) throw new Error("open the vault in this browser first");
   const req = cur.requests.find((r) => r.id === id); if (!req) return;
   const wraps = { ...cur.wraps };
   if (yes) { const kp = await ecdhPair(); wraps[id] = { kind: "ecdh", epk: kp.pub, ...(await aesWrap(ck, await ecdhSecret(kp.priv, req.ek, cur.salt))), wallet: req.wallet || "", label: req.label || "", at: new Date().toISOString() }; }
   const next = vaultBlob({ ...cur, wraps, requests: cur.requests.filter((r) => r.id !== id) });
-  await ownerCall("set_vault", { blob: next }, 20);
+  await vaultWrite(() => ownerCall("set_vault", { blob: next }, 20));
   vaultOnChain = next; renderVault();
 }
 /** No executor key in this browser and no device to admit it from: the owner creates a new executor here and tells the contract.
@@ -3154,9 +3182,9 @@ async function replaceExecutor() {
 $("#execReplace").addEventListener("click", () => withVaultButton($("#execReplace"), $("#vaultErr"), replaceExecutor));
 /** Forget a wallet key's wrap (a lost phone): the device that holds the vault removes it; the newcomer must ask again. */
 async function vaultRevoke(id) {
-  const cur = vaultParse(vaultOnChain); if (!cur || cur.v !== 3 || !vaultCK[settings.treasury]) throw new Error("open the vault in this browser first");
+  const cur = vaultParse(await readVault()); if (!cur || cur.v !== 3 || !vaultCK[settings.treasury]) throw new Error("open the vault in this browser first");
   const wraps = { ...cur.wraps }; delete wraps[id];
-  const next = vaultBlob({ ...cur, wraps }); await ownerCall("set_vault", { blob: next }, 20); vaultOnChain = next; renderVault();
+  const next = vaultBlob({ ...cur, wraps }); await vaultWrite(() => ownerCall("set_vault", { blob: next }, 20)); vaultOnChain = next; renderVault();
 }
 /** Settings block and the top notice. Called after the treasury loads and after every save. */
 async function renderVault() {
@@ -3191,7 +3219,12 @@ async function renderVault() {
     const when = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
     const keyOf = (w) => w.wallet ? `<span class="mono">${esc(w.wallet.slice(0, 20))}...</span>` : "<span class=muted>wallet key not recorded</span>";
     rows += `<span class="k">admitted devices</span><span class="v"><div style="display:grid;gap:6px">${ids.map((id) => { const w = cur.wraps[id]; return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px"><b>${esc(w.label || "a device")}${id === myId ? " (this browser)" : ""}</b> ${keyOf(w)} <span class="muted">${esc(when(w.at) || `wrap ${id.slice(0, 8)}`)}</span>${id !== myId ? `<button type="button" class="btn-ghost small vact" data-vact="revoke" data-id="${esc(id)}">forget</button>` : ""}</div>`; }).join("")}</div><span class="muted" style="font-size:13px">Each line is one wallet key that can open this vault. Forget a device you no longer hold; it can ask again.</span></span>`;
-    for (const r of cur.requests) rows += `<span class="k">asks to be admitted</span><span class="v"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px"><b>${esc(r.label || "a device")}</b> ${keyOf(r)} <span class="muted">${esc(when(r.at))}</span><span class="actions" style="display:inline-flex;gap:6px"><button type="button" class="btn-signal small vact" data-vact="admit" data-id="${esc(r.id)}">Admit</button><button type="button" class="btn-ghost small vact" data-vact="refuse" data-id="${esc(r.id)}">Refuse</button></span></div><span class="muted" style="font-size:13px">Admit only a device you hold: it gets every secret in this vault.</span></span>`;
+    for (const r of cur.requests) {
+      const verdict = await requestVerdict(r);
+      if (verdict === "own" && holds && !autoAdmitted[r.id]) { autoAdmitted[r.id] = true; rows += `<span class="k">admitting</span><span class="v"><b>${esc(r.label || "a device")}</b> ${keyOf(r)}: its key is one of ${esc(state.roles[0])}'s own full-access keys, so it is being admitted now...</span>`; vaultQueue.then(() => vaultAdmit(r.id, true)).catch((e) => { $("#vaultErr").textContent = e.message; $("#vaultErr").hidden = false; }); continue; }
+      const why = { own: "signed by one of the owner account's own keys", unsigned: "the request carries no signature: admit it only if you just asked from a device you hold", bad: "the signature does not check out, or the key is not on the owner account: refuse unless you know this device", limited: "signed by a key limited to this contract, not a full key of the owner account: a stolen browser key could ask this way; admit only a device you hold" }[verdict];
+      rows += `<span class="k">asks to be admitted</span><span class="v"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px"><b>${esc(r.label || "a device")}</b> ${keyOf(r)} <span class="muted">${esc(when(r.at))}</span><span class="actions" style="display:inline-flex;gap:6px"><button type="button" class="btn-signal small vact" data-vact="admit" data-id="${esc(r.id)}">Admit</button><button type="button" class="btn-ghost small vact" data-vact="refuse" data-id="${esc(r.id)}">Refuse</button></span></div><span class="muted" style="font-size:13px">${esc(why)}. A device that is admitted gets every secret in this vault.</span></span>`;
+    }
   }
   kv.innerHTML = rows;
   $("#vaultSave").hidden = !walletOwner || vaultOnChain === false; $("#vaultSave").disabled = (!behind && !!vaultOnChain) || (cur?.v === 3 && !holds);
