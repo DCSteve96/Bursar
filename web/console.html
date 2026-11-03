@@ -482,6 +482,7 @@
     <h3 class="heading-sm" style="margin:40px 0 12px">Refused by policy</h3>
     <div class="wrap"><table id="attnBlocked"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>reason</th><th>flags</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Cross-chain, waiting for the executor</h3>
+    <p class="muted" id="autoSettleRow" hidden style="margin:0 0 12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px"><label style="display:inline-flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="autoSettle"> <span>Settle queued payments while this page is open</span></label><span id="autoSettleNote" style="font-size:13px">This browser acts as the executor: it asks 1Click for a quote and sends it to the contract, which checks everything. Nothing is confirmed by hand. The same loop runs on a server with <span class="mono">npm run executor</span>.</span></p>
     <div class="wrap"><table id="attnQueued"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>destination</th></tr></thead><tbody></tbody></table></div>
   </div>
 </section>
@@ -1704,7 +1705,22 @@ $("#syncBalance").addEventListener("click", async () => {
   } catch (e) { $("#syncErr").textContent = e.message; $("#syncErr").hidden = false; }
   finally { b.disabled = false; }
 });
+const autoTried = {}; let autoBusy = false;
+const autoSettleOn = () => { try { return localStorage.getItem(`bursar.autoSettle.${settings.treasury}`) === "1"; } catch { return false; } };
+async function autoSettleTick() {
+  if (autoBusy || !autoSettleOn() || !settings.executorKey || !state.payments) return;
+  const next = state.payments.filter((p) => p.status === "Queued" && (autoTried[p.id] ?? 0) < 3 && state.vendors.some(([vid, v]) => vid === p.vendor_id && "Chain" in v.payout))[0];
+  if (!next) return;
+  autoBusy = true; autoTried[next.id] = (autoTried[next.id] ?? 0) + 1;
+  try { await settleNow(next.id, true); }
+  catch (e) { $("#attnErr").textContent = `#${next.id}: ${e.message}${autoTried[next.id] >= 3 ? " (three attempts: left for a person)" : ""}`; $("#attnErr").hidden = false; }
+  finally { autoBusy = false; }
+}
+$("#autoSettle").addEventListener("change", () => { try { localStorage.setItem(`bursar.autoSettle.${settings.treasury}`, $("#autoSettle").checked ? "1" : "0"); } catch {} if ($("#autoSettle").checked) autoSettleTick(); });
+setInterval(() => { if (!document.hidden) autoSettleTick(); }, 30000);
 function renderAttention() {
+  $("#autoSettleRow").hidden = !(settings.executor && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB)); $("#autoSettle").checked = autoSettleOn();
+  if (autoSettleOn()) setTimeout(autoSettleTick, 500);
   const canApprove = canAct("approve") && !(state.roles?.[3]);
   // bulk: approve or cancel the picked rows in one transaction (no DAO), or vote them one by one (council)
   const pickable = (p) => canApprove || (dao() && p.dao_proposal_id !== null && isCouncil() && daoInfo.proposals[p.id]?.status === "InProgress");
@@ -1807,7 +1823,7 @@ function signedPayload(resp) {
 }
 const quoteMessage = (payload) => te.encode(b58encode(sha256(te.encode(payload))));
 const STUB_SEED = new Uint8Array(32).fill(7); // the test signer the contract's own tests use; set on a testnet treasury with set_quote_signer
-async function settleNow(id) {
+async function settleNow(id, auto = false) {
   const p = state.payments.find((x) => x.id === id); const v = state.vendors.find(([vid]) => vid === p?.vendor_id)?.[1];
   if (!p || !v || !("Chain" in v.payout)) throw new Error("not a queued cross-chain payment");
   if (!settings.executor || !settings.executorKey) throw new Error("the executor account and key are not in Settings");
@@ -1827,7 +1843,7 @@ async function settleNow(id) {
   const payload = signedPayload(q); if (!payload) throw new Error("the quote carries no signed payload");
   let sigBytes; try { sigBytes = b58decode(String(q.signature || "").replace(/^ed25519:/, "")); } catch { throw new Error("the quote carries no readable signature"); }
   if (!ed25519.verify(sigBytes, quoteMessage(payload), unb64(signer))) throw new Error("the quote's signature does not verify against the treasury's quote signer");
-  const yes = await ask({ eyebrow: "NEAR Intents", title: `Settle payment #${id} to ${chain}?`, rows: [["vendor receives", `${usdc(out)} at ${address}`], ["at least", usdc(floor)], ["treasury sends", usdc(net)], ["deposit account", deposit], ["signed by", "1Click, checked here and by the contract"], ["estimated time", `${quote.timeEstimate ?? "?"} s`]], note: "The contract checks 1Click's signature, that the quote pays the vendor's recorded address for exactly this amount in USDC on the vendor's chain, registers the deposit account on the token itself and sends the USDC, in one transaction signed by the executor's key. Your wallet signs nothing.", ok: "Settle" });
+  const yes = auto || await ask({ eyebrow: "NEAR Intents", title: `Settle payment #${id} to ${chain}?`, rows: [["vendor receives", `${usdc(out)} at ${address}`], ["at least", usdc(floor)], ["treasury sends", usdc(net)], ["deposit account", deposit], ["signed by", "1Click, checked here and by the contract"], ["estimated time", `${quote.timeEstimate ?? "?"} s`]], note: "The contract checks 1Click's signature, that the quote pays the vendor's recorded address for exactly this amount in USDC on the vendor's chain, registers the deposit account on the token itself and sends the USDC, in one transaction signed by the executor's key. Your wallet signs nothing.", ok: "Settle" });
   if (!yes) { settleNote(id, "not sent"); return; }
   settleNote(id, "settle: the contract checks the quote and sends the USDC to the deposit account...");
   const r = await executorSend("settle", { id, payload, signature: b64(sigBytes) }, 100);
