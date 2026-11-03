@@ -2115,12 +2115,16 @@ function reportRows() {
   return { rows, byVendor, months: Object.values(months).sort((a, b) => a.key < b.key ? 1 : -1), withholding: Object.values(wh).sort((a, b) => a.month < b.month ? 1 : a.month > b.month ? -1 : a.vendor.localeCompare(b.vendor)), stats, company, isSpend };
 }
 const PAY_COLS = [["id", "id"], ["date (UTC)", "date"], ["month", "month"], ["vendor id", "vendor_id"], ["vendor", "vendor"], ["vendor tax id", "tax_id"], ["country", "country"], ["invoice", "invoice"], ["gross USDC", "gross"], ["withholding %", "rate"], ["withheld USDC", "withheld"], ["net paid USDC", "net"], ["status", "status"], ["reason", "reason"], ["flags", "flags"], ["order", "order"], ["invoice sha256", "hash"], ["enclave completion", "completion"], ["destination tx", "dest_tx"]];
+const TX_COLS = [["request tx", "request payment"], ["approval tx", "approve payment"], ["settle tx", "settle"], ["settled tx", "mark settled"]];
+/** The export cells for a row: the explorer URL of each step, the destination transaction URL last. */
+function txCells(r) { const links = onChainLinks(r); const by = (label) => links.find((x) => x.label === label || (label === "approve payment" && x.label === "approve payments")); return [...TX_COLS.map(([, label]) => by(label)?.url || ""), links.find((x) => x.ts === Infinity)?.url || ""]; }
 function saveBlob(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10000); }
 const reportName = (ext) => `bursar-${(settings.treasury || "treasury").replace(/\.(testnet|near)$/, "")}-${new Date().toISOString().slice(0, 10)}.${ext}`;
-function downloadCsv() {
+async function downloadCsv() {
   const { rows } = reportRows();
+  await loadTxIndex(); txClaimed = new Set();
   const cell = (v) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-  const csv = [PAY_COLS.map(([h]) => h).join(","), ...rows.map((r) => PAY_COLS.map(([, k]) => cell(r[k])).join(","))].join("\r\n");
+  const csv = [[...PAY_COLS.map(([h]) => h), ...TX_COLS.map(([h]) => h), "destination tx link"].join(","), ...rows.map((r) => [...PAY_COLS.map(([, k]) => cell(r[k])), ...txCells(r).map(cell)].join(","))].join("\r\n");
   saveBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), reportName("csv"));
 }
 let xlsxLib = null;
@@ -2131,13 +2135,15 @@ async function downloadXlsx() {
   const sheet = (name, aoa, widths) => { const ws = X.utils.aoa_to_sheet(aoa); ws["!cols"] = widths.map((w) => ({ wch: w })); X.utils.book_append_sheet(wb, ws, name); };
   const sum = (k) => rows.filter((r) => r.spend).reduce((a, r) => a + r[k], 0), month = monthOf(String(Date.now() * 1000000));
   sheet("Summary", [["Bursar treasury report"], [], ["company", company?.name || ""], ["company tax id", company?.tax_id || ""], ["country", company?.country || ""], ["treasury contract", settings.treasury], ["network", settings.network], ["generated (UTC)", new Date().toISOString().replace("T", " ").slice(0, 19)], [], ["balance USDC", toNum(stats.balance)], ["gross paid all time USDC", sum("gross")], ["withheld all time USDC", sum("withheld")], ["net paid to vendors USDC", sum("net")], ["withholding to remit now USDC", toNum(stats.withheld_due)], ["gross paid this month USDC", rows.filter((r) => r.spend && r.month === month).reduce((a, r) => a + r.gross, 0)], ["payments recorded", rows.length], ["vendors", state.vendors.length], [], ["Amounts are USDC with two decimals. Gross is what the invoice asked; withheld is the share kept in the treasury for the state at the rate set per vendor; net is what the vendor received. Every row comes from the contract on chain."]], [34, 28]);
-  sheet("Payments", [PAY_COLS.map(([h]) => h), ...rows.map((r) => PAY_COLS.map(([, k]) => r[k]))], [6, 12, 9, 16, 22, 16, 8, 14, 12, 12, 13, 13, 10, 22, 22, 7, 24, 24, 24]);
+  await loadTxIndex(); txClaimed = new Set();
+  const linkCell = (url) => url ? { t: "s", v: url.replace(/^https?:\/\//, "").slice(0, 60), l: { Target: url } } : "";
+  sheet("Payments", [[...PAY_COLS.map(([h]) => h), ...TX_COLS.map(([h]) => h), "destination tx link"], ...rows.map((r) => [...PAY_COLS.map(([, k]) => r[k]), ...txCells(r).map(linkCell)])], [6, 12, 9, 16, 22, 16, 8, 14, 12, 12, 13, 13, 10, 22, 22, 7, 24, 24, 24, 40, 40, 40, 40, 44]);
   sheet("By vendor", [["vendor id", "vendor", "tax id", "country", "withholding %", "payout on record", "monthly budget USDC", "payments", "paid", "gross USDC", "withheld USDC", "net paid USDC", "refused", "held"], ...byVendor.map((v) => [v.vendor_id, v.name, v.tax_id, v.country, v.rate, v.payout, v.budget, v.payments, v.paid, v.gross, v.withheld, v.net, v.refused, v.held])], [16, 22, 16, 8, 13, 34, 18, 9, 6, 12, 13, 13, 8, 6]);
   sheet("By month", [["month", "gross USDC", "withheld USDC", "net paid USDC", "payments", "refused", "held"], ...months.map((m) => [m.key, m.gross, m.withheld, m.net, m.payments, m.refused, m.held])], [9, 12, 13, 13, 9, 8, 6]);
   sheet("Withholding", [["month", "vendor id", "vendor", "vendor tax id", "rate %", "gross USDC", "withheld USDC", "invoices"], ...withholding.map((w) => [w.month, w.vendor_id, w.vendor, w.tax_id, w.rate, w.gross, w.withheld, w.n]), [], ["to remit now (contract)", "", "", "", "", "", toNum(stats.withheld_due)]], [9, 16, 22, 16, 7, 12, 13, 8]);
   X.writeFile(wb, reportName("xlsx"));
 }
-$("#csvBtn").addEventListener("click", () => { try { downloadCsv(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } });
+$("#csvBtn").addEventListener("click", async () => { $("#xlsErr").hidden = true; $("#csvBtn").disabled = true; try { await downloadCsv(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } finally { $("#csvBtn").disabled = false; } });
 $("#xlsBtn").addEventListener("click", async () => { $("#xlsErr").hidden = true; $("#xlsBtn").disabled = true; try { await downloadXlsx(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } finally { $("#xlsBtn").disabled = false; } });
 // The NEAR transactions behind each payment, read from nearblocks (the contract keeps timestamps, not hashes): a
 // receipt on the treasury whose block is the payment's created_at or updated_at, with a method that touches payments.
@@ -2162,25 +2168,30 @@ async function loadTxIndex() {
   return txIndex;
 }
 let txClaimed = new Set(); // receipts already shown on a row of this render, so a settle is not listed twice
-function onChainCell(r) {
-  const near = (hash, label) => `<a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener" title="${esc(hash)}">${esc(label)}</a>`;
+/** The transactions behind a payment, in time order: [{ label, url, hash, ts }]. */
+function onChainLinks(r) {
+  const near = (hash, label, ts) => ({ label, hash, ts, url: `${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}` });
   const seen = new Set(), parts = [];
   // a settlement in between: the one successful settle by the executor after the request and before the mark
   const c = Number(r.created_at) || 0, u = Number(r.updated_at) || 0;
   if (["Settled", "Settling"].includes(r.status) && c && u > c) {
     const x = txIndex.receipts.filter((x) => x.methods.includes("settle") && x.ts > c + 1e9 && x.ts < u - 1e9 && !txClaimed.has(x.hash)).sort((a, b) => b.ts - a.ts)[0];
-    if (x) { txClaimed.add(x.hash); seen.add(x.hash); parts.push({ ts: x.ts, html: near(x.hash, "settle") }); }
+    if (x) { txClaimed.add(x.hash); seen.add(x.hash); parts.push(near(x.hash, "settle", x.ts)); }
   }
   // the contract's timestamps arrive as JSON numbers (rounded past the microsecond): match a receipt within two seconds
   for (const t of [Number(r.created_at) || 0, Number(r.updated_at) || 0]) {
     if (!t) continue;
-    for (const x of txIndex.receipts) if (Math.abs(x.ts - t) < 2e9 && !seen.has(x.hash)) { seen.add(x.hash); parts.push({ ts: x.ts, html: near(x.hash, x.methods[0].replace(/_/g, " ")) }); }
+    for (const x of txIndex.receipts) if (Math.abs(x.ts - t) < 2e9 && !seen.has(x.hash)) { seen.add(x.hash); parts.push(near(x.hash, x.methods[0].replace(/_/g, " "), x.ts)); }
   }
   parts.sort((a, b) => a.ts - b.ts);
-  if (r.dest_tx && !r.dest_tx.startsWith("0xstub")) { const base = DEST_EXPLORER[r.chain]; parts.push({ ts: Infinity, html: base ? `<a href="${base}${encodeURIComponent(r.dest_tx)}" target="_blank" rel="noopener" title="${esc(r.dest_tx)}">${esc(r.chain)} tx</a>` : esc(`${r.chain} ${r.dest_tx.slice(0, 10)}...`) }); }
-  else if (r.dest_tx) parts.push({ ts: Infinity, html: `<span class="muted">${esc(r.chain)} stub</span>` });
+  if (r.dest_tx && !r.dest_tx.startsWith("0xstub")) { const base = DEST_EXPLORER[r.chain]; parts.push({ label: `${r.chain} tx`, hash: r.dest_tx, ts: Infinity, url: base ? `${base}${encodeURIComponent(r.dest_tx)}` : "" }); }
+  else if (r.dest_tx) parts.push({ label: `${r.chain} stub`, hash: r.dest_tx, ts: Infinity, url: "" });
+  return parts;
+}
+function onChainCell(r) {
+  const parts = onChainLinks(r);
   if (!parts.length && txIndex.treasury !== settings.treasury) return `<span class="muted">reading...</span>`;
-  return parts.map((x) => x.html).join(", ") || `<span class="muted">-</span>`;
+  return parts.map((x) => x.url ? `<a href="${x.url}" target="_blank" rel="noopener" title="${esc(x.hash)}">${esc(x.label)}</a>` : `<span class="muted">${esc(x.label)}</span>`).join(", ") || `<span class="muted">-</span>`;
 }
 function renderByVendor() {
   const { byVendor } = reportRows();
