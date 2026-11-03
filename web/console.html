@@ -3046,7 +3046,7 @@ async function readVault() {
 }
 const vaultReqKey = () => `bursar.vaultReq.${settings.treasury}`;
 const readVaultReq = () => { try { return JSON.parse(localStorage.getItem(vaultReqKey()) || "null"); } catch { return null; } };
-async function markVaultSaved(at) { try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at, plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))) })); } catch {} }
+async function markVaultSaved(at) { try { localStorage.setItem(`bursar.vaultSaved.${settings.treasury}`, JSON.stringify({ at, plain: toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultPlain())))), blob: typeof vaultOnChain === "string" ? toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultOnChain)))).slice(0, 32) : "" })); } catch {} }
 /** Write the secrets of this browser to the contract. A vault this tab has not opened cannot be overwritten blindly: open it first. */
 async function vaultSave(wallet) {
   if (!settings.treasury || !settings.owner || !settings.ownerKey) throw new Error("only the owner, signed in, can write the vault");
@@ -3170,12 +3170,16 @@ async function renderVault() {
   const behind = vaultHasSecrets() && (!saved || saved.plain !== plainHash);
   const myReq = readVaultReq(), waiting = !!(cur?.v === 3 && myReq && cur.requests.some((r) => r.id === myReq.id));
   const pending = cur?.v === 3 && cur.requests.length > 0 && !waiting;
-  const canUnlock = walletOwner && !!vaultOnChain && !holds && (!vaultHasSecrets() || behind && !saved || pending);
+  // another device wrote the vault since this browser last opened or saved it: its secrets may be newer than ours
+  const blobNow = typeof vaultOnChain === "string" ? toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(vaultOnChain)))).slice(0, 32) : "";
+  const elsewhere = !!(saved?.blob && blobNow && saved.blob !== blobNow);
+  const canUnlock = walletOwner && !!vaultOnChain && (!holds || elsewhere) && (!vaultHasSecrets() || behind && !saved || pending || elsewhere);
   const askable = canUnlock && cur?.v === 3 && (vaultAsk || waiting);
   let status;
   if (vaultOnChain === false) status = "not available: this treasury was created before the vault existed. Keep the keys backup file.";
   else if (!walletOwner) status = settings.ownerKey ? "the vault is for wallet owners; with full keys in this browser, keep the keys backup file." : "sign in as the owner with your wallet to use it.";
   else if (!vaultOnChain) status = vaultHasSecrets() ? "nothing saved yet: this browser holds secrets the contract does not." : "nothing to save yet.";
+  else if (elsewhere && !pending) status = "another device saved the vault since this browser last opened it: unlock to take what is new (keys the contract uses replace stale ones here; the rest stays).";
   else if (pending && !holds) status = `${cur.requests.length} device${cur.requests.length === 1 ? "" : "s"} ask${cur.requests.length === 1 ? "s" : ""} to be admitted: unlock the vault here to answer.`;
   else if (waiting) status = "this device asked to be admitted. Open the vault on the device that holds it (Settings, Keys) and admit this one there; then unlock here.";
   else if (canUnlock) status = cur?.v === 3 ? `the contract holds a vault opened by ${Object.keys(cur.wraps).length} wallet key${Object.keys(cur.wraps).length === 1 ? "" : "s"}; this browser has not opened it.` : "the contract holds a vault; this browser has not opened it.";
@@ -3193,7 +3197,7 @@ async function renderVault() {
   $("#vaultSave").hidden = !walletOwner || vaultOnChain === false; $("#vaultSave").disabled = (!behind && !!vaultOnChain) || (cur?.v === 3 && !holds);
   $("#vaultUnlock").hidden = !canUnlock; $("#vaultAsk").hidden = !askable; $("#vaultAsk").textContent = waiting ? "Ask again" : "Ask to admit this device";
   $("#vaultUnlockTop").hidden = false; $("#vaultAskTop").hidden = !askable; $("#vaultAskTop").textContent = waiting ? "Ask again" : "Ask to admit this device";
-  $("#vaultBarText").textContent = pending && !holds ? "A device asks to be admitted to this company's vault. Unlock it here to answer." : waiting ? "This device asked to be admitted to the vault. Admit it on the device that holds the vault (Settings, Keys), then unlock here." : askable ? "This wallet key is not admitted to the vault yet. Ask, then admit this device from the one that holds the vault." : "This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.";
+  $("#vaultBarText").textContent = elsewhere && !pending ? "Another device saved this company's vault. Unlock to take what is new." : pending && !holds ? "A device asks to be admitted to this company's vault. Unlock it here to answer." : waiting ? "This device asked to be admitted to the vault. Admit it on the device that holds the vault (Settings, Keys), then unlock here." : askable ? "This wallet key is not admitted to the vault yet. Ask, then admit this device from the one that holds the vault." : "This browser holds no keys for this company, but its contract keeps a vault with them, locked by your wallet.";
   $("#execReplace").hidden = !(settings.owner && settings.ownerKey) || !!settings.executorKey || !state.roles;
   bar.hidden = !canUnlock;
 }
