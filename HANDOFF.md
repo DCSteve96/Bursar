@@ -659,3 +659,14 @@ Per il caso di Stefano (executor nuovo creato dal telefono, Mac con chiave vecch
 ### 2.60 Colonna "on chain" in Analytics (3 novembre, sera)
 
 Stefano: pagamento #4 (DC-2003, 5 USDC su Base) regolato in automatico dalla console con la quotazione firmata verificata dal contratto; chiede il record delle transazioni nella tabella "All payments, by vendor". Il contratto tiene timestamp, deposit address e dest_tx, non gli hash NEAR. Aggiunta la colonna "on chain": le ricevute della tesoreria lette da nearblocks (`/v1/account/<t>/txns`, CORS aperto, fino a 300 ricevute, cache 60 s per sessione) abbinate al pagamento per tempo di blocco (entro 2 s da created_at e updated_at, perché i timestamp in JSON perdono i nanosecondi) e per metodo (request_payment, approve_payment, settle, mark_settled, ...); il settle intermedio è la ricevuta `settle` riuscita fra richiesta e marcatura non già assegnata a un'altra riga; `dest_tx` linkato all'explorer della chain (basescan, arbiscan, etherscan, solscan, suiscan). Mainnet verificato: #1 e #4 mostrano request payment, settle, mark settled, base tx; #2 request e approve; #3 request. Limite: l'API testnet di nearblocks non indicizza le nostre tesorerie (0 ricevute), quindi su testnet la colonna resta vuota; l'export CSV/Excel non ha ancora i link.
+
+### 3.3 Piano per il 4 novembre (concordato con Stefano la sera del 3)
+
+Si fa tutto, punto per punto, in quest'ordine:
+
+1. README per i giudici: un passo "fai X, vedi Y" per ognuna delle cose entrate il 3: quotazioni 1Click firmate verificate dal contratto (`settle`, `set_quote_signer`), proprietà in due passi (offer, accept, withdraw), ammissione dei dispositivi al vault (richiesta firmata, ammissione automatica per le chiavi dell'account, elenco dispositivi, forget), settlement automatico dalla console, colonna "on chain" e link negli export. Allineare docs.html e WHITEPAPER (3.4, 3.5, 4).
+2. Giro da giudice su macchina pulita, README alla lettera: setup testnet (`bursar setup`), agente, relayer, executor headless (`npm run executor -- --once` con la nuova `settle`), MCP, verify. Rilanciare il wizard wallet su testnet (`app/.bursar/wizard-wallet.cjs`, faucet 10 NEAR) per il passaggio di proprietà in due passi nel wizard. Correggere subito ciò che inciampa.
+3. Telefono dal vivo con Stefano: ammissione vera Mac più telefono con i nomi dei dispositivi, Settings e dialoghi sul telefono, interruttore automatico dal telefono. Annotare e correggere.
+4. Pulizia: il vecchio executor mainnet `executor.bursar-8ccac085.near` tiene 0.2 NEAR (la chiave è nel vault del Mac; `delete_account` verso badfrog6063.near dalla console o script); il wallet è a 0.2 NEAR, da ricaricare per altre prove. bulktreasury ha come quote signer la chiave di test (stub), da lasciare così (solo test).
+
+Dal 5: repo pubblica (documenti interni in inglese, history), seconda corsa mainnet con il build finale, video e post X, submission il 13 dopo conferma del payload.
