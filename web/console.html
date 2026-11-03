@@ -2105,7 +2105,7 @@ function reportRows() {
   const isSpend = (p) => ["Paid", "Settling", "Settled", "Queued"].includes(p.status);
   const rows = payments.slice().sort((a, b) => b.id - a.id).map((p) => {
     const v = vmap[p.vendor_id], gross = toNum(p.amount), withheld = isSpend(p) ? toNum(p.withheld) : 0;
-    return { id: p.id, date: dateOf(p.created_at), month: monthOf(p.created_at), vendor_id: p.vendor_id, vendor: v?.name || "(not a vendor)", tax_id: v?.tax_id || "", country: v?.country || "", invoice: p.invoice_number, gross, rate: v ? (v.withholding_bps || 0) / 100 : 0, withheld, net: isSpend(p) ? gross - withheld : 0, status: p.status, reason: p.reason || "", flags: (p.flags || []).join(" "), order: p.order_id ?? "", hash: p.invoice_hash, completion: p.attestation_ref, dest_tx: p.dest_tx || "", spend: isSpend(p) };
+    return { id: p.id, date: dateOf(p.created_at), month: monthOf(p.created_at), vendor_id: p.vendor_id, vendor: v?.name || "(not a vendor)", tax_id: v?.tax_id || "", country: v?.country || "", invoice: p.invoice_number, gross, rate: v ? (v.withholding_bps || 0) / 100 : 0, withheld, net: isSpend(p) ? gross - withheld : 0, status: p.status, reason: p.reason || "", flags: (p.flags || []).join(" "), created_at: p.created_at, updated_at: p.updated_at, dest_tx: p.dest_tx || "", deposit_address: p.deposit_address || "", chain: v?.payout?.Chain?.chain || "", order: p.order_id ?? "", hash: p.invoice_hash, completion: p.attestation_ref, dest_tx: p.dest_tx || "", spend: isSpend(p) };
   });
   const byVendor = vendors.map(([id, v]) => { const ps = rows.filter((r) => r.vendor_id === id), sp = ps.filter((r) => r.spend); return { vendor_id: id, name: v.name, tax_id: v.tax_id || "", country: v.country || "", rate: (v.withholding_bps || 0) / 100, payout: payoutText(v.payout), budget: toNum(v.monthly_budget), payments: ps.length, paid: sp.length, gross: sp.reduce((a, r) => a + r.gross, 0), withheld: sp.reduce((a, r) => a + r.withheld, 0), net: sp.reduce((a, r) => a + r.net, 0), refused: ps.filter((r) => r.status === "Blocked").length, held: ps.filter((r) => r.status === "Approval").length, rows: ps }; });
   const unknown = rows.filter((r) => !vmap[r.vendor_id]);
@@ -2139,16 +2139,61 @@ async function downloadXlsx() {
 }
 $("#csvBtn").addEventListener("click", () => { try { downloadCsv(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } });
 $("#xlsBtn").addEventListener("click", async () => { $("#xlsErr").hidden = true; $("#xlsBtn").disabled = true; try { await downloadXlsx(); } catch (e) { $("#xlsErr").hidden = false; $("#xlsErr").textContent = e.message; } finally { $("#xlsBtn").disabled = false; } });
+// The NEAR transactions behind each payment, read from nearblocks (the contract keeps timestamps, not hashes): a
+// receipt on the treasury whose block is the payment's created_at or updated_at, with a method that touches payments.
+const NB_API = { testnet: "https://api-testnet.nearblocks.io", mainnet: "https://api.nearblocks.io" };
+const DEST_EXPLORER = { base: "https://basescan.org/tx/", arb: "https://arbiscan.io/tx/", eth: "https://etherscan.io/tx/", sol: "https://solscan.io/tx/", sui: "https://suiscan.xyz/mainnet/tx/" };
+const PAYMENT_METHODS = new Set(["request_payment", "approve_payment", "approve_payments", "cancel_payment", "settle", "mark_settled", "mark_settlement_failed", "close_settlement", "sync_dao_proposal", "resolve_dao_proposal"]);
+let txIndex = { at: 0, treasury: "", receipts: [] };
+async function loadTxIndex() {
+  const t = settings.treasury; if (!t) return txIndex;
+  if (txIndex.treasury === t && Date.now() - txIndex.at < 60000) return txIndex;
+  const receipts = [];
+  try {
+    for (let page = 1; page <= 3; page++) {
+      const r = await fetch(`${NB_API[settings.network]}/v1/account/${encodeURIComponent(t)}/txns?per_page=100&page=${page}&order=desc`);
+      if (!r.ok) break;
+      const j = await r.json(); const rows = j.txns || [];
+      for (const x of rows) { const m = (x.actions || []).map((a) => a.method).filter((m) => PAYMENT_METHODS.has(m)); if (m.length && x.outcomes?.status !== false) receipts.push({ hash: x.transaction_hash, ts: Number(x.block_timestamp || 0), methods: m, by: x.predecessor_account_id }); }
+      if (rows.length < 100) break;
+    }
+    txIndex = { at: Date.now(), treasury: t, receipts };
+  } catch (e) { console.warn("nearblocks:", e.message); }
+  return txIndex;
+}
+let txClaimed = new Set(); // receipts already shown on a row of this render, so a settle is not listed twice
+function onChainCell(r) {
+  const near = (hash, label) => `<a href="${EXPLORER[settings.network]}/txns/${encodeURIComponent(hash)}" target="_blank" rel="noopener" title="${esc(hash)}">${esc(label)}</a>`;
+  const seen = new Set(), parts = [];
+  // a settlement in between: the one successful settle by the executor after the request and before the mark
+  const c = Number(r.created_at) || 0, u = Number(r.updated_at) || 0;
+  if (["Settled", "Settling"].includes(r.status) && c && u > c) {
+    const x = txIndex.receipts.filter((x) => x.methods.includes("settle") && x.ts > c + 1e9 && x.ts < u - 1e9 && !txClaimed.has(x.hash)).sort((a, b) => b.ts - a.ts)[0];
+    if (x) { txClaimed.add(x.hash); seen.add(x.hash); parts.push({ ts: x.ts, html: near(x.hash, "settle") }); }
+  }
+  // the contract's timestamps arrive as JSON numbers (rounded past the microsecond): match a receipt within two seconds
+  for (const t of [Number(r.created_at) || 0, Number(r.updated_at) || 0]) {
+    if (!t) continue;
+    for (const x of txIndex.receipts) if (Math.abs(x.ts - t) < 2e9 && !seen.has(x.hash)) { seen.add(x.hash); parts.push({ ts: x.ts, html: near(x.hash, x.methods[0].replace(/_/g, " ")) }); }
+  }
+  parts.sort((a, b) => a.ts - b.ts);
+  if (r.dest_tx && !r.dest_tx.startsWith("0xstub")) { const base = DEST_EXPLORER[r.chain]; parts.push({ ts: Infinity, html: base ? `<a href="${base}${encodeURIComponent(r.dest_tx)}" target="_blank" rel="noopener" title="${esc(r.dest_tx)}">${esc(r.chain)} tx</a>` : esc(`${r.chain} ${r.dest_tx.slice(0, 10)}...`) }); }
+  else if (r.dest_tx) parts.push({ ts: Infinity, html: `<span class="muted">${esc(r.chain)} stub</span>` });
+  if (!parts.length && txIndex.treasury !== settings.treasury) return `<span class="muted">reading...</span>`;
+  return parts.map((x) => x.html).join(", ") || `<span class="muted">-</span>`;
+}
 function renderByVendor() {
   const { byVendor } = reportRows();
   const groups = byVendor.filter((v) => v.rows.length).sort((a, b) => b.gross - a.gross);
+  txClaimed = new Set();
   $("#anByVendor").innerHTML = groups.map((v, i) => `<details class="vgroup"${i < 3 ? " open" : ""}><summary>
     <span><span class="k">vendor</span><span class="n"><b>${flagImg(v.country)}${esc(v.name)}</b>${v.tax_id ? ` <span class="mono muted">${esc(v.tax_id)}</span>` : ""}</span></span>
     <span><span class="k">payments</span><span class="n">${v.rows.length}${v.refused || v.held ? ` <span class="muted">(${[v.held ? `${v.held} held` : "", v.refused ? `${v.refused} refused` : ""].filter(Boolean).join(", ")})</span>` : ""}</span></span>
     <span><span class="k">gross paid</span><span class="n mono">${v.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
     <span class="hide-sm"><span class="k">withheld${v.rate ? ` ${v.rate}%` : ""}</span><span class="n mono">${v.withheld ? v.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "-"}</span></span>
     <span class="hide-sm"><span class="k">net to vendor</span><span class="n mono">${v.net.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span></summary>
-    <div class="wrap"><table><thead><tr><th>#</th><th>date</th><th>invoice</th><th>gross</th><th>withheld</th><th>net</th><th>status</th><th>order</th></tr></thead><tbody>${v.rows.map((r) => `<tr><td class="mono">${num(r.id)}</td><td class="mono">${r.date}</td><td class="mono">${esc(r.invoice)}</td><td class="mono">${r.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td><td class="mono">${r.withheld ? r.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td class="mono">${r.spend ? r.net.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td><span class="pill ${esc(r.status)}">${esc(r.status)}</span>${r.reason ? `<span class="mono muted"> ${esc(r.reason)}</span>` : ""}</td><td class="mono">${r.order === "" ? `<span class="muted">-</span>` : r.order}</td></tr>`).join("")}</tbody></table></div></details>`).join("") || `<p class="muted">no payments yet</p>`;
+    <div class="wrap"><table><thead><tr><th>#</th><th>date</th><th>invoice</th><th>gross</th><th>withheld</th><th>net</th><th>status</th><th>order</th><th>on chain</th></tr></thead><tbody>${v.rows.map((r) => `<tr><td class="mono">${num(r.id)}</td><td class="mono">${r.date}</td><td class="mono">${esc(r.invoice)}</td><td class="mono">${r.gross.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td><td class="mono">${r.withheld ? r.withheld.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td class="mono">${r.spend ? r.net.toLocaleString("en-US", { minimumFractionDigits: 2 }) : `<span class="muted">-</span>`}</td><td><span class="pill ${esc(r.status)}">${esc(r.status)}</span>${r.reason ? `<span class="mono muted"> ${esc(r.reason)}</span>` : ""}</td><td class="mono">${r.order === "" ? `<span class="muted">-</span>` : r.order}</td><td class="mono" style="font-size:13px">${onChainCell(r)}</td></tr>`).join("")}</tbody></table></div></details>`).join("") || `<p class="muted">no payments yet</p>`;
+  if (txIndex.treasury !== settings.treasury || Date.now() - txIndex.at >= 60000) loadTxIndex().then(() => { if (txIndex.treasury === settings.treasury) renderByVendor(); });
 }
 function renderCharts() {
   const { byVendor, months, rows } = reportRows();
