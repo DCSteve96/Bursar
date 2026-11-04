@@ -50,6 +50,12 @@ export async function setup(o: Opts) {
   const rpc = process.env.NEAR_RPC ?? (o.network === "mainnet" ? "https://free.rpc.fastnear.com" : "https://test.rpc.fastnear.com");
   const provider = new JsonRpcProvider({ url: rpc });
   const root = new Account(o.root, provider, await loadSigner(o.network, o.root));
+  const wasmDir = resolve(process.cwd(), "..", "contracts");
+  // The contracts must be built first: say so before any account is created, not after six of them are
+  for (const [dir, file] of [["policy", "bursar_policy.wasm"], ["test-usdc", "test_usdc.wasm"]]) {
+    const wasm = join(wasmDir, dir, "target", "wasm32-unknown-unknown", "release", file);
+    await readFile(wasm).catch(() => { throw new Error(`${file} not found: build it first with (cd contracts/${dir} && cargo build --release --target wasm32-unknown-unknown)`); });
+  }
   const sub = (name: string) => `${name}.${o.root}`;
   const names = {
     treasury: sub(`${o.prefix}treasury`),
@@ -91,7 +97,6 @@ export async function setup(o: Opts) {
   await create(names.vendorConsultant, 0.1); // a freelancer: the accountant sets a 20% withholding on this vendor
 
   // 2. test USDC on testnet
-  const wasmDir = resolve(process.cwd(), "..", "contracts");
   if (o.network === "testnet" && !o.usdc) {
     const usdc = await create(names.usdc, 3.5);
     const code = await readFile(join(wasmDir, "test-usdc", "target", "wasm32-unknown-unknown", "release", "test_usdc.wasm"));
