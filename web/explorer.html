@@ -67,6 +67,7 @@
 
 <footer>Bursar is software, not a payment service. Funds stay in each company's own contract, with the company's keys.</footer>
 
+<script src="contracts/builds.js"></script>
 <script>
 // Two public endpoints, tried in turn, each twice: a free endpoint drops or throttles a burst of requests now and then,
 // and this page asks every treasury four questions. Reads only, so any node will do.
@@ -112,7 +113,7 @@ async function view(contract, method, args = {}) {
 // A registry entry can point at any account. Only a contract whose code is a Bursar policy build is a treasury:
 // the code hash the RPC reports must be in contracts/builds.json (every build ever shipped, by date and commit).
 let KNOWN_BUILDS = null;
-async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
+async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = window.BURSAR_BUILDS || {}; } } return KNOWN_BUILDS; } // a page opened as a file cannot fetch: contracts/builds.js carries the same list
 async function codeHash(account) {
   const j = await rpcPost({ request_type: "view_account", finality: "final", account_id: account });
   if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;

@@ -19,3 +19,6 @@ for line in reversed([l for l in revs if l.strip()]):
 with open(os.path.join(ROOT, WASM), "rb") as f: builds[b58(hashlib.sha256(f.read()).digest())] = "current"
 out = os.path.join(ROOT, "web/contracts/builds.json")
 json.dump(builds, open(out, "w"), indent=1); print(f"{len(builds)} builds -> {out}")
+# the same list as a script, for pages opened as files (fetch cannot read a local JSON; a script tag can)
+js = os.path.join(ROOT, "web/contracts/builds.js")
+open(js, "w").write("window.BURSAR_BUILDS = " + json.dumps(builds) + ";\n"); print(f"{len(builds)} builds -> {js}")

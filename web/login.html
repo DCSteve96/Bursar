@@ -98,6 +98,7 @@
   <div id="kErr" class="err" hidden style="text-align:center"></div>
 </div></div>
 
+<script src="contracts/builds.js"></script>
 <script type="importmap">
 {"integrity":{
  "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm":"sha384-HwLfgX1nkNYwI0ie5ymVPmxNsDF9AddN4Ji0dZOxVA1NWrArBQjSBUfuShgREZcu",
@@ -137,7 +138,7 @@ async function view(network, contract, method, args = {}) {
 }
 // A registry entry can point at any account; only a contract whose code hash is a Bursar build (contracts/builds.json) is listed.
 let KNOWN_BUILDS = null;
-async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = {}; } } return KNOWN_BUILDS; }
+async function knownBuilds() { if (!KNOWN_BUILDS) { try { KNOWN_BUILDS = await (await fetch("contracts/builds.json")).json(); } catch { KNOWN_BUILDS = window.BURSAR_BUILDS || {}; } } return KNOWN_BUILDS; } // a page opened as a file cannot fetch: contracts/builds.js carries the same list
 async function codeHash(network, account) {
   const j = await rpcPost(network, { request_type: "view_account", finality: "final", account_id: account });
   if (j.error) throw new Error(j.error.data?.message ?? j.error.message); return j.result.code_hash;
