@@ -163,8 +163,9 @@ const connect = () => {
   }
   return connector;
 };
-const showExt = (ok) => { const ext = $("#wExt"); ext.textContent = ok ? "Meteor extension detected: it is listed as \"Meteor Wallet (extension)\"; the plain entry is the web wallet." : "No Meteor extension seen on this page: the Meteor entry opens the web wallet. If you have the extension, check it is enabled and unlocked, then press the button again."; ext.hidden = false; };
+const showExt = (ok) => { const ext = $("#wExt"); if (location.protocol === "file:") { ext.textContent = "Opened as a local file: wallets answer to a web address, so sign in with a wallet on https://bursar.network/login. Here, use throwaway keys, an invite link or a keys file."; ext.hidden = false; return; } ext.textContent = ok ? "Meteor extension detected: it is listed as \"Meteor Wallet (extension)\"; the plain entry is the web wallet." : "No Meteor extension seen on this page: the Meteor entry opens the web wallet. If you have the extension, check it is enabled and unlocked, then press the button again."; ext.hidden = false; };
 
+if (location.protocol === "file:") showExt(false);
 function setNet(n) {
   network = n;
   for (const b of document.querySelectorAll("#net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));

@@ -7,8 +7,7 @@ timeline
     title After the hackathon
     Nov to Dec 2026 : Mainnet pilot with a handful of companies
                     : Email inbox, same approvals as Telegram
-                    : Bulk approvals in the console and from the phone
-                    : Installable phone app (PWA)
+                    : Push notifications on the installed phone app
     Q1 2027 : NEAR Business as the vault behind a treasury
             : Approval chains and spending policies per department
             : Exports for accountants and auditors
@@ -25,8 +24,7 @@ timeline
 
 - **Mainnet pilot.** A handful of companies run a treasury with real USDC, each on its own contract with its own keys. The first cross-chain payouts through NEAR Intents (Base first), watched by hand before the executor is left alone.
 - **Email inbox.** Vendors mail the invoice to the treasury's own address; it lands in the same inbox as Telegram, with the same approvals and the same outcomes. Nothing changes for the contract.
-- **Bulk approvals.** Many invoices waiting means one "approve selected" in the console, and "approve all" on Telegram with a summary before confirming. Each invoice stays a decision of its own on the contract, with its own limits.
-- **Installable app.** The console as a progressive web app: icon on the phone, push notifications for holds and outcomes, the same code.
+- **Push notifications.** The console already installs on a phone (README step 9a) and approves in bulk ("Approve selected" in Attention, "approve all" on Telegram, step 9h). Next, the installed app tells you when an invoice is held or paid, with the same code.
 
 ## Q1 2027: larger companies
 
