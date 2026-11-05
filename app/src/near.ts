@@ -105,6 +105,10 @@ export async function account(id: string): Promise<Account> {
 export async function view<T>(method: string, args: Record<string, unknown> = {}): Promise<T> {
   return (await provider.callFunction({ contractId: config.treasury, method, args })) as T;
 }
+/** The same view on another treasury (a receipt downloaded from the console names the one it was paid on). */
+export async function viewAt<T>(contractId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
+  return (await provider.callFunction({ contractId, method, args })) as T;
+}
 
 export async function call(signer: string, method: string, args: Record<string, unknown>, gasTgas = 100, depositYocto: bigint = 0n) {
   const a = await account(signer);

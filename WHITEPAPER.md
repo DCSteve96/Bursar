@@ -34,7 +34,7 @@ The owner signs in from a browser with any NEAR wallet. The wallet adds a functi
 
 ### 3.2 Reading in an enclave
 
-Invoices are sensitive: amounts, counterparties, bank details. The agent rasterizes the PDF and sends the pages to NEAR AI Cloud, where the model runs inside an Intel TDX trusted execution environment. Before each reading the agent fetches the enclave's attestation; the model's answer comes back as structured JSON with a receipt signed by the enclave over the exact request and response bytes. The receipt is verified by the agent before any claim is made on it, stored next to the payment, and referenced on chain by its hash.
+Invoices are sensitive: amounts, counterparties, bank details. The agent rasterizes the PDF and sends the pages to NEAR AI Cloud, where the model runs inside an Intel TDX trusted execution environment. Before each reading the agent fetches the enclave's attestation; the model's answer comes back as structured JSON with a receipt signed by the enclave over the exact request and response bytes. The receipt is verified by the agent before any claim is made on it, stored next to the payment, and referenced on chain by its attestation reference (model, completion id, hashes of request and response, signer).
 
 Anyone can re-verify a reading later with `bursar verify`, without the API key and without trusting the agent: the signature over the exact bytes, the attestation nonce, the TDX quote's `report_data` binding, the quote against Intel's collateral, and the reference the contract stored. A one-byte change to the receipt fails the check.
 
@@ -80,7 +80,7 @@ The bounds that hold whatever the AI does: the per-payment cap, the daily cap, t
 
 ## 5. Privacy
 
-The invoice is read in an enclave and never leaves it in clear text; the agent keeps the pages only for the time of the reading. On chain the contract stores the claim, not the document: vendor id, normalized invoice number, amount, due date, a hash of the file, the payout seen, flags, and the receipt reference. Companies with a reading relay of their own keep their NEAR AI key and their traffic to themselves. The public explorer shows what a company chose to make public: its treasury's decisions, which are events the contract emits anyway.
+With the company's own NEAR AI key the invoice goes to the enclave over TLS and no Bursar server sees it. The receipt keeps the exact request, the page images included, because those are the bytes the enclave signed: it stays wherever the company keeps its receipts (the agent's folder, the file the console downloads), never on chain. On chain the contract stores the claim, not the document: vendor id, normalized invoice number, amount, due date, a hash of the file, the payout seen, flags, and the receipt reference. Companies with a reading relay of their own keep their NEAR AI key and their traffic to themselves. A NEAR contract's state is public: anyone can read a treasury's payments (vendor id, invoice number, amount, payout) from the chain, and the public dashboard shows them. The explorer leaves vendor names and invoice numbers out of its network view, and a company that needs its payments private needs a private ledger, which this build does not offer.
 
 ## 6. Economics
 
@@ -94,7 +94,7 @@ The unit that scales is the invoice, and its marginal cost is cents of enclave t
 
 ## 8. What exists today
 
-The policy contract (Rust, near-sdk 5, 67 unit tests, three audit rounds), the registry of treasuries, the agent, relayer, executor and MCP server (TypeScript), the web console (wallet sign-in, roles, DAO, encrypted vault, analytics, reports, contract upgrades from the browser), the public explorer and dashboards, the Telegram inbox with approvals from the phone and trusted vendors, independent receipt verification, and a load test of 1,030 invoices from ten invented companies. Live on NEAR testnet; cross-chain settlement through NEAR Intents on mainnet. The README has the step for each.
+The policy contract (Rust, near-sdk 5, 67 unit tests, three internal review rounds), the registry of treasuries, the agent, relayer, executor and MCP server (TypeScript), the web console (wallet sign-in, roles, DAO, encrypted vault, analytics, reports, contract upgrades from the browser), the public explorer and dashboards, the Telegram inbox with approvals from the phone and trusted vendors, independent receipt verification, and a load test of 1,030 invoices from ten invented companies. Live on NEAR testnet; cross-chain settlement through NEAR Intents on mainnet. The README has the step for each.
 
 ## 9. Limits
 
