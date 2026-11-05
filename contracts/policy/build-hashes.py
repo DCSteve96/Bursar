@@ -27,3 +27,8 @@ import base64
 wjs = os.path.join(ROOT, "web/contracts/bursar_policy.wasm.js")
 with open(os.path.join(ROOT, WASM), "rb") as f: open(wjs, "w").write("window.BURSAR_POLICY_WASM = \"" + base64.b64encode(f.read()).decode() + "\";\n")
 print(f"wasm as script -> {wjs}")
+# the recorded readings as one script, for the console opened as a file (same reason)
+import glob
+readings = {os.path.basename(f)[len("receipt-"):-len(".json")]: json.load(open(f)) for f in sorted(glob.glob(os.path.join(ROOT, "web/samples/receipt-*.json")))}
+rjs = os.path.join(ROOT, "web/samples/readings.js")
+open(rjs, "w").write("window.BURSAR_READINGS = " + json.dumps(readings, separators=(",", ":")) + ";\n"); print(f"{len(readings)} readings -> {rjs}")

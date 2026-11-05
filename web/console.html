@@ -1423,7 +1423,9 @@ async function loadSample(name) {
   try {
     if (!settings.treasury) throw new Error("set the treasury account in Settings first (or press \"Use the demo treasury\")");
     step("sample", "wait", `loading samples/receipt-${name}.json`);
-    const [rf, pdfBytes] = await Promise.all([fetch(`samples/receipt-${name}.json`).then((r) => { if (!r.ok) throw new Error(`sample ${r.status}`); return r.json(); }), fetch(`samples/${name}.pdf`).then((r) => r.ok ? r.arrayBuffer() : null)]);
+    // a page opened as a file cannot fetch: the recorded readings are also bundled in samples/readings.js, loaded then
+    const readingFromScript = async () => { if (!window.BURSAR_READINGS) await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "samples/readings.js"; sc.onload = res; sc.onerror = () => rej(new Error("the recorded readings could not be loaded: open this page from a web server or at bursar.network/console")); document.head.appendChild(sc); }); const r = window.BURSAR_READINGS?.[name]; if (!r) throw new Error(`no recorded reading for ${name}`); return r; };
+    const [rf, pdfBytes] = await Promise.all([fetch(`samples/receipt-${name}.json`).then((r) => { if (!r.ok) throw new Error(`sample ${r.status}`); return r.json(); }).catch(readingFromScript), fetch(`samples/${name}.pdf`).then((r) => r.ok ? r.arrayBuffer() : null).catch(() => null)]);
     if (pdfBytes) await rasterize(new Uint8Array(pdfBytes)); else $("#preview").width = 0;
     const r = rf.ai.receipt;
     step("sample", "ok", `recorded reading of ${rf.file}${rf.payment ? `, decided as payment #${rf.payment.id} ${rf.payment.status}` : ""}`);
