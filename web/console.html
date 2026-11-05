@@ -272,7 +272,7 @@
   <div class="pane" id="wizCreate" hidden>
     <div class="eyebrow muted">Step 2 of 3</div>
     <h3 id="wizCreateTitle">Creating your treasury</h3>
-    <p class="muted" id="wizCreateText">About a minute. Bursar asks the testnet faucet for a payer account, deploys the policy contract, writes your company on it, mints test USDC and registers three demo vendors. Nothing to pay.</p>
+    <p class="muted" id="wizCreateText">About a minute. Bursar asks the testnet faucet for a payer account, deploys the policy contract, writes your company on it, mints test USDC and registers four demo vendors. Nothing to pay.</p>
     <ul class="log" id="createSteps"></ul>
     <div id="createErr" class="err" hidden></div>
     <div class="actions" id="wizRetry" hidden><button type="button" class="btn-signal" id="wRetry">Try again</button><button type="button" class="btn-ghost" id="wCancel2">Close</button></div>
@@ -307,7 +307,7 @@
     <div class="grid cols-2">
       <div class="card">
         <div id="startWallet" class="who" hidden style="margin-bottom:16px"><div class="av" id="startAv"></div><div><div class="n" id="startOwner"></div><div class="r">will own the treasury. Bursar pays for the accounts and the contract: nothing to pay.</div></div></div>
-        <p style="margin:0 0 16px" id="startText">This browser becomes the company: it asks the testnet faucet for an account, deploys the policy contract, mints test USDC, registers three vendors and what the company agreed to buy, and creates an agent with one function-call key. Every key is generated here and stays here. About a minute.</p>
+        <p style="margin:0 0 16px" id="startText">This browser becomes the company: it asks the testnet faucet for an account, deploys the policy contract, mints test USDC, registers four vendors and what the company agreed to buy, and creates an agent with one function-call key. Every key is generated here and stays here. About a minute.</p>
         <div class="actions" style="margin:0;align-items:center">
           <button id="create" type="button" class="btn-signal">Create my treasury</button>
           <span class="muted" style="font-size:14px;max-width:46ch" id="startAside">Already have one? Add it in Settings with its keys.</span>
@@ -2318,9 +2318,7 @@ async function topUpFromFaucet(to, step) {
   const helper = `bursar-fund-${toHex(crypto.getRandomValues(new Uint8Array(4)))}.testnet`;
   const key = newKey();
   step("funds", "wait", `asking the testnet faucet for 10 NEAR through ${helper}`);
-  const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: helper, newAccountPublicKey: key.pubStr }) });
-  if (!f.ok) throw new Error(`faucet ${f.status}: ${(await f.text()).slice(0, 200)}`);
-  for (let i = 0; i < 20 && !(await accountExists(helper)); i++) await new Promise((r) => setTimeout(r, 1500));
+  await faucetAccount(helper, key.pubStr);
   const bal = await nearBalance(helper);
   await sendTx({ signerId: helper, secretKey: key.secretKey, receiverId: to, actions: [A.transfer(bal - NEAR(0.1))] });
   step("funds", "ok", `${(Number(bal - NEAR(0.1)) / 1e24).toFixed(1)} NEAR moved to ${to}`);
@@ -2625,6 +2623,18 @@ const DEMO_VENDORS = [
   // a freelancer whose invoices show a withholding tax: the accountant set 20%, the treasury keeps that share for the state
   { vendor_id: "consultant", name: "Studio Bianchi Consulting", payout: { Near: { account: "consultant.bursar-b48563e6.testnet" } }, monthly_budget: "0", tax_id: "IT05555555555", country: "IT", withholding_bps: 2000 },
 ];
+/** Asks the testnet faucet for an account. The faucet can take 15 seconds and the browser sometimes reports the slow
+ * answer as a failed fetch (CORS, a dropped connection) although the account was created: whatever the answer, the chain
+ * decides, so the page waits for the account for up to 45 seconds before giving up. */
+async function faucetAccount(id, pub) {
+  let why = null;
+  try {
+    const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: id, newAccountPublicKey: pub }) });
+    if (!f.ok) why = `faucet ${f.status}: ${(await f.text()).slice(0, 200)}`;
+  } catch (e) { why = `faucet: ${e.message}`; }
+  for (let i = 0; i < 30; i++) { if (await accountExists(id)) return; await new Promise((r) => setTimeout(r, 1500)); }
+  throw new Error(`${why || "the faucet accepted the request but the account did not appear"}; press the button again (it resumes where it stopped)`);
+}
 async function accountExists(id) { try { const r = await rpc("query", { request_type: "view_account", finality: "final", account_id: id }); return !r.error; } catch { return false; } }
 /** Set by login.html when a wallet account signed in and owns no treasury yet: the one created here belongs to it. */
 const walletOwner = () => { try { return JSON.parse(localStorage.getItem("bursar.walletOwner") || "null"); } catch { return null; } };
@@ -2634,7 +2644,7 @@ function reflectWalletOwner() {
   if (!wo) return;
   $("#startOwner").textContent = wo.account; $("#startAv").textContent = wo.account.slice(0, 2).toUpperCase();
   $("#startTitle").textContent = "Your company's treasury, created at first sign-in.";
-  $("#startText").textContent = "Bursar asks the testnet faucet for a payer account, deploys the policy contract with your wallet as its owner, mints test USDC, registers three vendors and what the company agreed to buy, and creates an agent with one function-call key. About a minute. Afterwards the wallet adds a key for this treasury to the browser.";
+  $("#startText").textContent = "Bursar asks the testnet faucet for a payer account, deploys the policy contract with your wallet as its owner, mints test USDC, registers four vendors and what the company agreed to buy, and creates an agent with one function-call key. About a minute. Afterwards the wallet adds a key for this treasury to the browser.";
   $("#startAside").textContent = "Only your wallet will be able to change vendors, limits and approvals.";
   $("#startOwned").textContent = "the policy contract, owned by your wallet account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person approves above 2,000";
 }
@@ -2720,7 +2730,7 @@ async function createTreasuryWithWallet(company) {
       const caps = network === "mainnet" ? { per_payment_cap: "1000000000", daily_cap: "5000000000", approval_threshold: "500000000" } : { per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
       // the payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below)
       const init = { owner: payer, agent, executor, dao: null, usdc: usdcContract, ...caps };
-      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5.6)), A.deployContract(wasm), A.functionCall("new", init, 50)]);
+      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(6)), A.deployContract(wasm), A.functionCall("new", init, 50)]);
       step("contract", "ok", `policy contract live at ${treasury}, with no access key`, t1.hash);
     }
     if (company?.name) {
@@ -2808,10 +2818,7 @@ async function createTreasury(company) {
     if (await accountExists(root)) step("account", "ok", `${root} already exists; resuming`);
     else {
       step("account", "wait", `asking the testnet faucet for ${root}`);
-      const f = await fetch("https://helper.nearprotocol.com/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newAccountId: root, newAccountPublicKey: rootKey.pubStr }) });
-      if (!f.ok) throw new Error(`faucet ${f.status}: ${(await f.text()).slice(0, 200)}`);
-      for (let i = 0; i < 20 && !(await accountExists(root)); i++) await new Promise((r) => setTimeout(r, 1500));
-      if (!(await accountExists(root))) throw new Error("the faucet accepted the request but the account did not appear; press the button again");
+      await faucetAccount(root, rootKey.pubStr);
       step("account", "ok", `${root} created with 10 NEAR; its key stays in this browser`);
     }
     if (await accountExists(treasury)) step("contract", "ok", `policy contract already live at ${treasury}`);
@@ -2822,7 +2829,7 @@ async function createTreasury(company) {
       // The payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below).
       const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
       // no access key on the treasury, ever: the contract alone governs the account, and the owner upgrades it through `upgrade`
-      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(5)), A.deployContract(wasm), A.functionCall("new", init, 50)]);
+      const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(6)), A.deployContract(wasm), A.functionCall("new", init, 50)]);
       step("contract", "ok", `policy contract live at ${treasury}, with no access key`, t1.hash);
     }
     if (company?.name) {
@@ -3342,5 +3349,6 @@ loadSettings();
 if (!(await acceptInvite())) { route(); loadTreasury(); }
 </script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
+<script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>
 </body>
 </html>

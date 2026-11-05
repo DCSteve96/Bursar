@@ -108,7 +108,11 @@
 <script type="module">
 import { ed25519 } from "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/ed25519.js/+esm";
 import { NearConnector } from "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/cdn/hot-connect.es.js";
-import { registerMeteorExtension } from "./meteor.js";
+// meteor.js is loaded on demand: opened as a local file the browser refuses relative module imports, and a static
+// import would take the whole page down with it (keys file, invite and throwaway doors included).
+const registerMeteorExtension = (ms) => import("./meteor.js").then((m) => m.registerMeteorExtension(ms)).catch(() => false);
+// Served pages use the short address; a local file needs the real file name.
+const CONSOLE = location.protocol === "file:" ? "console.html" : "console";
 const $ = (s) => document.querySelector(s);
 // Public RPC endpoints, tried in order: a free endpoint can refuse or drop a request for a moment, and a signed-in owner
 // should not see "Failed to fetch" for that. Read-only pages (this one) can fall back freely.
@@ -203,7 +207,7 @@ async function openTreasury(treasury, label, owner) {
     for (const [f, v] of Object.entries(profile)) localStorage.setItem("bursar." + f, v);
     const i = profiles.findIndex((p) => p.treasury === treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
-    location.href = "console#overview";
+    location.href = `${CONSOLE}#overview`;
   } catch (e) { $("#bErr").textContent = `the wallet did not add the key: ${e.message || e}`; $("#bErr").hidden = false; $("#keyWait").hidden = true; for (const b of document.querySelectorAll("#list button")) b.disabled = false; }
 }
 
@@ -238,7 +242,7 @@ async function afterIdentify(account) {
       $("#none").hidden = false;
       $("#createGo").addEventListener("click", () => {
         try { localStorage.setItem("bursar.walletOwner", JSON.stringify({ network, account })); } catch {}
-        location.href = "console#start";
+        location.href = `${CONSOLE}#start`;
       });
     }
   } catch (e) { $("#lookup").hidden = true; $("#bErr").textContent = e.message; $("#bErr").hidden = false; }
@@ -246,7 +250,7 @@ async function afterIdentify(account) {
 // A wallet connected earlier in this browser: skip straight to its treasuries.
 connect().getConnectedWallet().then(({ accounts }) => { if (accounts?.length) afterIdentify(accounts[0].accountId); }).catch(() => {});
 
-$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = "console" + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
+$("#iGo").addEventListener("click", () => { const m = $("#iLink").value.match(/#invite=[A-Za-z0-9_-]+/); if (m) location.href = CONSOLE + m[0]; else { $("#iErr").textContent = "that does not look like an invite link"; $("#iErr").hidden = false; } });
 $("#kFile").addEventListener("change", async (e) => {
   $("#kErr").hidden = true;
   try {
@@ -257,10 +261,11 @@ $("#kFile").addEventListener("change", async (e) => {
     let profiles = []; try { profiles = JSON.parse(localStorage.getItem("bursar.profiles") || "[]"); } catch {}
     const i = profiles.findIndex((p) => p.treasury === profile.treasury); if (i >= 0) profiles[i] = profile; else profiles.push(profile);
     localStorage.setItem("bursar.profiles", JSON.stringify(profiles));
-    location.href = "console#overview";
+    location.href = `${CONSOLE}#overview`;
   } catch (err) { $("#kErr").textContent = err.message; $("#kErr").hidden = false; }
 });
 </script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
+<script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>
 </body>
 </html>
