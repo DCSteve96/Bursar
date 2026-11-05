@@ -42,7 +42,7 @@ A company can run its own reading relay (a small Cloudflare Worker that holds it
 
 ### 3.3 The policy
 
-The contract applies, in order, rules the owner wrote down:
+The contract applies rules the owner wrote down. A refusal stops at the first rule broken; holds add up, and every reason for a hold is recorded together (`no_order+identity_mismatch`):
 
 1. The vendor is in the allowlist and active.
 2. The payout printed on the invoice equals the payout the owner recorded. Otherwise the payment is blocked with reason `payout_changed`.
@@ -70,7 +70,7 @@ Invoices reach the treasury by file drop, by a Telegram bot, or through an MCP s
 What Bursar trusts, and why it is acceptable:
 
 - **The enclave** for the confidentiality of the invoice and the integrity of the reading. The trust is checkable: attestation before every reading, a signed receipt after, independent verification by anyone. A wrong reading can still happen; it meets the policy, which cannot be persuaded.
-- **The contract** for the decision. It is public, small, unit-tested rule by rule (67 tests), and audited in three independent rounds with every finding reproduced by a test before its fix. Its builds are listed with their hashes, and the explorer and the sign-in page verify a treasury's code hash against that list.
+- **The contract** for the decision. It is public, small, unit-tested rule by rule (67 tests), and reviewed in three internal rounds by separate AI reviewer agents (not a third-party audit), with every finding reproduced by a test before its fix. Its builds are listed with their hashes, and the explorer and the sign-in page verify a treasury's code hash against that list.
 - **The owner's wallet** for the sensitive methods. Ownership moves in two steps, an offer by the owner and an acceptance by the new owner, so a wallet talked into one signature gives nothing away.
 - **The executor** for nothing but timing: it brings a quote 1Click signed, and the contract checks the quote's recipient, amount, asset and expiry itself.
 
