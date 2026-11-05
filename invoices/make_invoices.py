@@ -172,4 +172,10 @@ invoice(os.path.join(a.out, "09-studio-bianchi-0044.pdf"), "Studio Bianchi Consu
         [("Brand strategy workshop, two days", "1,000.00")], "1,000.00",
         [f"Pay to NEAR account: {a.near_vendor_consultant}", "Token: USDC"], withholding="200.00", net="800.00")
 
+# 10. A second DesignCo invoice, no purchase order: held no_order; approved by the owner it is Queued, for the automatic settlement step
+invoice(os.path.join(a.out, "10-designco-1108.pdf"), "DesignCo", "Prinsengracht 220, Amsterdam", "invoices@designco.example",
+        "DC-1108", "2026-11-05", "2026-11-19",
+        [("Social media kit, 12 formats", "300.00")], "300.00",
+        [f"Pay to base address: {a.base_address}", "Token: USDC on Base"])
+
 print("written to", a.out)

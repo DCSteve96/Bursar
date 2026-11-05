@@ -82,7 +82,7 @@ export async function verifyReceipt(rf: ReceiptFile, opts: { collateral?: boolea
   if (!r.signed_text || !r.signature || !r.signing_address) {
     add("signature", false, "the gateway returned no signature for this completion (receipt was taken without one)");
   } else {
-    add("signed_text", r.signed_text === expected, r.signed_text === expected ? `signed text is ${expected.slice(0, 40)}...` : `gateway signed "${r.signed_text.slice(0, 60)}" but the bytes give "${expected.slice(0, 60)}"`);
+    add("signed_text", r.signed_text === expected, r.signed_text === expected ? `signed text is ${expected.slice(0, 40)}...` : `gateway signed "${r.signed_text}" but the bytes give "${expected}"`);
     // 2. recover signer
     try {
       const rec = recoverAddress(r.signed_text, r.signature);

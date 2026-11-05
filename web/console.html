@@ -1423,7 +1423,9 @@ async function loadSample(name) {
   try {
     if (!settings.treasury) throw new Error("set the treasury account in Settings first (or press \"Use the demo treasury\")");
     step("sample", "wait", `loading samples/receipt-${name}.json`);
-    const [rf, pdfBytes] = await Promise.all([fetch(`samples/receipt-${name}.json`).then((r) => { if (!r.ok) throw new Error(`sample ${r.status}`); return r.json(); }), fetch(`samples/${name}.pdf`).then((r) => r.ok ? r.arrayBuffer() : null)]);
+    // a page opened as a file cannot fetch: the recorded readings are also bundled in samples/readings.js, loaded then
+    const readingFromScript = async () => { if (!window.BURSAR_READINGS) await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "samples/readings.js"; sc.onload = res; sc.onerror = () => rej(new Error("the recorded readings could not be loaded: open this page from a web server or at bursar.network/console")); document.head.appendChild(sc); }); const r = window.BURSAR_READINGS?.[name]; if (!r) throw new Error(`no recorded reading for ${name}`); return r; };
+    const [rf, pdfBytes] = await Promise.all([fetch(`samples/receipt-${name}.json`).then((r) => { if (!r.ok) throw new Error(`sample ${r.status}`); return r.json(); }).catch(readingFromScript), fetch(`samples/${name}.pdf`).then((r) => r.ok ? r.arrayBuffer() : null).catch(() => null)]);
     if (pdfBytes) await rasterize(new Uint8Array(pdfBytes)); else $("#preview").width = 0;
     const r = rf.ai.receipt;
     step("sample", "ok", `recorded reading of ${rf.file}${rf.payment ? `, decided as payment #${rf.payment.id} ${rf.payment.status}` : ""}`);
@@ -1718,8 +1720,8 @@ $("#syncBalance").addEventListener("click", async () => {
 const autoTried = {}; let autoBusy = false;
 const autoSettleOn = () => { try { return localStorage.getItem(`bursar.autoSettle.${settings.treasury}`) === "1"; } catch { return false; } };
 async function autoSettleTick() {
-  if (autoBusy || !autoSettleOn() || !settings.executorKey || !state.payments) return;
-  if (state.roles?.[2] && settings.executor !== state.roles[2]) { $("#attnErr").textContent = `automatic settlement is on, but the executor key in this browser is for ${settings.executor} and the treasury's executor is ${state.roles[2]}: get that key from the vault (admit this device from the one that holds it), or replace the executor from this device in Settings, Keys`; $("#attnErr").hidden = false; return; }
+  if (autoBusy || !autoSettleOn() || !executorSigner() || !state.payments) return;
+  if (state.roles?.[2] && executorSigner().signerId !== state.roles[2]) { $("#attnErr").textContent = `automatic settlement is on, but the executor key in this browser is for ${executorSigner().signerId} and the treasury's executor is ${state.roles[2]}: get that key from the vault (admit this device from the one that holds it), or replace the executor from this device in Settings, Keys`; $("#attnErr").hidden = false; return; }
   const next = state.payments.filter((p) => p.status === "Queued" && (autoTried[p.id] ?? 0) < 3 && state.vendors.some(([vid, v]) => vid === p.vendor_id && "Chain" in v.payout))[0];
   if (!next) return;
   autoBusy = true; autoTried[next.id] = (autoTried[next.id] ?? 0) + 1;
@@ -1729,12 +1731,12 @@ async function autoSettleTick() {
 }
 function renderAutoSettle() {
   const on = autoSettleOn(); const row = $("#autoSettleRow");
-  row.hidden = !(settings.executor && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB)); row.classList.toggle("on", on);
+  row.hidden = !(executorSigner() && (settings.network === "mainnet" || INTENTS_STUB)); row.classList.toggle("on", on);
   $("#autoSettle").setAttribute("aria-checked", on ? "true" : "false");
   $("#autoSettleTitle").textContent = on ? "Automatic settlement is on" : "Automatic settlement is off";
-  const staleExec = !!(state.roles?.[2] && settings.executor && settings.executor !== state.roles[2]);
+  const staleExec = !!(state.roles?.[2] && executorSigner() && executorSigner().signerId !== state.roles[2]);
   $("#autoSettleTitle").textContent = staleExec ? "This browser cannot settle: its executor key is stale" : $("#autoSettleTitle").textContent;
-  $("#autoSettleNote").textContent = staleExec ? `The key here is for ${settings.executor}; the treasury's executor is ${state.roles[2]}. Open the vault on the device that holds that key and admit this one, or replace the executor from this device in Settings, Keys.` : on ? "While this page is open it acts as the executor: every 30 seconds it takes the next queued payment, asks 1Click for a quote, checks the signature and sends it to the contract, which checks everything again before moving the USDC. Nothing is confirmed by hand. The same loop runs on a server with npm run executor." : "Queued payments wait for you to press Settle via Intents on each one. Turn this on and the page settles them by itself while it stays open.";
+  $("#autoSettleNote").textContent = staleExec ? `The key here is for ${executorSigner()?.signerId}; the treasury's executor is ${state.roles[2]}. Open the vault on the device that holds that key and admit this one, or replace the executor from this device in Settings, Keys.` : on ? "While this page is open it acts as the executor: every 30 seconds it takes the next queued payment, asks 1Click for a quote, checks the signature and sends it to the contract, which checks everything again before moving the USDC. Nothing is confirmed by hand. The same loop runs on a server with npm run executor." : "Queued payments wait for you to press Settle via Intents on each one. Turn this on and the page settles them by itself while it stays open.";
 }
 $("#autoSettle").addEventListener("click", () => { const on = !autoSettleOn(); try { localStorage.setItem(`bursar.autoSettle.${settings.treasury}`, on ? "1" : "0"); } catch {} renderAutoSettle(); if (on) autoSettleTick(); });
 setInterval(() => { if (!document.hidden) autoSettleTick(); }, 30000);
@@ -1750,7 +1752,7 @@ function renderAttention() {
   attnPicked();
   $("#attnDaoRow").hidden = !(dao() && !!settings.ownerKey && held().some((p) => p.dao_proposal_id !== null));
   $("#attnBlocked tbody").innerHTML = state.payments.filter((p) => p.status === "Blocked" || p.status === "Cancelled").slice().reverse().map((p) => `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td>${statusPill(p)}<div class="muted" style="font-size:13px">${why(p)}</div></td><td>${(p.flags || []).map((f) => `<span class="flag">${esc(f)}</span>`).join("") || "<span class=muted>none</span>"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">nothing refused</td></tr>`;
-  $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}${p.status === "Queued" && settings.ownerKey && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB) ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-signal small act" data-act="settleNow" data-id="${num(p.id)}">Settle via Intents</button></div>` : ""}${p.status === "Settling" && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB) ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-signal small act" data-act="settleCheck" data-id="${num(p.id)}">Check status</button></div>` : ""}${p.status === "Settling" && settings.ownerKey ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-ghost small act" data-act="closeDelivered" data-id="${num(p.id)}">Mark delivered</button> <button type="button" class="btn-ghost small act" data-act="closeFailed" data-id="${num(p.id)}">Not delivered</button></div>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
+  $("#attnQueued tbody").innerHTML = state.payments.filter((p) => ["Queued", "Settling"].includes(p.status)).slice().reverse().map((p) => { const v = state.vendors.find(([id]) => id === p.vendor_id)?.[1]; return `<tr><td>${num(p.id)}</td><td class="mono">${esc(p.vendor_id)}</td><td class="mono">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td class="mono">${esc(v ? payoutText(v.payout) : "")}${p.status === "Settling" ? ` (settling, deposit ${esc(p.deposit_address)})` : ""}${p.status === "Queued" && settings.ownerKey && executorSigner() && (settings.network === "mainnet" || INTENTS_STUB) ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-signal small act" data-act="settleNow" data-id="${num(p.id)}">Settle via Intents</button></div>` : ""}${p.status === "Settling" && settings.executorKey && (settings.network === "mainnet" || INTENTS_STUB) ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-signal small act" data-act="settleCheck" data-id="${num(p.id)}">Check status</button></div>` : ""}${p.status === "Settling" && settings.ownerKey ? `<div class="acts" style="margin-top:6px"><button type="button" class="btn-ghost small act" data-act="closeDelivered" data-id="${num(p.id)}">Mark delivered</button> <button type="button" class="btn-ghost small act" data-act="closeFailed" data-id="${num(p.id)}">Not delivered</button></div>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">nothing queued</td></tr>`;
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button.act"); if (!b) return;
@@ -1818,7 +1820,16 @@ async function oneClick(path, body) {
   if (!r.ok) throw new Error(`1Click ${path} ${first}${msg(r, j)}${r.status === 400 && /not available/i.test(j.message || "") && !settings.intentsKey ? ". Since 27 October 2026 1Click quotes need a partner key: get one at partners.near-intents.org and paste it in Settings as NEAR Intents API key" : ""}`);
   return j;
 }
-const executorSend = (method, args, gasTgas = 100) => sendTx({ signerId: settings.executor, secretKey: settings.executorKey, receiverId: settings.treasury, actions: [A.functionCall(method, args, gasTgas, 0n)] });
+/** The policy contract's wasm: fetched from contracts/, or, on a page opened as a file (fetch refuses file URLs), loaded
+ *  as the script contracts/bursar_policy.wasm.js that carries the same bytes in base64 (build-hashes.py writes both). */
+async function policyWasm() {
+  try { const r = await fetch("contracts/bursar_policy.wasm"); if (r.ok) return new Uint8Array(await r.arrayBuffer()); } catch {}
+  if (!window.BURSAR_POLICY_WASM) await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "contracts/bursar_policy.wasm.js"; sc.onload = res; sc.onerror = () => rej(new Error("the policy contract could not be loaded: open this page from a web server (python3 -m http.server in web/) or at bursar.network/console")); document.head.appendChild(sc); });
+  return unb64(window.BURSAR_POLICY_WASM);
+}
+/** Who signs as the executor here: the executor key, or the owner's full key when the contract names the owner as its executor (a treasury made with throwaway keys). */
+const executorSigner = () => settings.executor && settings.executorKey ? { signerId: settings.executor, secretKey: settings.executorKey } : state.roles?.[2] && state.roles[2] === settings.owner && settings.ownerKey && settings.ownerKeyKind !== "wallet" ? { signerId: settings.owner, secretKey: settings.ownerKey } : null;
+const executorSend = (method, args, gasTgas = 100) => { const s = executorSigner(); if (!s) throw new Error("no executor key in this browser"); return sendTx({ ...s, receiverId: settings.treasury, actions: [A.functionCall(method, args, gasTgas, 0n)] }); };
 /** The bytes 1Click signed for a quote: its request merged with its answer and a timestamp, keys sorted
  *  (json-stable-stringify), the fields its SDK keeps. The contract hashes exactly this string. */
 const QUOTE_REQ = ["dry", "swapType", "slippageTolerance", "originAsset", "depositType", "destinationAsset", "amount", "refundTo", "refundType", "recipient", "recipientType", "deadline"];
@@ -1846,8 +1857,9 @@ const STUB_SEED = new Uint8Array(32).fill(7); // the test signer the contract's 
 async function settleNow(id, auto = false) {
   const p = state.payments.find((x) => x.id === id); const v = state.vendors.find(([vid]) => vid === p?.vendor_id)?.[1];
   if (!p || !v || !("Chain" in v.payout)) throw new Error("not a queued cross-chain payment");
-  if (!settings.executor || !settings.executorKey) throw new Error("the executor account and key are not in Settings");
-  if (state.roles?.[2] && settings.executor !== state.roles[2]) throw new Error(`the executor key in this browser is for ${settings.executor}, but the treasury's executor is ${state.roles[2]}: get that key from the vault (admit this device from the one that holds it), or replace the executor from this device in Settings, Keys`);
+  const execSigner = executorSigner();
+  if (!execSigner) throw new Error("the executor account and key are not in Settings");
+  if (state.roles?.[2] && execSigner.signerId !== state.roles[2]) throw new Error(`the executor key in this browser is for ${execSigner.signerId}, but the treasury's executor is ${state.roles[2]}: get that key from the vault (admit this device from the one that holds it), or replace the executor from this device in Settings, Keys`);
   const { chain, address } = v.payout.Chain; const dest = USDC_ASSET[chain]; if (!dest) throw new Error(`no USDC asset id for ${chain}`);
   const net = BigInt(p.amount) - BigInt(p.withheld || "0");
   let signer = await view(settings.treasury, "get_quote_signer").catch(() => null);
@@ -2287,7 +2299,7 @@ $("#upgradeBtn").addEventListener("click", async () => {
   const b = $("#upgradeBtn"); b.disabled = true; $("#upgradeErr").hidden = true;
   try {
     if (!(await ask({ eyebrow: "Upgrade", title: "Deploy the current Bursar build onto this treasury?", note: "The state and every payment are kept. The wallet will ask you to sign.", ok: "Deploy" }))) return;
-    const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
+    const wasm = await policyWasm();
     let bin = ""; for (let i = 0; i < wasm.length; i += 0x8000) bin += String.fromCharCode.apply(null, wasm.subarray(i, i + 0x8000));
     await ownerCall("upgrade", { code: btoa(bin) }, 150);
     await loadTreasury();
@@ -2702,8 +2714,8 @@ async function createTreasuryWithWallet(company) {
     const send = (receiverId, actions) => sendTx({ signerId: payer, secretKey: payerKey.secretKey, receiverId, actions });
     if (await accountExists(treasury)) step("contract", "ok", `policy contract already live at ${treasury}`);
     else {
-      step("contract", "wait", "fetching the policy contract (472 KB)");
-      const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
+      step("contract", "wait", "fetching the policy contract");
+      const wasm = await policyWasm();
       step("contract", "wait", `deploying to ${treasury}`);
       const caps = network === "mainnet" ? { per_payment_cap: "1000000000", daily_cap: "5000000000", approval_threshold: "500000000" } : { per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
       // the payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below)
@@ -2804,8 +2816,8 @@ async function createTreasury(company) {
     }
     if (await accountExists(treasury)) step("contract", "ok", `policy contract already live at ${treasury}`);
     else {
-      step("contract", "wait", "fetching the policy contract (303 KB)");
-      const wasm = new Uint8Array(await (await fetch("contracts/bursar_policy.wasm")).arrayBuffer());
+      step("contract", "wait", "fetching the policy contract");
+      const wasm = await policyWasm();
       step("contract", "wait", `deploying to ${treasury}`);
       // The payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below).
       const init = { owner: root, agent, executor: root, dao: null, usdc: TUSDC, per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };

@@ -1,5 +1,6 @@
 // MCP server: lets any assistant (Claude, ChatGPT, Codex) drive the treasurer. Submitting an invoice goes
 // through the same agent path, so the assistant has exactly the agent's powers and nothing more.
+import { existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -20,8 +21,9 @@ export async function runMcp() {
     offline: z.boolean().optional().describe("Skip NEAR AI and use the offline parser (demo invoices only)"),
   }, async ({ path, offline }) => {
     // the assistant names files, not arbitrary paths: a PDF under the invoices folder (inbox and samples) or the working directory
-    const full = resolve(path);
-    const roots = [resolve(config.inbox, ".."), resolve(process.cwd())];
+    let full = resolve(path);
+    if (!existsSync(full) && existsSync(resolve(process.cwd(), "..", path))) full = resolve(process.cwd(), "..", path); // the README names files from the repository root; the server runs in app/
+    const roots = [resolve(config.inbox, ".."), resolve(process.cwd()), resolve(process.cwd(), "..")]; // the invoices folder, the app folder, the repository root
     if (!/\.pdf$/i.test(full) || !roots.some((r) => full === r || full.startsWith(r + sep))) throw new Error(`submit_invoice takes a .pdf under ${roots.join(" or ")}`);
     const r = await processInvoice(full, { offline, direct: !config.relayerAccount && !process.env.BURSAR_RELAYER_URL });
     return text({ paymentId: r.paymentId, status: r.payment?.status, reason: r.payment?.reason, amount: fmtUsdc(r.claim.amount), vendor: r.claim.vendor_id, flags: r.claim.flags, tx: r.txHash });
