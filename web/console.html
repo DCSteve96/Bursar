@@ -1398,6 +1398,14 @@ async function handleFile(file) {
     $("#readErr").textContent = e.message; $("#readErr").hidden = false;
   }
 }
+/** The receipt file offered under the checks: the same shape as the agent's, so `bursar verify` reads it. Before "Request
+ * payment" a recorded reading carries the README treasury's payment; once this treasury decides, the file carries this
+ * treasury's payment and transaction instead (with `treasury` named, which `bursar verify` checks against). */
+function receiptDownload(read, tx, payment, name) {
+  const blob = new Blob([JSON.stringify({ file: read.file, extraction: read.extraction, claim: read.claim, tx, payment, ai: { receipt: read.receipt, attestation: read.attestation } }, null, 2)], { type: "application/json" });
+  const a = $("#dl"); if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(blob); a.download = name || `receipt-${read.file.replace(/\.pdf$/i, "")}.json`;
+}
 /** Everything after a reading, live or recorded: show it, verify the receipt, offer the download, prepare the claim. */
 async function afterRead(read, vendors) {
   const { extraction, receipt, attestation, claim } = read;
@@ -1410,8 +1418,7 @@ async function afterRead(read, vendors) {
   for (const c of v.checks) { const li = document.createElement("li"); const st = c.ok === null ? "skip" : c.ok ? "ok" : "fail"; li.innerHTML = `<span class="st ${st}">${c.ok === null ? "SKIP" : c.ok ? "OK" : "FAIL"}</span><span><b>${esc(c.name)}</b> ${esc(c.detail)}</span>`; checks.appendChild(li); }
   const li = document.createElement("li"); li.innerHTML = `<div class="verdict ${v.ok ? "" : "fail"}">${v.ok ? "Verified: the decision will be made on this model output, inside an attested TEE." : "Not verified: this page will not submit it."}</div>`; checks.appendChild(li);
   $("#receipt").hidden = false;
-  const blob = new Blob([JSON.stringify({ file: read.file, extraction, claim, tx: read.tx ?? null, payment: read.payment ?? null, ai: { receipt, attestation } }, null, 2)], { type: "application/json" });
-  $("#dl").href = URL.createObjectURL(blob); $("#dl").download = `receipt-${read.file.replace(/\.pdf$/i, "")}.json`;
+  receiptDownload(read, read.tx ?? null, read.payment ?? null);
   showClaim(claim, vendors, v.ok);
 }
 /** A reading recorded by the CLI agent on the demo treasury: same receipt format, already decided on chain. */
@@ -1578,7 +1585,9 @@ async function loadTreasury() {
     state.inFlight = await view(t, "get_in_flight").catch(() => null);
     state.codeHash = await rpc("query", { request_type: "view_account", finality: "final", account_id: t }).then((a) => a.code_hash).catch(() => null);
     // what the token really holds: USDC sent with a plain transfer is in the account but not on the contract's books
-    state.held = roles?.[4] ? await view(roles[4], "ft_balance_of", { account_id: t }).catch(() => null) : null;
+    // the token's own count of this account, for USDC sent with a plain transfer; a busy RPC gets one more try, then the page says it could not look
+    state.heldErr = null;
+    state.held = roles?.[4] ? await view(roles[4], "ft_balance_of", { account_id: t }).catch(async () => { await new Promise((r) => setTimeout(r, 2000)); return view(roles[4], "ft_balance_of", { account_id: t }); }).catch((e) => { state.heldErr = e.message; return null; }) : null;
     // the switcher shows the company's name once it is set in the contract
     if (company?.name && settings.label !== company.name) { $("#label").value = company.name; settings.label = company.name; try { localStorage.setItem("bursar.label", company.name); } catch {} upsertProfile(); }
     await loadDao();
@@ -1630,8 +1639,9 @@ function renderOverview() {
   $("#flightNote").hidden = flight === 0n; $("#flightErr").hidden = true; $("#resetFlight").disabled = !settings.ownerKey;
   if (flight > 0n) $("#flightText").textContent = `${usdc(flight)} left the books a moment ago and the token has not confirmed the transfer yet. Normal for a few seconds. If it stays, a transfer callback never ran: check the token's balance, then reset the counter and press Sync.`;
   const extra = state.held !== null && state.held !== undefined ? BigInt(state.held) - BigInt(stats.balance) : 0n;
-  $("#syncNote").hidden = extra <= 0n; $("#syncErr").hidden = true;
+  $("#syncNote").hidden = extra <= 0n && !state.heldErr; $("#syncErr").hidden = true;
   if (extra > 0n) $("#syncText").textContent = `The USDC contract holds ${usdc(extra)} more than this treasury has on its books, USDC sent with a plain transfer. Press Sync to count it: the contract asks the token itself, nothing is typed in.`;
+  else if (state.heldErr) $("#syncText").textContent = `Could not read the USDC contract's balance for this treasury (${state.heldErr.slice(0, 80)}), so USDC sent with a plain transfer may not show here. Reload in a moment, or press Sync: the contract asks the token itself.`;
   $("#syncBalance").disabled = !(settings.ownerKey || settings.operatorKey);
 }
 $("#resetFlight").addEventListener("click", async () => { const b = $("#resetFlight"); b.disabled = true; $("#flightErr").hidden = true; try { await ownerCall("reset_in_flight", {}); await loadTreasury(); } catch (e) { $("#flightErr").textContent = e.message; $("#flightErr").hidden = false; } finally { b.disabled = false; } });
@@ -3032,6 +3042,9 @@ async function showDecision(id, hash, signedBy) {
   for (let i = 0; i < 6 && !p; i++) { p = await view(settings.treasury, "get_payment", { id }); if (!p) await new Promise((r) => setTimeout(r, 1500)); }
   const status = p?.status ?? "?";
   lastDecision = id;
+  // the receipt download now proves this treasury's payment (a refusal keeps the first 64 characters of the reference)
+  const ref = current?.claim?.attestation_ref;
+  if (p && ref && (p.attestation_ref === ref || (p.attestation_ref?.length === 64 && ref.startsWith(p.attestation_ref)))) receiptDownload(current, hash, { ...p, treasury: settings.treasury }, `receipt-${settings.treasury.replace(/^treasury\./, "").replace(/\.(testnet|near)$/, "")}-${id}.json`);
   $("#decId").textContent = `#${id}`;
   const st = $("#decStatus"); st.textContent = status; st.className = `stamp ${status}`; void st.offsetWidth; st.classList.add("in");
   const reason = p?.reason && p.status === "Blocked" ? p.reason : (p?.dao_proposal_id !== null && p?.dao_proposal_id !== undefined ? `dao#${p.dao_proposal_id}` : "");

@@ -151,12 +151,14 @@ export async function verifyReceipt(rf: ReceiptFile, opts: { collateral?: boolea
   add("attestation_ref", rf.claim?.attestation_ref === ref, rf.claim?.attestation_ref === ref ? `claim carries ${ref.slice(0, 48)}...` : "the claim's attestation_ref was not derived from this receipt");
   if (opts.chain !== false && rf.payment?.id !== undefined) {
     try {
-      const { view } = await import("./near.js");
-      const p = await view<{ attestation_ref: string; invoice_hash: string; status: string } | null>("get_payment", { id: rf.payment.id });
+      const { viewAt } = await import("./near.js");
+      // a receipt from the console names the treasury it was paid on; the agent's own receipts are for BURSAR_TREASURY
+      const treasury = (rf.payment as { treasury?: string }).treasury || config.treasury;
+      const p = await viewAt<{ attestation_ref: string; invoice_hash: string; status: string } | null>(treasury, "get_payment", { id: rf.payment.id });
       // a refusal is stored small (the contract keeps the first 64 characters of the reference), so a blocked payment matches on that prefix
       const clipped = !!p && p.status === "Blocked" && typeof p.attestation_ref === "string" && p.attestation_ref.length === 64 && ref.startsWith(p.attestation_ref);
       const same = !!p && (p.attestation_ref === ref || clipped);
-      add("on_chain", same, p ? (same ? `payment #${rf.payment.id} on ${config.treasury} carries this reference${clipped ? " (its first 64 characters: refusals are stored small)" : ""}` : "on-chain payment carries a different attestation_ref") : "payment not found on chain");
+      add("on_chain", same, p ? (same ? `payment #${rf.payment.id} on ${treasury} carries this reference${clipped ? " (its first 64 characters: refusals are stored small)" : ""}` : "on-chain payment carries a different attestation_ref") : "payment not found on chain");
     } catch (e) {
       add("on_chain", null, `skipped: ${(e as Error).message.slice(0, 80)}`);
     }
