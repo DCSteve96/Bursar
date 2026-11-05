@@ -232,40 +232,277 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 **8. Explorer and dashboard.** Open `web/explorer.html` (a static file, no build; live at `https://bursar.network/explorer`). See: every treasury on the network, read from the registry contract and verified against each policy contract (on mainnet `1 registered, 1 verified`; on testnet a hundred and more, the load test below included, plus yours after step 2; reading them all takes under a minute, with "reading 36 of 112 treasuries..." while it works), the totals across companies (treasury balance, paid out today, this month and all time, decisions, blocked, waiting for a person) and the last decisions of every company, with no vendor names and no invoice numbers. On testnet the registry also holds the load-test treasuries of 21 October (the `treasury.bursar-big-*.testnet` rows, invented companies), with every decision their contracts took on the generated invoices still on chain, read from the chain by this page like any other. The page shows accounts and numbers, never company or vendor names. `web/dashboard.html?treasury=treasury.you.testnet` is one company's own page: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC.
 
-**9. Be the customer, from a browser.** `web/login.html` is the door (live at `https://bursar.network/login`): pick the network, press "Continue with NEAR wallet" and choose your wallet in the picker (NEAR Connect: Meteor, Intear, Nightly, Near Mobile and Unity on testnet; HOT and OKX too on mainnet; with the Meteor browser extension installed, the Meteor entry goes through the extension). The wallet tells the page who you are; the page asks the registry for the treasuries that account owns and checks each one's `get_roles`. If there is one, pick it and the wallet adds a key limited to that contract to your browser: the everyday methods only (vendors, orders, limits, approvals, operators, the vault), never a withdrawal, a change of owner or roles, or a new contract build; those the wallet itself signs, and shows you first. If there is none, the page creates the company's treasury at this first sign-in, at no cost to you, in three small windows: your company (name, what it does, country; tax id optional, and left empty for this walkthrough: the recorded readings are addressed to a demo company, so another tax id holds them all as `buyer_mismatch`), the creation itself, and how invoices are read (Bursar's relay or your own NEAR AI Cloud key, plus a keys backup). Under the hood it asks the testnet faucet for a payer account, deploys the policy contract from `web/contracts/bursar_policy.wasm`, creates an agent with one function-call key, mints 15,000 test USDC, registers the four demo vendors (two companies, a freelancer with 20% withholding, and DesignCo paid on Base; the two companies and DesignCo without tax ids, so the recorded readings keep their outcomes, set one in Vendors to try that check) and their orders, offers the contract to your wallet account (`offer_ownership`) and has the wallet accept it (`accept_ownership`, one signature), and lists it in the registry; then "Connect the wallet key" asks the wallet to approve one transaction, the key for this treasury. See: `OK account`, `OK contract`, `OK company`, `OK agent`, `OK usdc`, `OK vendors`, `OK orders`, `OK owner ... is owned by you.testnet`, `OK registry`, then the console with "you.testnet, owner, wallet key" at the bottom of the sidebar and your treasury counted in the explorer. The payer account's key stays in the browser (and in "Download the keys") to fund invites and the DAO, which need NEAR deposits a wallet key cannot attach; it holds no power over the contract. The other doors: an invite link from a colleague, a keys file from a treasury created with throwaway keys, and "Try it with throwaway keys" for a browser with no wallet at all (same creation, the browser's own key as owner, so there is no `OK owner` line). No password and no server. Opened as a local file, every door works except the wallet one: wallets answer to a web address, so sign in with a wallet on `https://bursar.network/login` (or serve `web/` with any static server); for the rest open `web/console.html#start` directly, which is where "Try it with throwaway keys" leads. If the testnet faucet is slow, the page waits for the account on chain; if it still stops, the button reads "Resume creating my treasury" and carries on from the last step done. A new treasury holds 6 NEAR, most of it locked by the contract's storage; Overview shows the rest as free NEAR.
+**9. Be the customer, from a browser.** The console is `web/console.html` (live at `https://bursar.network/console`) and the door is `web/login.html` (live at `https://bursar.network/login`). Nothing to install: every number is read from the contract and every change is signed in the browser. Opened as a local file, everything works except the wallet door, because wallets answer to a web address: sign in with a wallet on the live site, or serve `web/` with any static server.
 
-`web/console.html` is the back office (live at `https://bursar.network/console`; opened as a local file it works too, the contract bytes come from `contracts/bursar_policy.wasm.js`): nothing to install, every number read from the contract and every change signed in the browser. Pages: Overview (balance, what waits for a person, last decisions), Invoices (read, receipt, decide), Attention (approve or cancel what is held, see what was refused and why), Vendors (allowlist, payouts, budgets), Orders (purchase orders and standing orders), Analytics (spend by vendor and by month, straight from the payments), Settings (company, limits, strict order mode, operators with on-chain roles, keys). Several treasuries live side by side in the switcher at the top of the sidebar. Collaborators: in Settings, "Invite a collaborator" creates an account for them with one key limited to the methods of their role (approve, vendors, orders), records the role in the contract, and gives you a link that carries the key after the hash sign, so it never reaches a server; send it however you like. Whoever opens it is signed in as that account with that role and nothing else. "Remove" next to the operator revokes it on chain. A DAO: in Settings, "Governance", pick the council (you, operators, any NEAR account) and press "Create the DAO": the page calls the Sputnik factory with a 6 NEAR deposit on testnet (the DAO's own account and storage, paid by the payer account), sends 2 NEAR to the treasury for proposal bonds and points the contract at the DAO; from then on every held payment opens a proposal, and council members vote in Attention (or in Trezu on mainnet). Then, on a treasury with no DAO yet (create the DAO after this walkthrough, or payment #1 opens a proposal instead of waiting for "Approve"), load the recorded readings (the real receipts the enclave signed on 20 October, verified in the page with the same checks as `bursar verify`, Intel collateral included, fetched through the relay) and press "Request payment" on each: Legal Partners `#1 Approval` (no DAO here, so "Approve" in Attention, signed by the owner, turns it into `Paid`), Acme with a new wallet `#2 Blocked payout_changed`, Acme `#3 Paid`, DesignCo `Queued`; the fifth, Acme with an invoice nobody ordered, is the one step 9e uses. Your contract, your keys, the same decisions as the walkthrough above. To read a PDF live, drop one of the files in `web/samples/`: with "Bursar reading", a hackathon demo convenience, the page goes through Bursar's relay (`relay/worker.js`, a Cloudflare Worker that holds a NEAR AI Cloud key paid by the team and forwards the bytes untouched, so the signature still verifies; daily caps apply); a company using Bursar brings its own NEAR AI Cloud key, and then the invoice goes from the browser straight to the enclave and never passes through Bursar. "Use the demo treasury" points the page at the README deployment instead (read-only without its agent key). See: the PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, the enclave's answer, then the same receipt checks as step 6 (the Intel collateral check included) and a "Download receipt JSON" link (once you press "Request payment" the file carries this treasury's payment and transaction and names the treasury, so `npm run dev verify <file>` in `app/` checks it on that contract, a refused payment included). The model is `Qwen/Qwen3-VL-30B-A3B-Instruct`, served inside NEAR AI Cloud's TEE with the same attestation and signed receipt: a reading takes 3 to 5 seconds. On 1030 invented invoices of ten invented companies (five layouts, 207 noisy scans without a text layer, 100 multi-page, 67 with new-bank-details fraud, 25 with a deposit already paid, 30 duplicates), read 8 at a time through the relay: 1030 read, 1030 signed, 0 errors, amount right on 1029, payout right on 1006; the payouts read wrong were garbled addresses on scans, refused by the page or blocked by the contract, never paid. The claim takes the amount from the string the model copies off the page, parsed here (European 1.234,56 included) and reconciled with the printed subtotal and tax; a notice of new payment details that points at the registered payout is not a hold, a different payout is refused whatever the notice says. The first receipts in this README were produced by `z-ai/glm-5.3-flash`, the model Bursar used until 21 October; they verify the same way, the model name is part of the signed text. If the gateway answers 502 or 524 the page retries on its own. Press "Request payment": the page signs `request_payment` with the agent key (plain borsh plus ed25519, no NEAR library) and shows the contract's decision with the transaction link: `Paid` for a known vendor whose order covers the invoice. Drop invoice 4 instead: `Blocked payout_changed`. The agent account needs a little NEAR for gas on this direct path (`setup` leaves it 0.5); the CLI agent goes through the relayer and needs none. Invoices can also arrive by Telegram: in Settings, "Connect a Telegram chat" gives a link; open it, press Start, and every PDF posted in that chat (by you, a colleague, or a vendor in a group) appears in the console's Inbox with the sender and the file name, nothing read yet. Press Read: the same enclave reading and the same contract decision as a dropped file, and the bot tells the chat the outcome with the transaction link. The owner can also connect their own Telegram as approver (step 9h): every invoice is forwarded there with the PDF and two buttons, an approved one is read and submitted by the agent, and a held one comes back to the console for the wallet. The relay keeps only the sender, the name and Telegram's file reference; the PDF stays on Telegram until Read (`relay/README.md`, "Telegram inbox", for the bot setup). `web/docs.html` explains all of this in one page. The workflow in `.github/workflows/pages.yml` publishes `web/` with GitHub Pages (enable Pages with source "GitHub Actions" in the repository settings).
+Do, with no wallet (works from a local file):
+1. Open `web/login.html` and press "Try it with throwaway keys" (it opens `web/console.html#start`).
+2. Fill in your company: name, what it does, country. Leave the tax id empty: the recorded readings below are addressed to a demo company, so another tax id holds them all as `buyer_mismatch`.
+3. Press "Create my treasury" and wait about a minute. It costs you nothing: the testnet faucet pays.
+4. In the third window, choose how invoices are read ("Bursar reading" through Bursar's relay, or your own NEAR AI Cloud key) and save the keys backup.
 
-**9a. On your phone.** Open `https://bursar.network/console` on the phone and add it to the home screen (Safari: Share, "Add to Home Screen"; Chrome: the install prompt or the menu's "Install app"). See: Bursar as an app with its own icon, full screen, opening on the console; the pages you visited open again without network, the chain and the relay are always asked live. A manifest, three icons and a small network-first service worker (`web/sw.js`), nothing else: keys stay in the page's own storage.
+See:
+- `OK account`, `OK contract ... with no access key`, `OK company`, `OK agent`, `OK usdc`, `OK vendors`, `OK orders`, `OK registry`, then the console. There is no `OK owner` line: the browser's own key is the owner.
+- Overview with 15,000 test USDC and about 1.35 NEAR free: a new treasury holds 6 NEAR, most of it locked by the contract's storage.
+- Your treasury counted in the explorer of step 8.
 
-**9b. Charts and the accountant's report.** In the console, Analytics: see spend by month (the lighter top of a bar is the withholding kept for the state), spend by vendor, the mix of decisions, and every payment grouped by vendor with gross, withheld and net. Press "Download the Excel report": see `bursar-<treasury>-<date>.xlsx` with five sheets (Summary, Payments, By vendor, By month, Withholding), amounts as numbers, one row per decision with its reason, invoice hash and enclave completion id. "CSV of all payments" is the Payments sheet alone. Both are built in the browser from the contract; nothing is uploaded anywhere.
+What the page did: it asked the testnet faucet for a payer account, deployed the policy contract from `web/contracts/bursar_policy.wasm` (from `contracts/bursar_policy.wasm.js` when opened as a file), created an agent with one function-call key, minted 15,000 test USDC, registered four demo vendors and their orders, and listed the treasury in the registry. The vendors are two companies and DesignCo (paid on Base) without tax ids, so the recorded readings keep their outcomes, and a freelancer with 20% withholding and a tax id; set one in Vendors to try that check. If the faucet is slow, the page waits for the account on chain; if it still stops, the button reads "Resume creating my treasury" and carries on from the last step done.
 
-**9c. Lose the browser, keep the company.** Sign in with the wallet, connect a Telegram chat (Settings), then in Settings press "Save to the vault": the wallet signs one message, no transaction. See: `vault on chain: saved <now>, up to date` and `get_vault` on the contract returning an opaque `v3:...` string (encrypted in the browser, the contract never reads it). Open a different browser, sign in with the same wallet, pick the treasury: see the green strip "its contract keeps a vault with them"; press "Unlock with the wallet": see the Telegram inbox back, same token. Nothing was stored anywhere but your contract, and nothing on it is readable without your wallet. A device whose wallet key is new (the wallet app on your phone holds a different key for the same account) is told so: press "Ask to admit this device" (one transaction, it leaves a public key on the contract), then open Settings, Keys on the first device: the request carries a signature by the phone's wallet key, the page checks on chain that this key is one of your account's own full-access keys and admits the phone by itself (one transaction, `admitting Safari on iPhone...`); a request signed by any other key, a browser key included, shows Admit and Refuse with the reason next to it. Back on the phone, "Unlock with the wallet" opens the vault, and from then on its own signature does. Under Settings, Keys, `admitted devices` lists each device by browser, system, wallet key and date; "forget" shuts a lost one out. With no device left to admit from (the executor key is gone with the browser), the owner presses "Replace the executor from this device": the wallet creates a new executor sub-account with one key limited to `settle` and the marks on this treasury (0.2 NEAR), then calls `set_roles`; see `get_roles` on the contract naming the new executor, and "Settle via Intents" back in Attention. A person in the console can also press "Request payment" without the agent key: `request_payment` accepts the agent, the owner and the operators, and decides the same way.
+With a wallet, on the live site:
+1. Pick the network and press "Continue with NEAR wallet".
+2. Choose your wallet in the picker (NEAR Connect: Meteor, Intear, Nightly, Near Mobile and Unity on testnet; HOT and OKX too on mainnet; with the Meteor browser extension installed, the Meteor entry goes through the extension).
+3. If your account owns a treasury (the registry lists it and its `get_roles` confirms it), pick it. If it owns none, the same three windows create one.
+4. Press "Connect the wallet key" and approve the one transaction.
 
-**9d. One chat per vendor.** Settings, Telegram inbox: pick a vendor in "Who is this chat for" and press Connect; open the link in Telegram and press Start. See the bot answer "Connected ... for the vendor Acme Hosting: invoices from here are expected from that vendor". Post a PDF there: see it in Inbox under "Acme Hosting". Connect a second chat for DesignCo and post Acme's invoice there: Read it and see the flag `chat_vendor_mismatch`; press Request payment and see the contract answer `Approval (flagged)`, a hold for a person, because the chat and the paper disagree. Under Settings, "Connected chats" lists every chat with the vendor it is for; change it or disconnect it there.
+See:
+- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (vendors, orders, limits, approvals, operators, the vault), never a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first.
+- For a new treasury, the same `OK` lines plus `OK owner ... is owned by you.testnet`: the contract is offered to your wallet account (`offer_ownership`) and the wallet accepts it (`accept_ownership`, one signature).
+- "you.testnet, owner, wallet key" at the bottom of the sidebar.
 
-**9e. Know the answer before you ask.** Read any invoice in the console: under the claim, before the button, see "will pay", "will queue" (cross-chain, for the executor), "will wait: ..." or "will be refused: ...". It is `preview_payment`, a view method that runs the contract's checks on the contract's state without recording anything. Deactivate a vendor in Vendors, read one of its invoices: see "will be refused: vendor deactivated by the owner" before you press anything, and the same `Blocked vendor_inactive` if you press.
+The payer account's key stays in the browser (and in "Download the keys") to fund invites and the DAO, which need NEAR deposits a wallet key cannot attach; it holds no power over the contract. The other doors are an invite link from a colleague and a keys file from an earlier treasury. No password and no server.
 
-**9f. Money that arrived without a call.** Overview has a "Top up" card: the treasury account to send USDC to from any wallet or exchange (as text with Copy, and as a QR code for a wallet that scans one), the NEAR the account has free of its storage (with a warning when it runs low), and for the owner "Deposit USDC" and "Add NEAR" signed from the browser (on testnet also "Mint 10,000 test USDC", test money moved into the treasury in one transaction). See the balance rise at once: a deposit made from the page is an `ft_transfer_call`, which the contract counts in the same transaction, the way the console funds a new treasury. A wallet or an exchange sends USDC with a plain `ft_transfer`: the tokens are in the account, the contract's books do not know. Send some test USDC to the treasury the console made in step 9 that way (its account is in the Top up card; the console's treasuries use the shared test token `tusdc.bursar-b48563e6.testnet`, whose open `mint` gives you the 500 first):
+**9, continued: the recorded readings.** These are the real receipts the enclave signed on 20 October, fetched through the relay. Use a treasury with no DAO yet: create the DAO after this, or payment #1 opens a proposal instead of waiting for "Approve".
+
+Do:
+1. Open Invoices and load the recorded readings one at a time.
+2. Press "Request payment" on each, in this order: Legal Partners, Acme with a new wallet, Acme, DesignCo.
+3. In Attention, press "Approve" on the Legal Partners payment.
+
+See:
+- Every reading verified in the page with the same checks as `bursar verify`, Intel collateral included.
+- Legal Partners `#1 Approval`, then `Paid` once you approve it (signed by the owner, since there is no DAO).
+- Acme with a new wallet `#2 Blocked payout_changed`.
+- Acme `#3 Paid`.
+- DesignCo `#4 Queued`, which step 9j settles.
+- The fifth reading, Acme with an invoice nobody ordered, is for step 9e.
+
+**9, continued: read a PDF live.**
+
+Do:
+1. In Invoices, drop one of the files in `web/samples/`, for example `04-acme-hosting-0924-fraud.pdf`.
+2. Press "Request payment".
+3. Press "Download receipt JSON", then in `app/` run `npm run dev verify <file>`.
+
+See:
+- The PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, and the enclave's answer from `Qwen/Qwen3-VL-30B-A3B-Instruct` in 3 to 5 seconds.
+- The receipt checks of step 6, the Intel collateral check included.
+- The contract's decision with the transaction link: `Blocked payout_changed` for invoice 4, `Paid` for a known vendor whose order covers the invoice.
+- `verify` passing on this treasury: after "Request payment" the file carries this treasury's payment and transaction and names the treasury, a refused payment included.
+
+Notes on the reading:
+- "Bursar reading" is a hackathon demo convenience. The page goes through Bursar's relay (`relay/worker.js`, a Cloudflare Worker that holds a NEAR AI Cloud key paid by the team and forwards the bytes untouched, so the signature still verifies; daily caps apply). A company brings its own NEAR AI Cloud key, and then the invoice goes from the browser straight to the enclave and never passes through Bursar.
+- The page signs `request_payment` with the agent key (plain borsh plus ed25519, no NEAR library). The agent account needs a little NEAR for gas on this direct path (`setup` leaves it 0.5); the CLI agent goes through the relayer and needs none. If the gateway answers 502 or 524, the page retries on its own.
+- On 1030 invented invoices of ten invented companies (five layouts, 207 noisy scans without a text layer, 100 multi-page, 67 with new-bank-details fraud, 25 with a deposit already paid, 30 duplicates), read 8 at a time through the relay: 1030 read, 1030 signed, 0 errors, amount right on 1029, payout right on 1006. The payouts read wrong were garbled addresses on scans, refused by the page or blocked by the contract, never paid.
+- The claim takes the amount from the string the model copies off the page, parsed here (European 1.234,56 included) and reconciled with the printed subtotal and tax. A notice of new payment details that points at the registered payout is not a hold; a different payout is refused whatever the notice says.
+- The first receipts in this README were produced by `z-ai/glm-5.3-flash`, the model Bursar used until 21 October. They verify the same way: the model name is part of the signed text.
+- "Use the demo treasury" points the page at the README deployment instead (read-only without its agent key).
+
+**9, continued: the rest of the console.** Pages: Overview (balance, what waits for a person, last decisions), Invoices (read, receipt, decide), Attention (approve or cancel what is held, see what was refused and why), Vendors (allowlist, payouts, budgets), Orders (purchase orders and standing orders), Analytics (spend by vendor and by month, straight from the payments), Settings (company, limits, strict order mode, operators with on-chain roles, keys). Several treasuries live side by side in the switcher at the top of the sidebar.
+
+- **Invite a collaborator.** Do: in Settings, press "Invite a collaborator" and pick a role (approve, vendors, orders). See: an account created for them with one key limited to the methods of that role, the role recorded in the contract, and a link that carries the key after the hash sign, so it never reaches a server; send it however you like. Whoever opens it is signed in as that account with that role and nothing else. "Remove" next to the operator revokes it on chain.
+- **Create a DAO.** Do: in Settings, "Governance", pick the council (you, operators, any NEAR account) and press "Create the DAO". See: the Sputnik factory called with a 6 NEAR deposit on testnet (the DAO's own account and storage, paid by the payer account), 2 NEAR sent to the treasury for proposal bonds, and the contract pointed at the DAO. From then on every held payment opens a proposal, and council members vote in Attention (or in Trezu on mainnet).
+- **Receive invoices by Telegram.** Do: in Settings, press "Connect a Telegram chat", open the link, press Start, and post a PDF in that chat (you, a colleague, or a vendor in a group). See: the PDF in the console's Inbox with the sender and the file name, nothing read yet. Press Read: the same enclave reading and contract decision as a dropped file, and the bot tells the chat the outcome with the transaction link. The relay keeps only the sender, the name and Telegram's file reference; the PDF stays on Telegram until Read (`relay/README.md`, "Telegram inbox", for the bot setup). The owner can also approve from Telegram: step 9h.
+
+`web/docs.html` explains all of this in one page. The workflow in `.github/workflows/pages.yml` publishes `web/` with GitHub Pages (enable Pages with source "GitHub Actions" in the repository settings).
+
+**9a. On your phone.**
+
+Do:
+1. Open `https://bursar.network/console` on the phone.
+2. Add it to the home screen (Safari: Share, "Add to Home Screen"; Chrome: the install prompt or the menu's "Install app").
+
+See:
+- Bursar as an app with its own icon, full screen, opening on the console.
+- The pages you visited open again without network; the chain and the relay are always asked live.
+
+It is a manifest, three icons and a small network-first service worker (`web/sw.js`), nothing else: keys stay in the page's own storage.
+
+**9b. Charts and the accountant's report.**
+
+Do:
+1. In the console, open Analytics.
+2. Press "Download the Excel report".
+3. Press "CSV of all payments".
+
+See:
+- Spend by month (the lighter top of a bar is the withholding kept for the state), spend by vendor, the mix of decisions, and every payment grouped by vendor with gross, withheld and net.
+- `bursar-<treasury>-<date>.xlsx` with five sheets (Summary, Payments, By vendor, By month, Withholding), amounts as numbers, one row per decision with its reason, invoice hash and enclave completion id.
+- The CSV is the Payments sheet alone. Both files are built in the browser from the contract; nothing is uploaded anywhere.
+
+**9c. Lose the browser, keep the company.**
+
+Do, to save and restore:
+1. Sign in with the wallet and connect a Telegram chat (Settings).
+2. In Settings, press "Save to the vault": the wallet signs one message, no transaction.
+3. Open a different browser, sign in with the same wallet and pick the treasury.
+4. Press "Unlock with the wallet".
+
+See:
+- `vault on chain: saved <now>, up to date`, and `get_vault` on the contract returning an opaque `v3:...` string (encrypted in the browser; the contract never reads it).
+- In the second browser, the green strip "its contract keeps a vault with them", then the Telegram inbox back with the same token. Nothing was stored anywhere but your contract, and nothing on it is readable without your wallet.
+
+Do, for a device whose wallet key is new (the wallet app on your phone holds a different key for the same account):
+1. On the phone, press "Ask to admit this device" (one transaction; it leaves a public key on the contract).
+2. On the first device, open Settings, Keys.
+3. Back on the phone, press "Unlock with the wallet".
+
+See:
+- The first device admits the phone by itself (one transaction, `admitting Safari on iPhone...`): the request carries a signature by the phone's wallet key, and the page checks on chain that this key is one of your account's own full-access keys. A request signed by any other key, a browser key included, shows Admit and Refuse with the reason next to it.
+- The vault opens on the phone, and from then on its own signature does.
+- Under Settings, Keys, `admitted devices` lists each device by browser, system, wallet key and date; "forget" shuts a lost one out.
+
+Do, with no device left to admit from (the executor key is gone with the browser):
+1. As the owner, press "Replace the executor from this device".
+
+See:
+- The wallet creates a new executor sub-account with one key limited to `settle` and the marks on this treasury (0.2 NEAR), then calls `set_roles`.
+- `get_roles` on the contract naming the new executor, and "Settle via Intents" back in Attention.
+
+A person in the console can also press "Request payment" without the agent key: `request_payment` accepts the agent, the owner and the operators, and decides the same way.
+
+**9d. One chat per vendor.**
+
+Do:
+1. In Settings, Telegram inbox, pick a vendor in "Who is this chat for" and press Connect.
+2. Open the link in Telegram and press Start.
+3. Post a PDF in that chat.
+4. Connect a second chat for DesignCo, post Acme's invoice there, Read it and press "Request payment".
+
+See:
+- The bot answering "Connected ... for the vendor Acme Hosting: invoices from here are expected from that vendor".
+- The PDF in Inbox under "Acme Hosting".
+- For Acme's invoice in DesignCo's chat, the flag `chat_vendor_mismatch` and the contract's answer `Approval (flagged)`: a hold for a person, because the chat and the paper disagree.
+- Under Settings, "Connected chats", every chat with the vendor it is for; change it or disconnect it there.
+
+**9e. Know the answer before you ask.**
+
+Do:
+1. Load any recorded reading or read any invoice, and look under the claim, before the button.
+2. In Vendors, deactivate Acme Hosting, then load "Acme, an invoice nobody ordered".
+3. Press "Request payment", then reactivate Acme.
+
+See:
+- "will pay", "will queue" (cross-chain, for the executor), "will wait: ..." or "will be refused: ...". It is `preview_payment`, a view method that runs the contract's checks on the contract's state without recording anything.
+- "will be refused: vendor deactivated by the owner" before you press anything.
+- The same `Blocked vendor_inactive` when you press.
+
+**9f. Money that arrived without a call.**
+
+Do:
+1. Open Overview and look at the "Top up" card.
+2. Send 500 test USDC to the treasury the console made in step 9 with a plain transfer (its account is in the Top up card; the console's treasuries use the shared test token `tusdc.bursar-b48563e6.testnet`, whose open `mint` gives you the 500 first):
 
 ```bash
 near contract call-function as-transaction tusdc.bursar-b48563e6.testnet mint json-args '{"to":"you.testnet","amount":"500000000"}' prepaid-gas '30 Tgas' attached-deposit '0.01 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
 near contract call-function as-transaction tusdc.bursar-b48563e6.testnet ft_transfer json-args '{"receiver_id":"<your console treasury>","amount":"500000000"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as you.testnet network-config testnet sign-with-keychain send
 ```
 
-Open the console's Overview: see "The USDC contract holds 500.00 USDC more than this treasury has on its books" and a "Sync balance" button. Press it: the contract asks the token contract itself what it holds (`sync_balance`, owner or operator; a cross-contract `ft_balance_of`, minus the transfers it sent whose callback has not landed, so nothing is counted twice), see the balance rise by 500.00 and the notice gone. Nobody types a number: `balance_synced` in the log carries old, new and in-flight amounts.
+3. Reload Overview and press "Sync balance".
 
-**9g. Upgrade the contract from the console.** A treasury created in a browser has no full-access key anywhere, by design. When a new build of the policy contract ships, Settings shows the build the treasury runs (its code hash against `web/contracts/builds.json`) and, to the owner, an "Upgrade contract" button: the wallet signs `upgrade` with the new wasm as its argument and the contract deploys it onto itself and runs `migrate` in the same batch, which brings the stored state to the new layout (idempotent: a state already in the current layout is left alone; builds from before 20 October 2026 upgrade through build 17 first). See: the build label change and every payment still there. Treasuries deployed before this method existed are upgraded once with their treasury key (`near deploy`), after that from the console.
+See:
+- In the card: the treasury account to send USDC to from any wallet or exchange (as text with Copy, and as a QR code), the NEAR the account has free of its storage (with a warning when it runs low), and for the owner "Deposit USDC" and "Add NEAR" (on testnet also "Mint 10,000 test USDC"). A deposit made from the page raises the balance at once: it is an `ft_transfer_call`, which the contract counts in the same transaction.
+- After the plain transfer, "The USDC contract holds 500.00 USDC more than this treasury has on its books" and a "Sync balance" button. If the token's balance cannot be read at that moment (a busy RPC), the card says so instead.
+- After Sync, the balance up by 500.00 and the notice gone. `balance_synced` in the log carries the old, new and in-flight amounts.
 
-**9h. Approve from your phone.** Settings, Telegram inbox, "Connect your Telegram as approver": open the link, press Start. See the bot answer "You approve invoices for ... from here". Post a PDF in a vendor's chat: see it reach your chat as a message with the PDF attached, the sender, the file name and two buttons, Approve and Reject (with several waiting, reply to the one you mean, or type yes or no under it). The vendor's chat reads "accepted by the company, being processed"; in Inbox the row reads "approved, by you: press Read to send it to the contract". Many waiting at once: type `approve all` in your approver chat, see the list of what waits and one button, "Approve all N", and press it; in the console, Inbox has "Approve all waiting (N)" for the same, and Attention has a checkbox per held payment with "Approve selected" and "Cancel selected" (four `approve_payment` calls per signature; with a DAO, "Vote approve selected", one vote per proposal). Each invoice is still a decision of its own on the contract, with its own limits: bulk means fewer signatures, never fewer checks. Press Read, then "Request payment", as for any inbox item (a company that runs the agent with the inbox token from Settings, Keys, `BURSAR_RELAY=https://bursar-relay.<you>.workers.dev BURSAR_INBOX_TOKEN=<token> npm run agent -- --direct`, sees it take the invoice on its own: `telegram AH-0923.pdf -> payment #N Paid`). Either way the bot posts the outcome under your message: `Paid: AH-0923, Acme Hosting, 480.00 USDC` with the transaction link, or `Held: ... Reason: amount at or above the approval threshold. Open the console to review it and approve with your wallet` with a link straight to Attention, or `Blocked: ... Reason: payout on the invoice differs from the vendor record`. The vendor's chat reads only "paid", "under review at the company" or "declined", never the reason. Approve on Telegram is a yes recorded on the relay, nothing more: whoever presses Read (or the company's agent) signs `request_payment`, a method that can only ask, and the contract applies the same caps, thresholds and holds; a held invoice is approved in the console, with the owner's wallet. No key of any kind lives on the relay. Only the Telegram user who pressed Start with your code can decide, in a group too. Press Reject instead: the row leaves Inbox and the vendor reads "declined". Decide in the console instead of the phone: your Telegram message gets the same outcome under it. For a vendor you would approve anyway, tick "Trusted vendor, accept without asking" when you connect its chat (or the "trusted" box next to it under Connected chats): its invoices skip the question, you only get a notice, the vendor reads "Accepted: the treasury contract decides next", and with the agent running nobody touches anything between the PDF and the payment. The contract still applies every rule, so a changed payout, a cap, a missing order or a flag is held or blocked exactly as before.
+Why: a wallet or an exchange sends USDC with a plain `ft_transfer`, so the tokens are in the account but the contract's books do not know. `sync_balance` (owner or operator) has the contract ask the token contract itself what it holds, a cross-contract `ft_balance_of`, minus the transfers it sent whose callback has not landed, so nothing is counted twice. Nobody types a number.
 
-**9i. Hand the company over in two steps.** Settings, Ownership: type another account in "Offer the treasury to" and press "Offer ownership" (one transaction). See: `get_ownership_offer` on the contract naming it, `get_roles` unchanged, and "Withdraw the offer" available. Sign in from the offered account (any browser, its own wallet or key), open the same treasury: see "Accept ownership"; press it (one transaction) and see `get_roles` name the new owner and the old one lose every owner method (`set_company` from it: `only the owner`). There is no `transfer_ownership` any more: a wallet talked into one signature gives nothing away.
+**9g. Upgrade the contract from the console.** A treasury created in a browser has no full-access key anywhere, by design.
 
-**9j. Settle on a quote the contract verifies (testnet, with a stand-in for 1Click).** NEAR Intents has no testnet, so open the console with `?intents=stub` added to its address: the page plays 1Click and signs its quotes with the test key the contract's own tests use. The DesignCo payment requested in step 9 is already `Queued` (DesignCo lives on Base; on a treasury where it is not, load its recorded reading or drop `02-designco-1107.pdf` and request it), so in Attention press "Settle via Intents" on it (a treasury the testnet wizard made names its owner as the executor, so the owner's key in this browser signs the settlement; a treasury with its own executor needs that key here, Settings, Keys). See: the page point the treasury at the test signer once (`set_quote_signer`, signed by the owner), the quote with "signed by the test signer standing in for 1Click (stub), checked here and by the contract" (on mainnet: "1Click, checked here and by the contract"), then one transaction by the executor key, `settle` with the signed bytes and the signature; the contract verifies the signature, checks the recipient, the amount, the asset, the floor and the expiry, registers the 64-character deposit account on the test USDC and sends the net amount in the same receipt; `get_payment` shows `deposit_address` (an implicit account the executor never named) and `quote_id` (the base58 hash of the signed bytes); a few seconds later the stub reports delivery and `mark_settled` closes it. What a tampered quote gets is in the unit tests: `cargo test settle` runs a signed quote for another recipient, another amount, a fee over 2 percent, another chain, an expired one, a named deposit account, a wrong signature and a wrong key, and every one is refused with its reason and nothing moves.
+Do:
+1. Open Settings and look at the build the treasury runs.
+2. When a new build of the policy contract ships, press "Upgrade contract" as the owner and let the wallet sign.
 
-**9k. Let the page be the executor.** Attention, above the queued table: the switch "Automatic settlement is off". Turn it on: the box turns green and says what runs. Then give it something to settle: read `web/samples/10-designco-1108.pdf` (DesignCo again, 300 USDC, no purchase order) and request it: `Approval no_order`; in Attention press Approve: `Queued`; within 30 seconds it goes through step 9j with no dialog and ends `Settled`. Three failed attempts leave a payment to a person, with the reason. The same loop runs headless with `npm run executor`.
+See:
+- The build label: the treasury's code hash checked against `web/contracts/builds.json`.
+- After the upgrade, the build label changed and every payment still there.
 
-**9l. The transactions behind each payment.** Analytics, "All payments, by vendor", column "on chain": one link per transaction the contract recorded a timestamp for (request payment, approve payment, settle, mark settled) and the destination chain transaction, in time order; "Download the Excel report" and "CSV of all payments" carry the same links as columns (hyperlinks in Excel). The contract keeps timestamps, not hashes: the page matches them to the treasury's receipts read from nearblocks. On testnet nearblocks does not index these treasuries, so the column reads `-` there; on mainnet it is the table in step 10.
+How: the wallet signs `upgrade` with the new wasm as its argument, and the contract deploys it onto itself and runs `migrate` in the same batch, which brings the stored state to the new layout. It is idempotent: a state already in the current layout is left alone. Builds from before 20 October 2026 upgrade through build 17 first. Treasuries deployed before this method existed are upgraded once with their treasury key (`near deploy`), after that from the console.
+
+**9h. Approve from your phone.**
+
+Do:
+1. In Settings, Telegram inbox, press "Connect your Telegram as approver", open the link and press Start.
+2. Post a PDF in a vendor's chat.
+3. In your own chat, press Approve under it (with several waiting, reply to the one you mean, or type yes or no under it).
+4. In the console's Inbox, press Read, then "Request payment".
+
+See:
+- The bot answering "You approve invoices for ... from here".
+- The invoice in your chat as a message with the PDF attached, the sender, the file name, and two buttons, Approve and Reject.
+- After Approve, the vendor's chat reading "accepted by the company, being processed", and the Inbox row reading "approved, by you: press Read to send it to the contract".
+- After "Request payment", the outcome under your message: `Paid: AH-0923, Acme Hosting, 480.00 USDC` with the transaction link, or `Held: ... Reason: amount at or above the approval threshold. Open the console to review it and approve with your wallet` with a link straight to Attention, or `Blocked: ... Reason: payout on the invoice differs from the vendor record`. The vendor's chat reads only "paid", "under review at the company" or "declined", never the reason.
+
+More from the same chat:
+- **Many at once.** Type `approve all` in your approver chat: see the list of what waits and one button, "Approve all N". In the console, Inbox has "Approve all waiting (N)", and Attention has a checkbox per held payment with "Approve selected" and "Cancel selected" (four `approve_payment` calls per signature; with a DAO, "Vote approve selected", one vote per proposal). Each invoice is still a decision of its own on the contract, with its own limits: bulk means fewer signatures, never fewer checks.
+- **Reject.** Press Reject instead: the row leaves Inbox and the vendor reads "declined". Decide in the console instead of the phone: your Telegram message gets the same outcome under it.
+- **Trusted vendors.** Tick "Trusted vendor, accept without asking" when you connect a vendor's chat (or the "trusted" box next to it under Connected chats). Its invoices skip the question, you only get a notice, and the vendor reads "Accepted: the treasury contract decides next". The contract still applies every rule, so a changed payout, a cap, a missing order or a flag is held or blocked exactly as before.
+- **With the agent running.** A company that runs the agent with the inbox token from Settings, Keys, sees it take approved invoices on its own, and with trusted vendors nobody touches anything between the PDF and the payment:
+
+```bash
+BURSAR_RELAY=https://bursar-relay.<you>.workers.dev BURSAR_INBOX_TOKEN=<token> npm run agent -- --direct
+```
+
+See: `telegram AH-0923.pdf -> payment #N Paid`.
+
+Why it is safe: Approve on Telegram is a yes recorded on the relay, nothing more. Whoever presses Read (or the company's agent) signs `request_payment`, a method that can only ask, and the contract applies the same caps, thresholds and holds; a held invoice is approved in the console, with the owner's wallet. No key of any kind lives on the relay. Only the Telegram user who pressed Start with your code can decide, in a group too.
+
+**9i. Hand the company over in two steps.**
+
+Do:
+1. In Settings, Ownership, type another account in "Offer the treasury to" and press "Offer ownership" (one transaction).
+2. Sign in from the offered account (any browser, its own wallet or key) and open the same treasury.
+3. Press "Accept ownership" (one transaction).
+
+See:
+- After the offer, `get_ownership_offer` on the contract naming that account, `get_roles` unchanged, and "Withdraw the offer" available.
+- On the offered account, "Accept ownership".
+- After accepting, `get_roles` naming the new owner, and the old owner without any owner method (`set_company` from it: `only the owner`).
+
+There is no `transfer_ownership` any more: a wallet talked into one signature gives nothing away.
+
+**9j. Settle on a quote the contract verifies (testnet, with a stand-in for 1Click).** NEAR Intents has no testnet, so with `?intents=stub` the page plays 1Click and signs its quotes with the test key the contract's own tests use.
+
+Do:
+1. Open the console with `?intents=stub` before the `#`, for example `web/console.html?intents=stub#attention`.
+2. In Attention, press "Settle via Intents" on the DesignCo payment queued in step 9. On a treasury where it is not queued, load its recorded reading or drop `02-designco-1107.pdf` and request it first.
+3. Confirm in the dialog.
+4. Read `get_payment` for that id on the contract.
+5. In `contracts/policy`, run `cargo test settle`.
+
+See:
+- The page pointing the treasury at the test signer once (`set_quote_signer`, signed by the owner).
+- The quote dialog: what the vendor receives and at which address, what the treasury sends, a 64-character deposit account, and "signed by the test signer standing in for 1Click (stub), checked here and by the contract" (on mainnet: "1Click, checked here and by the contract").
+- One transaction by the executor key, `settle` with the signed bytes and the signature. The contract verifies the signature, checks the recipient, the amount, the asset, the floor and the expiry, registers the deposit account on the test USDC and sends the net amount in the same receipt.
+- `get_payment` showing `deposit_address` (an implicit account the executor never named) and `quote_id` (the base58 hash of the signed bytes); a few seconds later the stub reports delivery and `mark_settled` closes it.
+- `cargo test settle` running a signed quote for another recipient, another amount, a fee over 2 percent, another chain, an expired one, a named deposit account, a wrong signature and a wrong key: every one refused with its reason, and nothing moves.
+
+Who signs: a treasury the testnet wizard made names its owner as the executor, so the owner's key in this browser signs the settlement. A treasury with its own executor needs that key here (Settings, Keys).
+
+**9k. Let the page be the executor.**
+
+Do:
+1. In Attention, above the queued table, turn on the switch "Automatic settlement is off".
+2. Read `web/samples/10-designco-1108.pdf` (DesignCo again, 300 USDC, no purchase order) and press "Request payment".
+3. In Attention, press Approve on it.
+
+See:
+- The box turning green and saying what runs.
+- `Approval no_order` for invoice 10, then `Queued` after Approve.
+- Within 30 seconds, step 9j with no dialog, ending `Settled`.
+
+Three failed attempts leave a payment to a person, with the reason. The same loop runs headless with `npm run executor`.
+
+**9l. The transactions behind each payment.**
+
+Do:
+1. In Analytics, look at the "on chain" column of "All payments, by vendor".
+2. Press "Download the Excel report" or "CSV of all payments".
+
+See:
+- One link per transaction the contract recorded a timestamp for (request payment, approve payment, settle, mark settled) and the destination chain transaction, in time order.
+- The same links as columns in both files (hyperlinks in Excel).
+- On testnet the column reads `-`: nearblocks does not index these treasuries. On mainnet it is the table in step 10.
+
+The contract keeps timestamps, not hashes: the page matches them to the treasury's receipts read from nearblocks.
 
 **10. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. On mainnet the whole thing runs from the browser: sign in at `https://bursar.network/login` with a mainnet wallet, press "Create my treasury" and see the wallet sign five transactions (the treasury account with the contract inside and no access key, the agent with its one key, the executor with a key limited to `settle` and the two marks, the USDC registration, and the acceptance of the treasury, since ownership moves in two steps; about 7 NEAR, 4.7 of them the contract's storage on your own account); add a vendor on Base in Vendors and deposit USDC from Overview, Top up. Submit an invoice for that vendor (`web/samples/mainnet/` holds three small ones, 10 and 5 USDC on Base and 5 USDC on NEAR, made with `make_invoices.py --mainnet-demo`): `Queued`. In Attention, "Settle via Intents" (with a 1Click partner key pasted in Settings, see the limits below): see the 1Click quote (what the vendor receives, the one-off deposit account, 1Click's signature checked in the page), the executor key call `settle` with the signed quote, the contract verify the signature and every field of the quote, register the deposit account on the USDC contract itself and send the USDC in one receipt (your wallet signs nothing), and the page follow the swap until the vendor's chain confirms, then `mark_settled` with the destination transaction hash. Or turn on "Automatic settlement" in Attention and watch it happen with no click. The same loop runs headless with `npm run executor -- --once` and the executor key in the keystore.
 
