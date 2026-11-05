@@ -1,6 +1,6 @@
 # Bursar: an AI treasurer that pays invoices within limits it cannot change
 
-Version 0.1, October 2026. Companion to the [README](README.md), which has the runnable steps, and the [roadmap](ROADMAP.md).
+Version 0.2, November 2026. Companion to the [README](README.md), which has the runnable steps, and the [roadmap](ROADMAP.md).
 
 ## Abstract
 
@@ -38,7 +38,7 @@ Invoices are sensitive: amounts, counterparties, bank details. The agent rasteri
 
 Anyone can re-verify a reading later with `bursar verify`, without the API key and without trusting the agent: the signature over the exact bytes, the attestation nonce, the TDX quote's `report_data` binding, the quote against Intel's collateral, and the reference the contract stored. A one-byte change to the receipt fails the check.
 
-A company can run its own reading relay (a small Cloudflare Worker that holds its NEAR AI key and forwards bytes untouched) or bring its own key; nothing of its invoices passes through Bursar.
+A company can run its own reading relay (a small Cloudflare Worker that holds its NEAR AI key and forwards bytes untouched) or bring its own key; then nothing of its invoices passes through Bursar. The shared relay of the hackathon demo is the exception: it forwards the bytes untouched, so the receipt still verifies, but they pass through it.
 
 ### 3.3 The policy
 

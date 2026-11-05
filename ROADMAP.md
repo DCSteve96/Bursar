@@ -10,7 +10,7 @@ timeline
                     : Push notifications on the installed phone app
     Q1 2027 : NEAR Business as the vault behind a treasury
             : Approval chains and spending policies per department
-            : Exports for accountants and auditors
+            : Audit packs for accountants and auditors
             : Structured e-invoices (Peppol, CFDI, Factur-X, GST)
             : Cash forecast and history checks
     Q2 2027 : ERP connectors (NetSuite, SAP, QuickBooks, Xero)
@@ -30,7 +30,7 @@ timeline
 
 - **NEAR Business as the vault.** The multisig holds the funds and votes on the exceptions; it tops up the operating contract that Bursar runs. Bursar keeps doing the reading and the policy. The escalation hook already exists: today held invoices go to a Sputnik DAO.
 - **Approval chains and policies per department.** A hold can require two people, or a person of a given role; caps and budgets can differ by cost center. All of it on the contract, all of it events.
-- **Exports for accountants and auditors.** Every decision is already an on-chain event; the console turns a period into a ledger, with the enclave receipts attached, in the formats accountants use.
+- **Audit packs for accountants and auditors.** The console already exports payments to Excel and CSV (README step 9b). Next, a period becomes a ledger with the enclave receipts attached, in the formats accountants import.
 - **Structured e-invoices.** Where a country mandates a format (Peppol, CFDI in Mexico, Factur-X, India's GST e-invoice, and the others), the reading step becomes a deterministic parser and the contract decides the same way. PDFs stay for everywhere else.
 - **Cash forecast and history checks.** Commitments of the next 30 days against the balance, computed from the contract's own data (holds, queue, standing orders, due dates), shown before anyone approves; flags from the history (an amount out of scale for that vendor, two vendors sharing a payout or a tax id). Arithmetic, no AI, and the contract still decides.
 
