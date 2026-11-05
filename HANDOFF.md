@@ -721,3 +721,13 @@ Su main 6de682f: tutti i passi "matches", hash del wasm uguale a quello mainnet,
 ### 2.69 Passi 9-9l in formato "do X, see Y" (5 novembre, notte)
 
 Su richiesta di Stefano, come chiedono le regole (HACKATHON.md: README per lettori macchina, passi "do X - see Y"): ogni passo da 9 a 9l ora ha "Do:" con azioni numerate, "See:" con i risultati attesi in elenco, e sotto le note tecniche (Why, How, Who signs). Il passo 9 è diviso in quattro: creazione (senza wallet da file, poi con wallet sul sito), letture registrate, lettura live di un PDF, il resto della console (invito, DAO, Telegram). Contenuto invariato, verificato con un confronto delle parole chiave fra vecchio e nuovo testo.
+
+### 2.70 Ottavo giudice a freddo (5 novembre, notte)
+
+Su main f3ae090, con i passi 9-9l nel formato Do/See: tutto riproduce, build mainnet identica byte per byte, ogni riga mainnet confermata. Corretto:
+- `setup`: al primo giro si è fermato con "Account treasury.<root> does not exist at block height" (RPC indietro di un blocco). Ora `seen()` aspetta fino a 30 s l'account appena creato; il README dice che rilanciarlo riprende da dove si era fermato.
+- Analytics ed export: un pagamento Queued o Settling contava come "net to vendor" / "net paid". Ora net è solo Paid e Settled; il resto è "on the way" (colonna nuova in Payments e By vendor, testo nella tabella).
+- Passo 9: ordine dei Do corretto ("Create my treasury" prima del modulo azienda, Continue, backup delle chiavi nella seconda finestra); 9k con `?intents=stub` (su testnet l'interruttore compare solo così); 9l "base stub" per i pagamenti regolati dallo stub; invito con "Create the invite"; `cargo test settle` asserisce i motivi ma non li stampa.
+- 5d: "Mark as remitted" chiama `remit_withholding` (USDC al proprietario, saldo e debito scendono insieme); `mark_withholding_remitted` resta per chi ha pagato da altrove.
+- WHITEPAPER: niente "independent" (revisioni interne di agenti separati), regole non "in order" (il rifiuto si ferma alla prima, le attese si sommano).
+- login.html: "you pay nothing" vale solo su testnet; su mainnet il wallet paga circa 7 NEAR.

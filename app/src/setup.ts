@@ -72,6 +72,11 @@ export async function setup(o: Opts) {
   const exists = async (id: string) => {
     try { await provider.viewAccount({ accountId: id }); return true; } catch { return false; }
   };
+  // an RPC node can answer "does not exist" for a block or two after the account was created: wait for it to see it
+  const seen = async (id: string) => {
+    for (let i = 0; i < 20; i++) { if (await exists(id)) return; await new Promise((r) => setTimeout(r, 1500)); }
+    throw new Error(`${id} was created but the RPC does not show it yet; run setup again, it resumes where it stopped`);
+  };
 
   const create = async (id: string, near: number) => {
     if (await exists(id)) {
@@ -85,6 +90,7 @@ export async function setup(o: Opts) {
     const kp = KeyPair.fromRandom("ed25519");
     await root.createSubAccount({ accountOrPrefix: id, publicKey: kp.getPublicKey(), nearToTransfer: NEAR(near) });
     await saveKey(o.network, id, kp);
+    await seen(id);
     log(`created ${id} with ${near} NEAR`);
     return new Account(id, provider, new KeyPairSigner(kp));
   };
@@ -144,6 +150,7 @@ export async function setup(o: Opts) {
         receiverId: names.treasury,
         actions: [actions.createAccount(), actions.transfer(NEAR(near)), actions.deployContract(code), actions.functionCall("new", init, TGAS(50), 0n)],
       });
+      await seen(names.treasury);
       log(`created ${names.treasury} with ${near} NEAR and the policy contract in one transaction; the account has no access key`);
     } else {
       const acc = new Account(names.treasury, provider);

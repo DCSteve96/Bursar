@@ -114,6 +114,8 @@ near tokens you-c.testnet send-near you.testnet '9.5 NEAR' network-config testne
 ```bash
 npx tsx src/cli.ts setup --root you.testnet
 ```
+If it stops on a network error (an RPC node can lag a block behind the account it just created), run the same command again: it resumes where it stopped and skips what exists.
+
 See: sub-accounts for treasury, agent, executor and three vendors (two companies and a freelancer); a throwaway tUSDC token; a Sputnik DAO with you as council and a 0.1 NEAR proposal bond; the policy contract deployed and funded with 15,000 tUSDC; four vendors, each with the tax id it prints on its invoices, one of them a freelancer with a 20% withholding set on it; three orders recorded (hosting 500 USDC a month, purchase orders PO-2026-118 and PO-2026-104); the treasury listed in the public registry (`listed treasury.you.testnet in the registry`); the agent left with a single function-call key; `.env.testnet` written; sample invoices regenerated with your vendor accounts (`written to .../invoices/samples`).
 
 **3. Start the relayer and process the inbox.**
@@ -183,7 +185,7 @@ The reading itself is cross-checked without trusting the model: the total must a
 cp ../invoices/samples/09-studio-bianchi-0044.pdf ../invoices/inbox/ && npm run agent -- --once --offline
 npm run dev status
 ```
-See: `#9 consultant SB-0044 1000.00 USDC Paid`, the vendor's tUSDC balance up by 800, and in `status` the line `withheld for the state, to remit 200.00 USDC`: the 200 never left the treasury, it is earmarked: the balance `status` shows still includes it, and the contract spends only the balance minus what is withheld (payments and `withdraw` alike). Budgets and caps count the gross. An invoice that shows a different withholding than the rate set, or shows one for a vendor with none set, is held (`Approval withholding_mismatch`). The same holds for a misreading: read live in the enclave, invoice 9 can come back with the net 800 as the amount, and then it is held this way instead of paid; the `Paid` above is the offline parser's exact reading. The withheld share is the vendor's money paid to the state on its behalf, and remitting and filing stay with the company and its accountant (in Italy the F24, the Certificazione Unica and the 770): Bursar talks to no tax authority. When the company has paid the state, the owner calls `mark_withholding_remitted` (in the console: Analytics, "Mark as remitted") and the counter goes down; the USDC leaves with the usual `withdraw`.
+See: `#9 consultant SB-0044 1000.00 USDC Paid`, the vendor's tUSDC balance up by 800, and in `status` the line `withheld for the state, to remit 200.00 USDC`: the 200 never left the treasury, it is earmarked: the balance `status` shows still includes it, and the contract spends only the balance minus what is withheld (payments and `withdraw` alike). Budgets and caps count the gross. An invoice that shows a different withholding than the rate set, or shows one for a vendor with none set, is held (`Approval withholding_mismatch`). The same holds for a misreading: read live in the enclave, invoice 9 can come back with the net 800 as the amount, and then it is held this way instead of paid; the `Paid` above is the offline parser's exact reading. The withheld share is the vendor's money paid to the state on its behalf, and remitting and filing stay with the company and its accountant (in Italy the F24, the Certificazione Unica and the 770): Bursar talks to no tax authority. To pay the state, the owner calls `remit_withholding` (in the console: Analytics, "Mark as remitted"): the withheld USDC goes to the owner's own account in one transaction, and the balance and the debt drop together; the company then pays the state with it. A company that paid the state from elsewhere calls `mark_withholding_remitted` instead: the counter goes down and the USDC stays in the treasury, spendable again.
 
 **6. Verify the TEE receipt yourself.** With `NEAR_AI_API_KEY` set, step 3 reads the invoices inside the enclave and writes one receipt per payment in `app/.bursar/receipts/<id>.json`: the exact request and response bytes, the gateway's ECDSA signature, the attestation report with the Intel TDX quote, and the nonce the agent chose. Anyone with that file can check it, without the API key:
 
@@ -236,9 +238,10 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 Do, with no wallet (works from a local file):
 1. Open `web/login.html` and press "Try it with throwaway keys" (it opens `web/console.html#start`).
-2. Fill in your company: name, what it does, country. Leave the tax id empty: the recorded readings below are addressed to a demo company, so another tax id holds them all as `buyer_mismatch`.
-3. Press "Create my treasury" and wait about a minute. It costs you nothing: the testnet faucet pays.
-4. In the third window, choose how invoices are read ("Bursar reading" through Bursar's relay, or your own NEAR AI Cloud key) and save the keys backup.
+2. Press "Create my treasury".
+3. In the first window, fill in your company: name, what it does, country. Leave the tax id empty: the recorded readings below are addressed to a demo company, so another tax id holds them all as `buyer_mismatch`. Press Continue.
+4. Wait about a minute in the second window while it creates everything. It costs you nothing: the testnet faucet pays. Save the keys backup it offers.
+5. Press Continue. In the third window, choose how invoices are read ("Bursar reading" through Bursar's relay, or your own NEAR AI Cloud key).
 
 See:
 - `OK account`, `OK contract ... with no access key`, `OK company`, `OK agent`, `OK usdc`, `OK vendors`, `OK orders`, `OK registry`, then the console. There is no `OK owner` line: the browser's own key is the owner.
@@ -298,7 +301,7 @@ Notes on the reading:
 
 **9, continued: the rest of the console.** Pages: Overview (balance, what waits for a person, last decisions), Invoices (read, receipt, decide), Attention (approve or cancel what is held, see what was refused and why), Vendors (allowlist, payouts, budgets), Orders (purchase orders and standing orders), Analytics (spend by vendor and by month, straight from the payments), Settings (company, limits, strict order mode, operators with on-chain roles, keys). Several treasuries live side by side in the switcher at the top of the sidebar.
 
-- **Invite a collaborator.** Do: in Settings, press "Invite a collaborator" and pick a role (approve, vendors, orders). See: an account created for them with one key limited to the methods of that role, the role recorded in the contract, and a link that carries the key after the hash sign, so it never reaches a server; send it however you like. Whoever opens it is signed in as that account with that role and nothing else. "Remove" next to the operator revokes it on chain.
+- **Invite a collaborator.** Do: in Settings, under "Invite a collaborator", pick a role (approve, vendors, orders) and press "Create the invite". See: an account created for them with one key limited to the methods of that role, the role recorded in the contract, and a link that carries the key after the hash sign, so it never reaches a server; send it however you like. Whoever opens it is signed in as that account with that role and nothing else. "Remove" next to the operator revokes it on chain.
 - **Create a DAO.** Do: in Settings, "Governance", pick the council (you, operators, any NEAR account) and press "Create the DAO". See: the Sputnik factory called with a 6 NEAR deposit on testnet (the DAO's own account and storage, paid by the payer account), 2 NEAR sent to the treasury for proposal bonds, and the contract pointed at the DAO. From then on every held payment opens a proposal, and council members vote in Attention (or in Trezu on mainnet).
 - **Receive invoices by Telegram.** Do: in Settings, press "Connect a Telegram chat", open the link, press Start, and post a PDF in that chat (you, a colleague, or a vendor in a group). See: the PDF in the console's Inbox with the sender and the file name, nothing read yet. Press Read: the same enclave reading and contract decision as a dropped file, and the bot tells the chat the outcome with the transaction link. The relay keeps only the sender, the name and Telegram's file reference; the PDF stays on Telegram until Read (`relay/README.md`, "Telegram inbox", for the bot setup). The owner can also approve from Telegram: step 9h.
 
@@ -324,7 +327,7 @@ Do:
 3. Press "CSV of all payments".
 
 See:
-- Spend by month (the lighter top of a bar is the withholding kept for the state), spend by vendor, the mix of decisions, and every payment grouped by vendor with gross, withheld and net.
+- Spend by month (the lighter top of a bar is the withholding kept for the state), spend by vendor, the mix of decisions, and every payment grouped by vendor with gross, withheld and net (net is what the vendor received; a cross-chain payment the executor has not delivered yet shows as "on the way", in its own column in the files too).
 - `bursar-<treasury>-<date>.xlsx` with five sheets (Summary, Payments, By vendor, By month, Withholding), amounts as numbers, one row per decision with its reason, invoice hash and enclave completion id.
 - The CSV is the Payments sheet alone. Both files are built in the browser from the contract; nothing is uploaded anywhere.
 
@@ -473,14 +476,14 @@ See:
 - The quote dialog: what the vendor receives and at which address, what the treasury sends, a 64-character deposit account, and "signed by the test signer standing in for 1Click (stub), checked here and by the contract" (on mainnet: "1Click, checked here and by the contract").
 - One transaction by the executor key, `settle` with the signed bytes and the signature. The contract verifies the signature, checks the recipient, the amount, the asset, the floor and the expiry, registers the deposit account on the test USDC and sends the net amount in the same receipt.
 - `get_payment` showing `deposit_address` (an implicit account the executor never named) and `quote_id` (the base58 hash of the signed bytes); a few seconds later the stub reports delivery and `mark_settled` closes it.
-- `cargo test settle` running a signed quote for another recipient, another amount, a fee over 2 percent, another chain, an expired one, a named deposit account, a wrong signature and a wrong key: every one refused with its reason, and nothing moves.
+- `cargo test settle` running a signed quote for another recipient, another amount, a fee over 2 percent, another chain, an expired one, a named deposit account, a wrong signature and a wrong key: every one refused, the test asserting its reason, and nothing moves.
 
 Who signs: a treasury the testnet wizard made names its owner as the executor, so the owner's key in this browser signs the settlement. A treasury with its own executor needs that key here (Settings, Keys).
 
 **9k. Let the page be the executor.**
 
 Do:
-1. In Attention, above the queued table, turn on the switch "Automatic settlement is off".
+1. Open the console with `?intents=stub` as in step 9j (on testnet the switch appears only with it; on mainnet it is always there). In Attention, above the queued table, turn on the switch "Automatic settlement is off".
 2. Read `web/samples/10-designco-1108.pdf` (DesignCo again, 300 USDC, no purchase order) and press "Request payment".
 3. In Attention, press Approve on it.
 
@@ -500,7 +503,7 @@ Do:
 See:
 - One link per transaction the contract recorded a timestamp for (request payment, approve payment, settle, mark settled) and the destination chain transaction, in time order.
 - The same links as columns in both files (hyperlinks in Excel).
-- On testnet the column reads `-`: nearblocks does not index these treasuries. On mainnet it is the table in step 10.
+- On testnet the column reads `-` for the NEAR transactions, because nearblocks does not index these treasuries; a payment settled through the stub shows `base stub` for its destination. On mainnet it is the table in step 10.
 
 The contract keeps timestamps, not hashes: the page matches them to the treasury's receipts read from nearblocks.
 
