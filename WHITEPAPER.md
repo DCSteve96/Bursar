@@ -18,7 +18,7 @@ The usual answers are controls around people: four eyes, approval chains, vendor
 
 - The **agent** reads the invoice and produces a claim: vendor, invoice number, amount, due date, the payout printed on the document, the tax identifiers, the purchase order reference, and flags for anything odd. It holds one key, a NEAR function-call access key that can call exactly one method on one contract: `request_payment`. It cannot transfer, cannot change a vendor, cannot approve. A stolen agent key is worth nothing.
 - The **policy contract** is the company's treasury. It holds the USDC, the vendor allowlist with each vendor's registered payout, the caps and budgets, the purchase orders, the roles. On every claim it decides: pay, hold for a person, or refuse. The decision is deterministic and reproducible from the chain alone.
-- The **executor** settles the payments the contract queued for vendors on other chains. It is a plain process with no model in it. The contract gives it one place to send the USDC: the NEAR Intents deposit account the owner registered. A quote naming any other recipient is refused by the contract, not by the executor's good manners.
+- The **executor** settles the payments the contract queued for vendors on other chains. It is a plain process with no model in it. The contract gives it one place to send the USDC: the one-off deposit account of a quote 1Click signed for that payment, whose signature and fields (the vendor's recorded address, the exact net amount, the asset, the expiry) the contract verifies itself. A quote naming any other recipient is refused by the contract, not by the executor's good manners.
 
 The AI never chooses an address. The contract pays NEAR vendors itself, in the same transaction that approved them. That single fact removes the fraud the industry fears most: a changed payout on an invoice is a block, not a payment.
 
@@ -86,7 +86,7 @@ The invoice is read in an enclave and never leaves it in clear text; the agent k
 
 Bursar is software. It never takes a percentage of payments, it never holds funds, and it is not a payment service: companies run it on their own accounts, with their own keys, and are responsible for the rules that apply to paying vendors in a stablecoin where they are.
 
-The unit that scales is the invoice, and its marginal cost is cents of enclave time, so the plans are per treasury and by volume: a self-hosted license, a pay-as-you-go rate per invoice, and monthly plans from a starter for small companies to business and enterprise plans with roles, DAO approvals, forecasts, exports, connectors and dedicated relays. The subscription itself is paid by the treasury: Bursar is a registered vendor with a standing order in USDC, invoices through the same bot, and is paid by the contract within the customer's own limits. No cards, no direct debits.
+The unit that scales is the invoice, and its marginal cost is cents of enclave time, so the plans are per treasury and by volume: a self-hosted license, a pay-as-you-go rate per invoice, and monthly plans from a starter for small companies to business and enterprise plans with roles, DAO approvals, exports and dedicated relays, and the forecasts and ERP connectors of the roadmap as they ship. The subscription itself is paid by the treasury: Bursar is a registered vendor with a standing order in USDC, invoices through the same bot, and is paid by the contract within the customer's own limits. No cards, no direct debits.
 
 ## 7. Where it sits
 
