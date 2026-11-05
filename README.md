@@ -22,7 +22,7 @@
 <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-ffffff?style=flat-square&labelColor=0d0f0e">
 </p>
 
-Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `business`, `privacy`, `security`. Development started on October 20, 2026; the project was completed, tested and submitted during the hackathon, and the commit history is kept as it is.
+Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `business`, `privacy`, `security`. Development started on October 20, 2026, the day after the hackathon was announced: the rules count code from the announcement on October 19 to November 14 (HACKATHON.md, Q-001), so every commit in this repository, from the first one, is inside the window. The commit history is kept as it is.
 
 ## The problem
 
