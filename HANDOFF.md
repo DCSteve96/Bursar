@@ -759,3 +759,12 @@ Su main 18bba0c: tutto "matches" (setup al primo colpo, chiavi sopravvissute al 
 - README: l'MCP non ha "exactly the agent's powers" (ha anche `owner_cancel_payment` e `sync_dao_approvals` con le chiavi di owner ed executor se nell'ambiente).
 - Link on chain: finestra 6 s con il receipt più vicino (il contratto registra il blocco del receipt, nearblocks quello della transazione, 1-2 blocchi prima: un request a 2,58 s restava fuori); per un pagamento tenuto, approvato e poi regolato (il mark sovrascrive updated_at) l'approvazione si cerca per ordine fra request e settle. Verificato su mainnet (invariato) e su testnet (fattura 10: request, approve, base stub).
 - Interruttore 9k: anche il testo accanto lo attiva; 9k "about 30 seconds"; 9c: la chiave del nuovo executor copre anche `sync_dao_proposal`; dashboard "counted against today's cap"; docs: duplicate_invoice (numero normalizzato o stesso file, i rifiutati non contano), glossario "hold" completo; README: gli errori di fetch da file:// sono attesi.
+
+### 2.74 Dodicesimo giudice a freddo (6 novembre)
+
+Su main 7498de4: tutto "matches" (interruttore dal testo, link on chain con l'approvazione, export coerenti), tabelle mainnet confermate. Il giudice ha letto il contratto per dire cosa può fare una chiave del browser rubata: con `set_limits` e `set_order_bound` alzava i limiti e svuotava la tesoreria verso i fornitori registrati. Corretto:
+- Tolti anche `set_limits` e `set_order_bound` dalla chiave (li firma il wallet, già via `ownerCall`). Ora una chiave rubata può solo chiedere e approvare pagamenti ai fornitori registrati entro limiti che non può allargare: scritto così nel README (passo 9 e tabella), nel WHITEPAPER (§2, §3.1, §4) e nei testi di console e login che dicevano ancora "signs vendors ... never a transfer".
+- "Stolen key = nothing" e "worth nothing" per l'agente: riscritti (può solo chiedere, entro limiti e quote).
+- WHITEPAPER 3.1: con il setup CLI la chiave dell'owner è nel keystore della macchina.
+- docs: il payout lo cambia anche un operatore ma non paga finché l'owner conferma; CDN "pinned by version, integrity dove l'import map lo permette" (dcap-qvl da esm.sh senza hash, anche nel README).
+- README: letture registrate da readings.js da file; mark_settled "within half a minute"; passo 10 con `sync_dao_proposal`; i fornitori demo della console pagano gli account del deployment del README; sezione Repository con `video/` e le note interne (da togliere quando la repo diventa pubblica), mainnet samples in web/samples/mainnet.
