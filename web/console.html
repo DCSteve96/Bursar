@@ -491,7 +491,7 @@
     <h3 class="heading-sm" style="margin:40px 0 12px">Cross-chain, waiting for the executor</h3>
     <div id="autoSettleRow" class="autosettle" hidden>
       <button type="button" id="autoSettle" class="toggle" role="switch" aria-checked="false" aria-labelledby="autoSettleTitle"><span class="knob"></span></button>
-      <div class="t"><b id="autoSettleTitle">Automatic settlement is off</b><div class="muted" id="autoSettleNote">Queued payments wait for you to press Settle via Intents on each one.</div></div>
+      <div class="t" style="cursor:pointer" onclick="document.getElementById('autoSettle').click()"><b id="autoSettleTitle">Automatic settlement is off</b><div class="muted" id="autoSettleNote">Queued payments wait for you to press Settle via Intents on each one.</div></div>
     </div>
     <div class="wrap"><table id="attnQueued"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>destination</th></tr></thead><tbody></tbody></table></div>
   </div>
@@ -2239,10 +2239,18 @@ function onChainLinks(r) {
     const x = txIndex.receipts.filter((x) => x.methods.includes("settle") && x.ts > c + 1e9 && x.ts < u - 1e9 && !txClaimed.has(x.hash)).sort((a, b) => b.ts - a.ts)[0];
     if (x) { txClaimed.add(x.hash); seen.add(x.hash); parts.push(near(x.hash, "settle", x.ts)); }
   }
-  // the contract's timestamps arrive as JSON numbers (rounded past the microsecond): match a receipt within two seconds
+  // the contract stores the block of the receipt, nearblocks the block of the transaction, a block or two earlier (and the
+  // timestamps arrive as JSON numbers, rounded past the microsecond): take the nearest receipt within six seconds
   for (const t of [Number(r.created_at) || 0, Number(r.updated_at) || 0]) {
     if (!t) continue;
-    for (const x of txIndex.receipts) if (Math.abs(x.ts - t) < 2e9 && !seen.has(x.hash)) { seen.add(x.hash); parts.push(near(x.hash, x.methods[0].replace(/_/g, " "), x.ts)); }
+    const x = txIndex.receipts.filter((x) => Math.abs(x.ts - t) < 6e9 && !seen.has(x.hash) && !txClaimed.has(x.hash)).sort((a, b) => Math.abs(a.ts - t) - Math.abs(b.ts - t))[0];
+    if (x) { seen.add(x.hash); txClaimed.add(x.hash); parts.push(near(x.hash, x.methods[0].replace(/_/g, " "), x.ts)); }
+  }
+  // a payment held, approved and then settled keeps only the settlement's time: the one approval between the request and the settle
+  if (["Settled", "Settling"].includes(r.status) && r.reason && c) {
+    const end = parts.find((p) => p.label === "settle")?.ts || u;
+    const x = txIndex.receipts.filter((x) => x.methods.some((m) => m.startsWith("approve_payment")) && x.ts > c && x.ts < end && !seen.has(x.hash) && !txClaimed.has(x.hash)).sort((a, b) => a.ts - b.ts)[0];
+    if (x) { seen.add(x.hash); txClaimed.add(x.hash); parts.push(near(x.hash, "approve payment", x.ts)); }
   }
   parts.sort((a, b) => a.ts - b.ts);
   if (r.dest_tx && !r.dest_tx.startsWith("0xstub")) { const base = DEST_EXPLORER[r.chain]; parts.push({ label: `${r.chain} tx`, hash: r.dest_tx, ts: Infinity, url: base ? `${base}${encodeURIComponent(r.dest_tx)}` : "" }); }
@@ -2318,8 +2326,9 @@ function renderSettings() {
 // The key a wallet owner keeps in this browser can call these and nothing else; the rest (ownership, withdrawals, roles, code) needs the wallet itself.
 // What the browser key of a wallet owner may sign alone. Never a vendor or a payout (add_vendor, update_vendor,
 // confirm_vendor_payout: with request_payment they would let a stolen key pay any address), never the DAO (clear_dao),
-// a withdrawal, the owner or the roles, a new build: those the wallet signs, through ownerCall, and shows the owner first.
-const WALLET_KEY_METHODS = ["set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "add_operator", "remove_operator", "mark_withholding_remitted", "set_paused", "reset_in_flight"];
+// an operator (add_operator, remove_operator), a withdrawal, the owner or the roles, a new build: those the wallet signs,
+// through ownerCall, and shows the owner first.
+const WALLET_KEY_METHODS = ["set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "mark_withholding_remitted", "set_paused", "reset_in_flight"];
 async function ownerCall(method, args, gasTgas = 30) {
   if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
   if (settings.ownerKeyKind === "wallet" && !WALLET_KEY_METHODS.includes(method)) {

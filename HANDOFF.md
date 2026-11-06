@@ -750,3 +750,12 @@ Su main 37e4597: tutto "matches", setup al primo colpo, chiavi sopravvissute a 9
 - Export: Summary con "gross paid or on the way" e "net on the way to vendors"; By month con colonna "on the way"; Overview "paid or on the way this month"; aiuto del grafico.
 - docs.html allineata al README: aziende di ogni dimensione, eccezione del relay condiviso, settle su quote firmata, riga mainnet #2 (held flagged poi approvata) e build del 3 novembre, build di test-usdc, refuso.
 - Ethereum aggiunto all'elenco delle chain (README, WHITEPAPER, docs, index, console); 9d "Connect a Telegram chat"; 9h "Trusted vendor" + "accept without asking"; login: quattro fornitori, cinque transazioni e 4,7 NEAR su mainnet; WHITEPAPER: l'agente ha al massimo un piccolo saldo per il gas.
+
+### 2.73 Undicesimo giudice a freddo (6 novembre)
+
+Su main 18bba0c: tutto "matches" (setup al primo colpo, chiavi sopravvissute al riavvio, export e pagina coerenti, link on chain su testnet), tabelle mainnet confermate con l'API v3. Corretto:
+- Chiave del browser: tolti anche `add_operator` e `remove_operator` (con quelli una chiave rubata dava ruoli a un account suo); li firma il wallet via `ownerCall`. Testi allineati (README passo 9 e tabella, WHITEPAPER 3.1, docs sezione 07, che diceva ancora "signs vendors").
+- WHITEPAPER 3.1: "nobody holds a key that could redeploy or drain it" era falso per l'owner (`upgrade`, `withdraw` dal wallet): riscritto come "nessuna chiave sull'account".
+- README: l'MCP non ha "exactly the agent's powers" (ha anche `owner_cancel_payment` e `sync_dao_approvals` con le chiavi di owner ed executor se nell'ambiente).
+- Link on chain: finestra 6 s con il receipt più vicino (il contratto registra il blocco del receipt, nearblocks quello della transazione, 1-2 blocchi prima: un request a 2,58 s restava fuori); per un pagamento tenuto, approvato e poi regolato (il mark sovrascrive updated_at) l'approvazione si cerca per ordine fra request e settle. Verificato su mainnet (invariato) e su testnet (fattura 10: request, approve, base stub).
+- Interruttore 9k: anche il testo accanto lo attiva; 9k "about 30 seconds"; 9c: la chiave del nuovo executor copre anche `sync_dao_proposal`; dashboard "counted against today's cap"; docs: duplicate_invoice (numero normalizzato o stesso file, i rifiutati non contano), glossario "hold" completo; README: gli errori di fetch da file:// sono attesi.

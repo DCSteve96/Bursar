@@ -64,7 +64,7 @@ flowchart LR
    - vendor on NEAR: USDC is transferred in the same transaction (`Paid`)
    - vendor on Base, Arbitrum, Ethereum, Solana or Sui: the **executor** (a plain process with the company's key, no AI) gets a NEAR Intents quote (EXACT_INPUT on the net amount the contract will send) with the vendor's recorded address as recipient and calls `settle` with the bytes 1Click signed and its signature. The contract verifies the signature against 1Click's key, checks that the quote pays the vendor's recorded address for exactly the net amount in USDC on the vendor's chain, that the swap keeps at least 98 percent of it and that it has not expired, registers the one-off deposit account on the token itself and sends the USDC there, in one receipt (`Settling`, then `Settled`). The executor names nothing; nobody signs anything by hand. A refunded settlement goes back in front of a person (`Approval`, reason `settlement_failed`), nothing is re-sent on the executor's own; one nobody can confirm is closed by the owner (`close_settlement`, delivered or not).
    - a USDC transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked `transfer_failed`, nothing lost
-6. Everything is an on-chain event. The MCP server lets any assistant drive it, with exactly the agent's powers.
+6. Everything is an on-chain event. The MCP server lets any assistant drive it with the agent's powers, plus two housekeeping tools that use the owner's and the executor's keys when the environment has them (cancel a held payment, sync the DAO's answers).
 7. Anyone can re-verify the TEE receipt behind a payment, without the API key and without trusting the agent (`bursar verify`).
 8. Orders: the owner records what the company agreed to buy (a purchase order with a total, or a standing order per period). An invoice outside them, or one the model flagged, is held for a person instead of paid on the AI's word. Operators get on-chain roles (approve, manage vendors, manage orders), revocable by the owner.
 
@@ -234,7 +234,7 @@ Then ask: "submit the invoice at invoices/samples/04-acme-hosting-0924-fraud.pdf
 
 **8. Explorer and dashboard.** Open `web/explorer.html` (a static file, no build; live at `https://bursar.network/explorer`). See: every treasury on the network, read from the registry contract and verified against each policy contract (on mainnet `1 registered, 1 verified`; on testnet a hundred and more, the load test below included, plus yours after step 2; reading them all takes under a minute, with "reading 36 of 112 treasuries..." while it works), the totals across companies (treasury balance, paid out today, this month and all time, decisions, blocked, waiting for a person) and the last decisions of every company, with no vendor names and no invoice numbers. On testnet the registry also holds the load-test treasuries of 21 October (the `treasury.bursar-big-*.testnet` rows, invented companies), with every decision their contracts took on the generated invoices still on chain, read from the chain by this page like any other. The page shows accounts and numbers, never company or vendor names. `web/dashboard.html?treasury=treasury.you.testnet` is one company's own page: balance, caps, vendors with their monthly budget, and every payment with its decision, DAO proposal, destination transaction and attestation reference, all read from the RPC.
 
-**9. Be the customer, from a browser.** The console is `web/console.html` (live at `https://bursar.network/console`) and the door is `web/login.html` (live at `https://bursar.network/login`). Nothing to install: every number is read from the contract and every change is signed in the browser. Opened as a local file, everything works except the wallet door, because wallets answer to a web address: sign in with a wallet on the live site, or serve `web/` with any static server.
+**9. Be the customer, from a browser.** The console is `web/console.html` (live at `https://bursar.network/console`) and the door is `web/login.html` (live at `https://bursar.network/login`). Nothing to install: every number is read from the contract and every change is signed in the browser. Opened as a local file, everything works except the wallet door, because wallets answer to a web address (the browser console logs blocked fetches of `builds.json`, `meteor.js` and the sample PDFs, which the pages cover with their `.js` bundles; they are expected): sign in with a wallet on the live site, or serve `web/` with any static server.
 
 Do, with no wallet (works from a local file):
 1. Open `web/login.html` and press "Try it with throwaway keys" (it opens `web/console.html#start`).
@@ -257,7 +257,7 @@ With a wallet, on the live site:
 4. Press "Connect the wallet key" and approve the one transaction.
 
 See:
-- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (orders, limits, approvals, operators, the vault, pause), never a vendor or a payout, the DAO, a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first: a stolen browser key cannot add a vendor or point one at a new address and then pay it. A key added by a build before 6 November could also sign vendor and payout changes; Overview says so and "Replace the key" swaps it for a narrow one in one wallet transaction.
+- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (orders, limits, approvals, the vault, the company record, pause, balance sync, a request of its own), never a vendor or a payout, an operator, the DAO, a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first: a stolen browser key cannot add a vendor or point one at a new address and then pay it. A key added by a build before 6 November could also sign vendor and payout changes; Overview says so and "Replace the key" swaps it for a narrow one in one wallet transaction.
 - For a new treasury, the same `OK` lines plus `OK owner ... is owned by you.testnet`: the contract is offered to your wallet account (`offer_ownership`) and the wallet accepts it (`accept_ownership`, one signature).
 - "you.testnet, owner, wallet key" at the bottom of the sidebar.
 
@@ -357,7 +357,7 @@ Do, with no device left to admit from (the executor key is gone with the browser
 1. As the owner, press "Replace the executor from this device".
 
 See:
-- The wallet creates a new executor sub-account with one key limited to `settle` and the marks on this treasury (0.2 NEAR), then calls `set_roles`.
+- The wallet creates a new executor sub-account with one key limited to `settle`, the two marks and `sync_dao_proposal` on this treasury (0.2 NEAR), then calls `set_roles`.
 - `get_roles` on the contract naming the new executor, and "Settle via Intents" back in Attention.
 
 A person in the console can also press "Request payment" without the agent key: `request_payment` accepts the agent, the owner and the operators, and decides the same way.
@@ -490,7 +490,7 @@ Do:
 See:
 - The box turning green and saying what runs.
 - `Approval no_order` for invoice 10, then `Queued` after Approve.
-- Within 30 seconds, step 9j with no dialog, ending `Settled`.
+- Within about 30 seconds (the loop ticks every 30 s, the settlement takes a few more), step 9j with no dialog, ending `Settled`.
 
 Three failed attempts leave a payment to a person, with the reason. The same loop runs headless with `npm run executor`.
 
@@ -501,7 +501,7 @@ Do:
 2. Press "Download the Excel report" or "CSV of all payments".
 
 See:
-- One link per transaction the contract recorded a timestamp for (request payment, approve payment, settle, mark settled) and the destination chain transaction, in time order.
+- One link per transaction the page can match: the request and the last change from the contract's two timestamps, the settle and the approval of a held payment from their place between them (a payment approved and then settled keeps only the settlement's time, so its approval is found by order), and the destination chain transaction, in time order.
 - The same links as columns in both files (hyperlinks in Excel).
 - The NEAR transactions as links, read from the nearblocks API v3, on testnet too. A payment the CLI agent requested through the relayer reads `-`: its outer transaction is a meta transaction addressed to the agent, not to the treasury. A payment settled through the stub shows `base stub` for its destination. On mainnet it is the table in step 10.
 
@@ -563,7 +563,7 @@ The hackathon build is the demo above. The [roadmap](ROADMAP.md) has the full pl
 | Access keys as identity | console vault | A device asking to be admitted signs with its wallet key; a device that holds the vault checks `view_access_key_list` of the owner account and admits the account's own full-access keys by itself. |
 | Sputnik DAO v2 / Trezu | `policy` contract | Human approval above a threshold, opened by the contract itself as a FunctionCall proposal; the callback stores the proposal id, `sync_dao_proposal` reads the verdict back. |
 | NEP-141, NEP-297 events | `policy` contract | USDC in, every decision out as an event, so dashboards need no database. |
-| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the everyday methods of the company's contract (orders, limits, approvals, operators, the vault): vendors and payouts, the DAO, withdrawals, ownership, roles and code changes are signed by the wallet itself. |
+| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the everyday methods of the company's contract (orders, limits, approvals, the vault, the company record, pause, balance sync, request_payment): vendors and payouts, operators, the DAO, withdrawals, ownership, roles and code changes are signed by the wallet itself. |
 
 ## Repository
 

@@ -127,7 +127,7 @@ async function load(e) {
       view(network, treasury, "list_vendors"), view(network, treasury, "list_payments", { from: 0, limit: 200 }),
     ]);
     const stat = (k, v) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-    $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent today", usdc(stats.spent_today)) + stat("per payment cap", usdc(limits.per_payment_cap)) + stat("daily cap", usdc(limits.daily_cap)) + stat("approval from", usdc(limits.approval_threshold)) + stat("payments", stats.payments) + (stats.paused ? stat("paused", "yes") : "");
+    $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("counted against today's cap", usdc(stats.spent_today)) + stat("per payment cap", usdc(limits.per_payment_cap)) + stat("daily cap", usdc(limits.daily_cap)) + stat("approval from", usdc(limits.approval_threshold)) + stat("payments", stats.payments) + (stats.paused ? stat("paused", "yes") : "");
     $("#vendors tbody").innerHTML = vendors.map(([id, v]) => {
       const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month);
       const pct = b > 0n ? Number(s * 100n / b) : 0;
