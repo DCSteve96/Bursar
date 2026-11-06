@@ -53,7 +53,7 @@ flowchart LR
 
 1. An invoice PDF lands in the inbox.
 2. The **agent** reads it inside a TEE on NEAR AI Cloud. With the company's own NEAR AI key the invoice goes from its browser or agent straight to the enclave, over TLS, and no Bursar server sees it; the model's answer comes with an attestation and a signed receipt. (The shared "Bursar reading" relay of the hackathon demo forwards the bytes untouched, so the receipt still verifies, but they do pass through it: step 9.)
-3. The agent asks the **policy contract** on NEAR to pay. It signs with one function-call key that can only call `request_payment`, and sends it as a meta transaction, so the agent owns no NEAR at all.
+3. The agent asks the **policy contract** on NEAR to pay. It signs with one function-call key that can only call `request_payment`, and sends it as a meta transaction through a relayer, so on that path the agent pays no gas (the console and the MCP server can also call the contract directly, and `setup` leaves the agent 0.5 NEAR for that).
 4. The **contract** decides, deterministically and on chain:
    - vendor must be in the owner's allowlist
    - the payout printed on the invoice must equal the payout the owner recorded (otherwise `payout_changed`)
@@ -241,7 +241,7 @@ Do, with no wallet (works from a local file):
 2. Press "Create my treasury".
 3. In the first window, fill in your company: name, what it does, country. Leave the tax id empty: the recorded readings below are addressed to a demo company, so another tax id holds them all as `buyer_mismatch`. Press Continue.
 4. Wait about a minute in the second window while it creates everything. It costs you nothing: the testnet faucet pays. Save the keys backup it offers.
-5. Press Continue. In the third window, choose how invoices are read ("Bursar reading" through Bursar's relay, or your own NEAR AI Cloud key).
+5. Press Continue. In the third window, choose how invoices are read ("Bursar reading" through Bursar's relay, or your own NEAR AI Cloud key), then press "Open my treasury".
 
 See:
 - `OK account`, `OK contract ... with no access key`, `OK company`, `OK agent`, `OK usdc`, `OK vendors`, `OK orders`, `OK registry`, then the console. There is no `OK owner` line: the browser's own key is the owner.
@@ -288,7 +288,7 @@ Do:
 See:
 - The PDF rendered to PNG in the browser, the attestation fetched for a fresh nonce, and the enclave's answer from `Qwen/Qwen3-VL-30B-A3B-Instruct` in 3 to 5 seconds.
 - The receipt checks of step 6, the Intel collateral check included.
-- The contract's decision with the transaction link: `Blocked payout_changed` for invoice 4, `Paid` for a known vendor whose order covers the invoice.
+- The contract's decision with the transaction link: `Blocked payout_changed` for invoice 4. Other files get whatever the treasury's state allows: after the recorded readings every order is used, so an ordinary Acme invoice such as 5 is held `no_order`, and `Paid` needs an order that covers it (add one in Orders).
 - `verify` passing on this treasury: after "Request payment" the file carries this treasury's payment and transaction and names the treasury, a refused payment included.
 
 Notes on the reading:
@@ -555,7 +555,7 @@ The hackathon build is the demo above. The [roadmap](ROADMAP.md) has the full pl
 | Feature | Where | Why it matters here |
 |---|---|---|
 | Function-call access keys | `setup` step 7, `agent` | The agent's only key can call one method on one contract. Stolen key = nothing. |
-| Meta transactions (NEP-366) | `relayer.ts`, `near.ts` | The agent owns no NEAR. The relayer only forwards `request_payment` from the agent. |
+| Meta transactions (NEP-366) | `relayer.ts`, `near.ts` | Through the relayer the agent pays no gas; the relayer only forwards `request_payment` from the agent. The direct path (console, MCP) pays gas from the agent's 0.5 NEAR. |
 | Sub-accounts | `setup.ts` | Agent, executor and treasury are separate accounts under the company. |
 | NEAR AI Cloud (TEE) | `ai.ts` | Invoices are sensitive. Inference runs in a TEE, with attestation and a signed receipt stored next to the payment. |
 | NEAR Intents (1-Click) | `executor.ts`, `quote.ts`, console | Vendors get USDC on their chain. The contract verifies 1Click's signature on the quote and checks its recipient, amount, asset, floor and expiry itself before moving USDC. |
