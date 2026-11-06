@@ -768,3 +768,11 @@ Su main 7498de4: tutto "matches" (interruttore dal testo, link on chain con l'ap
 - WHITEPAPER 3.1: con il setup CLI la chiave dell'owner è nel keystore della macchina.
 - docs: il payout lo cambia anche un operatore ma non paga finché l'owner conferma; CDN "pinned by version, integrity dove l'import map lo permette" (dcap-qvl da esm.sh senza hash, anche nel README).
 - README: letture registrate da readings.js da file; mark_settled "within half a minute"; passo 10 con `sync_dao_proposal`; i fornitori demo della console pagano gli account del deployment del README; sezione Repository con `video/` e le note interne (da togliere quando la repo diventa pubblica), mainnet samples in web/samples/mainnet.
+
+### 2.75 Tredicesimo giudice a freddo (6 novembre)
+
+Su main 7360684: tutto "matches", setup al primo colpo, ogni azione fuori lista passa dal wallet (nessuna eccezione trovata), tabelle mainnet confermate. Il giudice ha mostrato che "entro limiti che non può allargare" era falso per gli ordini (`add_order` sulla chiave) e che la chiave poteva togliere la pausa, azzerare la ritenuta e cancellare il tax id dell'azienda. Corretto:
+- Chiave del browser ridotta a dieci metodi (ordini, approvazioni e cancellazioni, proposte DAO e sync, sync balance, vault, request_payment): tolti `set_company`, `set_paused`, `mark_withholding_remitted`, `reset_in_flight` (tutti già via `ownerCall`, quindi li firma il wallet). Frase onesta riscritta in README (passo 9 e tabella), WHITEPAPER §4 e docs: una chiave rubata può chiedere, coprire con un ordine e approvare pagamenti ai fornitori registrati entro cap e budget, che non può cambiare.
+- Console: nota del Top up (il NEAR della tesoreria non si può ritirare, l'account non ha chiavi); didascalia di "Mark as remitted" (gli USDC trattenuti vanno all'owner).
+- docs: "Signing in" senza "limits"; ritenuta come nel README; titolo mainnet "2 and 3 November"; glossario con vendor_inactive, paused, zero_amount, no_invoice_identity, many_invoices, payout_unconfirmed, hold_quota_reached.
+- README: audit terzo giro (il wizard testnet nomina l'owner come executor apposta); "Try it with throwaway keys" è un link; passo 9 con wallet: accept_ownership e firma del vault; Repository con app.html, privacy.html, sw.js, manifest, csp.py, builds.json e registry wasm, @scure/base.
