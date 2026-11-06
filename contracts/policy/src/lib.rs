@@ -2459,7 +2459,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_refunded_settlement_goes_back_to_the_queue() {
+    fn audit_refunded_settlement_waits_for_a_person() {
         let mut c = plain();
         testing_env!(ctx(accounts(0)).build());
         let pay = Payout::Chain { chain: "base".into(), address: "0xabc".into() };

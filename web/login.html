@@ -90,6 +90,7 @@
     <div id="lookup" class="spin">looking for your treasuries...</div>
     <div id="have" hidden class="way"><h2>Your treasuries</h2><p>Pick one. The wallet will ask you to approve one transaction: it adds a key to this browser limited to that treasury, which signs payment requests, orders, approvals and cancellations, DAO proposals, balance sync and the vault, never a vendor or a payout, a limit, an operator, the DAO or a withdrawal: those the wallet signs, and shows you first.</p><div class="list" id="list"></div><div id="keyWait" class="spin" hidden>waiting for the wallet to approve the key...</div></div>
     <div id="none" hidden class="way"><h2>No treasury yet</h2><p id="noneText">This account owns no Bursar treasury. Create it now: Bursar funds the accounts and the contract storage, registers four demo vendors and mints test USDC. About a minute, nothing to pay.</p><button id="createGo" type="button" class="btn-signal">Create my treasury</button></div>
+    <div id="offered" hidden class="way"><h2>Was a treasury offered to you?</h2><p>The list above shows only the treasuries this account owns. An owner who offered you theirs (Settings, Ownership) gives you its account name: the page checks the offer on the contract, adds a key for it, and the console shows "Accept ownership".</p><div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="offAcct" placeholder="treasury.their-company.testnet" autocomplete="off"><button id="offGo" type="button" class="btn-inverse">Open it</button></div></div>
     <div id="bErr" class="err" hidden></div>
     <p class="way" style="margin:0"><a href="#" id="another" style="font-size:13px">Use another account</a></p>
   </div>
@@ -233,6 +234,16 @@ async function afterIdentify(account) {
       } catch {}
     }));
     $("#lookup").hidden = true;
+    $("#offered").hidden = false;
+    $("#offGo").addEventListener("click", async () => {
+      $("#bErr").hidden = true; const t = $("#offAcct").value.trim();
+      try {
+        if (!t) throw new Error("type the treasury's account");
+        const offer = await view(network, t, "get_ownership_offer").catch(() => { throw new Error(`${t} is not a Bursar treasury this page can read`); });
+        if (offer !== account) throw new Error(offer ? `${t} is offered to ${offer}, not to ${account}` : `${t} has no ownership offer open`);
+        openTreasury(t, t, account);
+      } catch (e) { $("#bErr").textContent = e.message; $("#bErr").hidden = false; }
+    });
     if (mine.length) {
       mine.sort((a, b) => a.treasury.localeCompare(b.treasury));
       $("#list").innerHTML = mine.map((m) => `<button type="button" data-t="${esc(m.treasury)}" data-l="${esc(m.label)}"><span>${esc(m.label)}</span>${m.label !== m.treasury ? `<span class="m">${esc(m.treasury)}</span>` : ""}</button>`).join("");

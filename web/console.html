@@ -399,7 +399,7 @@
     <div class="drop" id="drop">
       <input id="file" type="file" accept="application/pdf">
       <div class="big">Drop a PDF invoice here, or click to choose one.</div>
-      <div class="muted" style="margin-top:8px">The file is rendered to PNG in this browser; the model inside the TEE sees pixels, and its answer comes back signed.</div>
+      <div class="muted" style="margin-top:8px">The file is rendered to PNG in this browser; the model inside the TEE sees the page images and the text layer, if the file has one, and its answer comes back signed.</div>
     </div>
     <div class="samples" style="margin-top:24px">
       <div class="eyebrow muted" style="margin-bottom:12px">Or load a reading recorded on 20 October 2026, with its real receipt from the enclave</div>
@@ -1385,7 +1385,7 @@ async function handleFile(file) {
     $("#fileInfo").textContent = `${file.name}, ${(bytes.length / 1024).toFixed(0)} KB, sha256 ${invoiceHash.slice(0, 16)}...`;
     step("pdf", "wait", "rasterizing the PDF in this browser");
     const { pages, text } = await rasterize(bytes);
-    step("pdf", "ok", `${pages.length} page(s) rendered to PNG${text.trim() ? "" : " at 160 dpi, the file has no text layer"}; the enclave sees images, not the file`);
+    step("pdf", "ok", `${pages.length} page(s) rendered to PNG${text.trim() ? "" : " at 160 dpi, the file has no text layer"}; the enclave sees the page images and the text layer, not the file`);
     const { extraction, receipt, attestation } = await readInTee(pages, text.trim() ? text : "", step);
     const vendors = await view(settings.treasury, "list_vendors");
     const values = claimValues(extraction);
@@ -1439,7 +1439,7 @@ async function loadSample(name) {
     const [rf, pdfBytes] = await Promise.all([fetch(`samples/receipt-${name}.json`).then((r) => { if (!r.ok) throw new Error(`sample ${r.status}`); return r.json(); }).catch(readingFromScript), fetch(`samples/${name}.pdf`).then((r) => r.ok ? r.arrayBuffer() : null).catch(() => null)]);
     if (pdfBytes) await rasterize(new Uint8Array(pdfBytes)); else $("#preview").width = 0;
     const r = rf.ai.receipt;
-    step("sample", "ok", `recorded reading of ${rf.file}${rf.payment ? `, decided as payment #${rf.payment.id} ${rf.payment.status}` : ""}`);
+    step("sample", "ok", `recorded reading of ${rf.file}${rf.payment ? `, recorded on the README treasury as payment #${rf.payment.id} (${rf.payment.status}); your treasury numbers it on its own` : ""}`);
     step("model", "ok", `completion ${r.inference_id} by ${r.model}`);
     step("signature", r.signature ? "ok" : "fail", r.signature ? `${r.signature_kind} by ${r.signing_address}` : "no signature");
     $("#fileInfo").textContent = `${rf.file}, sha256 ${rf.claim.invoice_hash.slice(0, 16)}...${rf.tx ? `, tx ${rf.tx.slice(0, 12)}...` : ""}`;
