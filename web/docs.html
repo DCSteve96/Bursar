@@ -71,10 +71,10 @@
 <section id="what">
   <div class="eyebrow">[ 01 ]</div>
   <h1>What Bursar is</h1>
-  <p class="lead">An AI treasurer for small companies that pays invoices within limits it cannot change.</p>
+  <p class="lead">An AI treasurer for companies of any size that pays invoices within limits it cannot change.</p>
   <p>Every company pays invoices. Two things go wrong, often: someone pays a fake invoice (the "please note our new bank details" fraud, the most common business scam in the world), and someone pays the same invoice twice. Letting an AI do the work makes both worse, unless the AI never holds the keys.</p>
   <p>Bursar splits the job in three. <strong>The AI reads</strong> the invoice inside a trusted execution environment on NEAR AI Cloud and reports what it says. <strong>The contract decides</strong>: a NEAR smart contract owned by the company checks the vendor, the payout, the amounts, the orders, and pays or refuses by itself. <strong>A dumb executor moves the money</strong>, and only to the destination the owner recorded. Nobody in the loop can both decide and move money, and the AI cannot choose an address.</p>
-  <div class="note"><p>Bursar is software, not a payment service. The USDC stays in the company's own contract, with the company's keys. Nothing passes through Bursar.</p></div>
+  <div class="note"><p>Bursar is software, not a payment service. The USDC stays in the company's own contract, with the company's keys. No money passes through Bursar; invoices do only when a company uses the shared demo reading relay instead of its own NEAR AI key.</p></div>
 </section>
 
 <section id="flow">
@@ -85,7 +85,7 @@
     <li>The <strong>agent</strong> rasterizes it and sends the page to a model running in a TEE on NEAR AI Cloud. First it fetches an attestation for a fresh nonce; the answer comes back as structured JSON with an ECDSA signature over the exact bytes.</li>
     <li>The agent turns the answer into a claim (vendor, invoice number, amount, payout printed on the invoice, order reference, flags) and calls <code>request_payment</code> on the policy contract. Its only key can call that one method on that one contract.</li>
     <li>The <strong>contract</strong> decides, deterministically and on chain, in the same transaction.</li>
-    <li>A vendor on NEAR is paid in that transaction. A vendor on Base, Arbitrum, Solana or Sui is queued for the <strong>executor</strong>, which settles through NEAR Intents to the address on record, verified by the contract before any USDC leaves (mainnet only).</li>
+    <li>A vendor on NEAR is paid in that transaction. A vendor on Base, Arbitrum, Ethereum, Solana or Sui is queued for the <strong>executor</strong>, which settles through NEAR Intents to the address on record, verified by the contract before any USDC leaves (mainnet only).</li>
     <li>Every decision is an on-chain event and carries a reference to the signed receipt of the reading. There is no database.</li>
   </ol>
 </section>
@@ -116,7 +116,7 @@
   <p>Two things to be clear about. The withheld share is the vendor's money, not the company's: on a 1,000 invoice with 20% withholding the vendor receives 800 and the state 200 on the vendor's behalf, which the vendor later deducts from its own taxes; the company's cost is 1,000 either way. And the company still remits and files exactly as it does today, with its accountant: in Italy the F24 by the 16th of the following month, the Certificazione Unica and the 770; in India the TDS deposit by the 7th and the quarterly certificate; in Spain the modelo 111 each quarter. Bursar does not talk to any tax authority and will not; it keeps the amounts right and visible, per vendor and per month, so the filing is a copy, not a reconstruction.</p>
   <h3>Who is who: tax ids</h3>
   <p>Every vendor record can carry the identifier the vendor prints on its invoices: a VAT number in Europe, an EIN in the United States, a CNPJ in Brazil, a GSTIN in India, an ABN in Australia, or, for a freelancer with none, a supplier code the company assigns and asks them to print. The company records its own in Settings. Spaces and punctuation do not matter. Both checks are optional and both hold rather than block, so a tax id read wrong never refuses a real invoice.</p>
-  <p style="margin-top:20px">Only the owner changes a vendor's payout. The executor cannot redirect funds: the contract compares the recipient it reports with the vendor record before releasing USDC. A transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked <code>transfer_failed</code>.</p>
+  <p style="margin-top:20px">Only the owner changes a vendor's payout. The executor cannot redirect funds: it can settle only on a quote 1Click signed, and the contract checks that signature and that the quote pays the vendor's recorded address, the exact net amount, in USDC on the vendor's chain, before releasing USDC. A transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked <code>transfer_failed</code>.</p>
 </section>
 
 <section id="orders">
@@ -145,7 +145,7 @@
 <section id="reading">
   <div class="eyebrow">[ 06 ]</div>
   <h2>The reading and its receipt</h2>
-  <p>The invoice is read by a model running in a TEE on NEAR AI Cloud. The invoice never leaves the enclave in clear text. The answer comes with a receipt anyone can verify, without the API key and without trusting the agent:</p>
+  <p>The invoice is read by a model running in a TEE on NEAR AI Cloud. With the company's own NEAR AI key the invoice goes to the enclave over TLS and no Bursar server sees it; the shared demo relay forwards the bytes untouched but does see them pass. The answer comes with a receipt anyone can verify, without the API key and without trusting the agent:</p>
   <ul>
     <li>the exact request and response bytes, and their hashes;</li>
     <li>the enclave's ECDSA signature over <code>model:sha256(request):sha256(response)</code>;</li>
@@ -171,7 +171,7 @@
   </ul>
   <p>Several treasuries live side by side in the console's switcher. "Switch account" takes you back to the door.</p>
   <h3>Done on mainnet, 2 November 2026</h3>
-  <p>Everything on this page ran once for real, with small amounts, from a browser and a phone: treasury <a href="https://nearblocks.io/address/treasury.bursar-8ccac085.near">treasury.bursar-8ccac085.near</a> created by the wallet with no access key and listed in the registry; an invoice for 5 USDC to a vendor on NEAR read in the enclave and <a href="https://nearblocks.io/txns/Hcx5Scqm6mNXAmcasemJXfskxNkHsRfCizUwnna1NSof">paid in the same transaction</a>; an invoice for 10 USDC to a vendor on Base <a href="https://nearblocks.io/txns/Bg1Cett5fRg1WmVzoY5BE7Wwwj7RagHSiceUyCKRxBw9">queued</a>, the deposit account registered by the owner, <a href="https://nearblocks.io/txns/CcHpJwRmZCcCM1FhGakNzbUTGLeHLNg73mQW5S3AyQVx">settled by the executor</a> through NEAR Intents and <a href="https://basescan.org/tx/0x9784ec838c10f1622132f994b75d0e7b2fc4ee91d3be730695f363bfb3713b15">received on Base</a> (9.996381 USDC), then <a href="https://nearblocks.io/txns/G3W6LMv1qbJnNcUzdUUmUqeLSp5MhnvYUzrLj5HbaJhU">marked settled</a> with the Base hash. The README lists every transaction.</p>
+  <p>Everything on this page ran once for real, with small amounts, from a browser and a phone: treasury <a href="https://nearblocks.io/address/treasury.bursar-8ccac085.near">treasury.bursar-8ccac085.near</a> created by the wallet with no access key and listed in the registry; an invoice for 5 USDC to a vendor on NEAR read in the enclave, <a href="https://nearblocks.io/txns/Hcx5Scqm6mNXAmcasemJXfskxNkHsRfCizUwnna1NSof">held</a> because the model flagged it, then <a href="https://nearblocks.io/txns/8mKk1126EuqDZ1FBpr325Rw9qm3GcMXGtUbtrotvZqNm">approved by the owner and paid</a>; an invoice for 10 USDC to a vendor on Base <a href="https://nearblocks.io/txns/Bg1Cett5fRg1WmVzoY5BE7Wwwj7RagHSiceUyCKRxBw9">queued</a>, the deposit account registered by the owner, <a href="https://nearblocks.io/txns/CcHpJwRmZCcCM1FhGakNzbUTGLeHLNg73mQW5S3AyQVx">settled by the executor</a> through NEAR Intents and <a href="https://basescan.org/tx/0x9784ec838c10f1622132f994b75d0e7b2fc4ee91d3be730695f363bfb3713b15">received on Base</a> (9.996381 USDC), then <a href="https://nearblocks.io/txns/G3W6LMv1qbJnNcUzdUUmUqeLSp5MhnvYUzrLj5HbaJhU">marked settled</a> with the Base hash. That was the build of 2 November. On 3 November the owner <a href="https://nearblocks.io/txns/6Gm41Co8GybdZh6SD5R6E9td2QZX2j43tMTHEX15U4yS">upgraded</a> the treasury to the current build, and the console <a href="https://nearblocks.io/txns/9NindR1cjsbgAGroQbewxRsYfjsYkdET3TVzgzpbsbKJ">settled</a> the next invoice on Base by itself, on a quote whose signature the contract verified, <a href="https://basescan.org/tx/0x46bff94770ad6230a06d5e694be29aa0ff72d231bb1f7a8a479ca94a990d1d13">received on Base</a>. The README lists every transaction.</p>
   <h3>The vault: lose the browser, keep the company</h3>
   <p>Everything that matters is on the contract and comes back at every sign-in: vendors, limits, payments, roles. What lives only in a browser is secret by nature: the agent key, the Telegram inbox token, the labels. A wallet owner keeps them in the <strong>vault</strong>: the wallet signs one fixed message (no transaction, no cost), the signature becomes an encryption key, the secrets are encrypted in the browser and stored on the contract with <span class="mono">set_vault</span>, owner only. A new browser, after signing in with the same wallet, presses "Unlock with the wallet" and gets them back. The vault holds one content key, wrapped once per wallet key: a device whose wallet key is new (the wallet app on a phone keeps its own key for the same account) asks to be admitted, leaving a public key on the contract with one transaction; the request carries the wallet's signature, and any device that holds the vault checks on chain that the key is one of the owner account's own full-access keys and admits it by itself; a request from any other key waits for a person, with the reason next to it. From then on the newcomer's own signature opens the vault. The first device lists the admitted devices by browser, wallet key and date, and can forget a lost one. With no device left to admit from, the owner replaces the executor from the browser at hand: the wallet creates a new executor account with one key limited to settling on this treasury and tells the contract with <span class="mono">set_roles</span>. Nobody can open the vault without one of those wallet keys, Bursar included. The contract never reads it. Keep the keys backup file too.</p>
   <p>A person in the console can also ask the contract directly: <span class="mono">request_payment</span> accepts the agent, the owner and the operators. The decision is the same whoever asks; only the contract decides.</p>
@@ -188,7 +188,7 @@
     <span class="k">Attention</span><span>Held payments to approve or cancel, one at a time or picked together ("Approve selected": four per signature; with a DAO, one vote per proposal), council votes when there is a DAO, what was refused, with the reason, and the cross-chain payments queued or settling, which the owner can close when nobody could confirm them.</span>
     <span class="k">Vendors</span><span>The allowlist: id, name, the identifier printed on invoices, country, withholding rate set by the accountant, payout on record, monthly budget, active or not.</span>
     <span class="k">Orders</span><span>Purchase orders and standing orders, what each has consumed, close.</span>
-    <span class="k">Analytics</span><span>Spend by month (with the withheld share), by vendor and the mix of decisions, as charts; every payment grouped by vendor with gross, withheld and net; the withholding kept back for the state with "Mark as remitted"; and the accountant's report: an Excel file with five sheets (Summary, Payments, By vendor, By month, Withholding) or a CSV, built in the browser from the chain., with the transactions behind it (request, approval, settle, mark, destination chain) as links, also in the CSV and Excel exports</span>
+    <span class="k">Analytics</span><span>Spend by month (with the withheld share), by vendor and the mix of decisions, as charts; every payment grouped by vendor with gross, withheld and net; the withholding kept back for the state with "Mark as remitted"; and the accountant's report: an Excel file with five sheets (Summary, Payments, By vendor, By month, Withholding) or a CSV, built in the browser from the chain, with the transactions behind it (request, approval, settle, mark, destination chain) as links, also in the CSV and Excel exports</span>
     <span class="k">Settings</span><span>Company (name, country, tax id), limits, strict order mode, collaborators and invites, Telegram inbox, governance (create the DAO, its proposal bond), the build the treasury runs and "Upgrade contract", keys, the vault and the reading plan.</span>
   </div>
 </section>
@@ -206,13 +206,14 @@
   <p>The <a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">README</a> is a walkthrough in "do X, see Y" form; the short version:</p>
   <div class="code">git clone https://github.com/DCSteve96/Bursar && cd Bursar
 (cd contracts/policy && cargo test && ./build.sh)
+(cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 cd app && npm install && npm test
 npx tsx src/cli.ts setup --root you.testnet     # accounts, contract, USDC, vendors, orders, DAO
 set -a; source .env.testnet; set +a
 npm run relayer &amp;
 npm run agent -- --once --offline                # drop --offline to read with NEAR AI Cloud
 npm run dev status
-npm run dev verify 1                             # the receipt behind payment 1</div>
+npm run dev verify 1                             # the receipt behind payment 1 (read with a NEAR AI key)</div>
   <p>The agent sends its claims as meta transactions (NEP-366) through a relayer that only forwards <code>request_payment</code>, so on that path the agent pays no gas (the console and the MCP server can also call directly, with a little NEAR on the agent). An MCP server (<code>bursar mcp</code>) lets any assistant drive it with exactly the agent's powers: submit an invoice, list payments, explain a decision, verify a receipt.</p>
   <h3>What it is built with</h3>
   <p>No template or boilerplate. Contracts: near-sdk 5 (near-contract-standards for the test token). App: near-api-js 7, borsh, @noble/curves and @noble/hashes, @phala/dcap-qvl for the TDX quote, the NEAR Intents 1-Click SDK, the MCP SDK with zod; TypeScript, tsx, vitest. Pages: @fastnear/near-connect for the wallets, @noble, pdf.js, dcap-qvl, SheetJS, qrcode-generator, all from CDNs with integrity hashes, and the Meteor SDK bundled for the extension. Relay: the Cloudflare Workers runtime, no dependencies. Sample invoices: reportlab. Tools: poppler, near-cli-rs. The reading at runtime is a model on NEAR AI Cloud inside a TDX enclave; it reads, it never decides. The code was written by one person with Claude Code as pair programmer, under their direction and review; the README lists it all.</p>
@@ -222,7 +223,7 @@ npm run dev verify 1                             # the receipt behind payment 1<
   <div class="eyebrow">[ 11 ]</div>
   <h2>Custody and limits</h2>
   <ul>
-    <li>Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through Bursar. USDC only.</li>
+    <li>Software, not a payment service. You run it on your own accounts with your own keys; no money passes through Bursar (invoices do only through the shared demo reading relay). USDC only.</li>
     <li>The AI never chooses an address. The executor cannot redirect funds. Only the owner changes a payout, and a changed payout on an invoice is a block.</li>
     <li>Cross-chain payouts through NEAR Intents are mainnet only; on testnet the Base vendor stops at Queued.</li>
     <li>The verifier checks the signature, the nonce, the quote's binding and the quote against Intel collateral. It does not yet replay the RTMR3 event log or check GPU evidence; the receipt keeps both.</li>

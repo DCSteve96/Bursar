@@ -53,7 +53,7 @@ The contract applies rules the owner wrote down. A refusal stops at the first ru
 7. At or above the approval threshold, or when the model flagged something, or after a vendor's daily allowance of autopaid invoices, a person decides: the owner or an approver in the console, or a Sputnik DAO council through a proposal the contract opens itself. The contract writes the proposal id on the payment and reads the verdict back; a rejected or expired proposal cancels it.
 8. Withholding tax, set per vendor by the accountant, is kept back and set aside for the state, outside the spendable balance.
 
-What passes is paid at once if the vendor is on NEAR, or queued for the executor if the vendor is on Base, Arbitrum, Solana or Sui. What is held waits. What fails is refused with a reason. All three outcomes are events, so dashboards and auditors need no database.
+What passes is paid at once if the vendor is on NEAR, or queued for the executor if the vendor is on Base, Arbitrum, Ethereum, Solana or Sui. What is held waits. What fails is refused with a reason. All three outcomes are events, so dashboards and auditors need no database.
 
 Every payment carries the payout it was checked against and goes nowhere else. A payout recorded or changed by an operator pays nothing until the owner confirms it. Pausing the treasury or switching a vendor off is re-checked at approval time, not only at request time.
 
@@ -74,7 +74,7 @@ What Bursar trusts, and why it is acceptable:
 - **The owner's wallet** for the sensitive methods. Ownership moves in two steps, an offer by the owner and an acceptance by the new owner, so a wallet talked into one signature gives nothing away.
 - **The executor** for nothing but timing: it brings a quote 1Click signed, and the contract checks the quote's recipient, amount, asset and expiry itself.
 
-What Bursar does not trust: the agent (one method, no NEAR, no addresses), the relayer (verifies before paying gas, rate-limited), the Telegram relay (no keys, bound chats, signed pairing by the owner), the browser (secrets in a vault encrypted with a key only the owner's wallet can derive, stored on the contract), the registry (a hint, verified against the contract by every reader), the model's flags and tax ids (they can only add scrutiny, never remove a block).
+What Bursar does not trust: the agent (one method, a small gas balance at most, no addresses), the relayer (verifies before paying gas, rate-limited), the Telegram relay (no keys, bound chats, signed pairing by the owner), the browser (secrets in a vault encrypted with a key only the owner's wallet can derive, stored on the contract), the registry (a hint, verified against the contract by every reader), the model's flags and tax ids (they can only add scrutiny, never remove a block).
 
 The bounds that hold whatever the AI does: the per-payment cap, the daily cap, the vendor budgets, the allowlist and the registered payouts. A fully compromised agent can, at worst, submit claims that meet those bounds, and the quotas on requests, refusals and holds limit even that.
 
