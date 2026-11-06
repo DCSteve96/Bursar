@@ -164,7 +164,7 @@ npm run dev status
 ```
 See: `#6 acmehosting AH-1002 290.00 USDC Approval no_order dao#1`: not blocked, not paid, held for a person. With a DAO the council votes; without one the owner or an approver calls `approve_payment` or `cancel_payment`. Invoices the model flagged (urgency, new payment details) are held the same way, reason `flagged`: the AI can add scrutiny, never remove it. `set_order_policy true` makes every invoice need an order; by default only vendors that have orders are held to them.
 
-**5c. Identity on the invoice.** Names can be imitated; tax ids cannot. `setup` recorded the VAT number each vendor prints on its invoices, so the contract compares it with the one the model read. Invoice 7 is "Acme Host GmbH", a look-alike with another VAT number that asks to be paid to Acme's registered account:
+**5c. Identity on the invoice.** Names can be imitated; a look-alike company has a different tax id, and a mismatch is held for a person. `setup` recorded the VAT number each vendor prints on its invoices, so the contract compares it with the one the model read. Invoice 7 is "Acme Host GmbH", a look-alike with another VAT number that asks to be paid to Acme's registered account:
 
 ```bash
 cp ../invoices/samples/07-acme-host-gmbh-3001.pdf ../invoices/inbox/ && npm run agent -- --once --offline
@@ -460,7 +460,7 @@ See:
 - On the offered account, "Accept ownership".
 - After accepting, `get_roles` naming the new owner, and the old owner without any owner method (`set_company` from it: `only the owner`).
 
-There is no `transfer_ownership` any more: a wallet talked into one signature gives nothing away.
+There is no `transfer_ownership` any more: nothing changes until the named account accepts, the owner can withdraw the offer until then, and the wallet shows the account before signing (an offer to the wrong account is still an offer).
 
 **9j. Settle on a quote the contract verifies (testnet, with a stand-in for 1Click).** NEAR Intents has no testnet, so with `?intents=stub` the page plays 1Click and signs its quotes with the test key the contract's own tests use.
 
@@ -642,6 +642,7 @@ AI-generated code: the project was built by one person working with Claude Code 
 
 ## Honest limits
 
+- The Telegram inbox lives in Cloudflare KV, which is eventually consistent: an invoice posted in the same second the agent takes another one can be missed and must be posted again.
 - A refused payment is stored small: the contract keeps the first 64 characters of its attestation reference and invoice hash, so a storm of bad claims cannot fill its storage. `bursar verify` matches a blocked payment on that prefix, and the console's exports show it as stored.
 - Software, not a payment service. You run it on your own accounts with your own keys; nothing passes through us, except, in the demo, invoices read through the shared "Bursar reading" relay (step 9). Paying vendors in a stablecoin is regulated differently from country to country (unrestricted, to be reported, or not allowed for businesses): checking that is the company's responsibility, not something Bursar can do.
 - Structured e-invoices (SDI and FatturaPA in Italy, Peppol in Europe, Singapore and Australia, Factur-X, Verifactu, KSeF, CFDI in Mexico, NF-e in Brazil, India's GST e-invoice, Saudi Fatoora) are not parsed yet; the United States has no mandate and runs on PDFs: where they exist, the reading step can become a deterministic parser and the contract decides the same way. The demo reads PDFs.

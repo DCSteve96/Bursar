@@ -629,8 +629,8 @@ impl Bursar {
 
     /// Hand the treasury to another account. Used when a payer account bootstraps a treasury for a
     /// wallet owner, and to move a company to new keys.
-    /// Ownership moves in two steps: the owner offers, the new owner accepts. A wallet talked into one signature
-    /// gives nothing away; the offer can be withdrawn until it is accepted.
+    /// Ownership moves in two steps: the owner offers, the new owner accepts. Nothing changes until the named account
+    /// accepts, and the offer can be withdrawn until then (an offer to the wrong account is still an offer).
     pub fn offer_ownership(&mut self, new_owner: AccountId) {
         self.assert_owner();
         require!(new_owner != self.owner, "already the owner");
