@@ -45,7 +45,7 @@
       <span class="line">The contract <span class="accent">decides.</span></span>
       <span class="line dim">A dumb executor moves the money.</span>
     </h1>
-    <p class="sub muted" style="max-width:62ch;margin-top:32px">Bursar pays a company's invoices without ever handing the AI a key. Invoices are read inside a NEAR AI Cloud enclave, a NEAR contract decides inside limits the owner set, and the only thing that moves USDC is a dumb executor the contract keeps on a leash.</p>
+    <p class="sub muted" style="max-width:62ch;margin-top:32px">Bursar pays a company's invoices without ever handing the AI a key. Invoices are read inside a NEAR AI Cloud enclave, a NEAR contract decides inside limits the owner set, and the only thing that moves USDC off NEAR is a dumb executor the contract keeps on a leash; on NEAR the contract pays the vendor itself.</p>
     <div class="actions">
       <a class="btn btn-signal" href="login">Log in</a>
       <a class="btn btn-ghost" href="explorer">See the live treasury</a>
@@ -104,9 +104,10 @@ verified: the decision was made on this model output, inside an attested TEE</di
     <div class="band-head"><div class="eyebrow">[ 04 / TRY IT ]</div><h2 class="heading">Four invoices, four decisions, one command.</h2></div>
     <div class="grid cols-2">
       <div class="card"><div class="eyebrow muted">From the browser</div><p class="fine" style="margin:12px 0 0">Log in with your NEAR wallet. No treasury yet? Bursar creates one on the spot: free on testnet, about 7 NEAR from your wallet on mainnet. Then drop a PDF and watch the enclave read it, the receipt verify, and the contract answer.</p><a class="btn btn-signal" href="login" style="margin-top:24px">Open the console</a></div>
-      <div class="card"><div class="eyebrow muted">From the terminal</div><div class="code" style="margin-top:12px">npx tsx src/cli.ts setup --root you.testnet
+      <div class="card"><div class="eyebrow muted">From the terminal</div><div class="code" style="margin-top:12px">cd app && npx tsx src/cli.ts setup --root you.testnet
+set -a; source .env.testnet; set +a
 npm run relayer &amp;
-npm run agent -- --once        # NEAR_AI_API_KEY set
+npm run agent -- --once --offline   # drop --offline with NEAR_AI_API_KEY set
 npm run dev status</div><a class="btn btn-ghost" href="docs" style="margin-top:24px">Read the docs</a></div>
     </div>
   </div>

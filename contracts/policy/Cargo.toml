@@ -3,7 +3,7 @@ name = "bursar-policy"
 version = "0.1.0"
 edition = "2021"
 description = "Bursar policy contract: an AI treasurer that pays invoices within limits it cannot change"
-repository = "https://github.com/TBD/bursar"
+repository = "https://github.com/DCSteve96/Bursar"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
