@@ -2990,21 +2990,23 @@ mod tests {
         testing_env!(ctx(accounts(1)).build());
         let id = c.request_payment(claim("design", "1107", 1_250_000_000, pay));
         let good = quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, LATER, "base");
-        let cases: Vec<(&str, String, Base64VecU8)> = vec![
-            ("another recipient", quote_payload("0xdef", 1_250_000_000, 1_240_000_000, DEP, LATER, "base"), Base64VecU8(vec![])),
-            ("another amount", quote_payload("0xabc", 1_000_000_000, 990_000_000, DEP, LATER, "base"), Base64VecU8(vec![])),
-            ("fee over 2 percent", quote_payload("0xabc", 1_250_000_000, 1_200_000_000, DEP, LATER, "base"), Base64VecU8(vec![])),
-            ("another chain", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, LATER, "arb"), Base64VecU8(vec![])),
-            ("expired", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, "2025-10-01T00:00:00.000Z", "base"), Base64VecU8(vec![])), // the mock clock reads 9 October 2025
-            ("named deposit account", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, "attacker.near", LATER, "base"), Base64VecU8(vec![])),
-            ("unsigned", good.clone(), Base64VecU8(vec![1u8; 64])),
-            ("signed bytes differ", good.clone(), sign_payload(&good.replace("0xabc", "0xdef"))),
+        // each case: what is wrong, the quote, its signature (empty: signed by the test key), and the reason the contract must give
+        let cases: Vec<(&str, String, Base64VecU8, &str)> = vec![
+            ("another recipient", quote_payload("0xdef", 1_250_000_000, 1_240_000_000, DEP, LATER, "base"), Base64VecU8(vec![]), "does not pay the vendor's recorded address"),
+            ("another amount", quote_payload("0xabc", 1_000_000_000, 990_000_000, DEP, LATER, "base"), Base64VecU8(vec![]), "not this payment's net amount"),
+            ("fee over 2 percent", quote_payload("0xabc", 1_250_000_000, 1_200_000_000, DEP, LATER, "base"), Base64VecU8(vec![]), "less than 98 percent"),
+            ("another chain", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, LATER, "arb"), Base64VecU8(vec![]), "does not deliver USDC on the vendor's chain"),
+            ("expired", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, DEP, "2025-10-01T00:00:00.000Z", "base"), Base64VecU8(vec![]), "the quote has expired"), // the mock clock reads 9 October 2025
+            ("named deposit account", quote_payload("0xabc", 1_250_000_000, 1_240_000_000, "attacker.near", LATER, "base"), Base64VecU8(vec![]), "not an implicit account"),
+            ("unsigned", good.clone(), Base64VecU8(vec![1u8; 64]), "not signed by 1Click"),
+            ("signed bytes differ", good.clone(), sign_payload(&good.replace("0xabc", "0xdef")), "not signed by 1Click"),
         ];
-        for (what, payload, sig) in cases {
+        for (what, payload, sig, reason) in cases {
             let sig = if sig.0.is_empty() { sign_payload(&payload) } else { sig };
             testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id, payload.clone(), sig)));
-            assert!(r.is_err(), "{what}: must be refused");
+            let msg = panic_text(r.err().expect(&format!("{what}: must be refused")));
+            assert!(msg.contains(reason), "{what}: refused for the wrong reason: {msg}");
             assert_eq!(c.get_payment(id).unwrap().status, Status::Queued, "{what}: nothing moved");
         }
         // the owner's key wins: with 1Click's built-in key, a quote signed by the test key is refused
@@ -3012,13 +3014,18 @@ mod tests {
         c.set_quote_signer(None);
         testing_env!(ctx(accounts(2)).account_balance(NearToken::from_near(2)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id, good.clone(), sign_payload(&good))));
-        assert!(r.is_err(), "not 1Click's signature");
+        assert!(panic_text(r.err().expect("not 1Click's signature")).contains("not signed by 1Click"));
         // and only the executor may call it
         testing_env!(ctx(accounts(0)).build());
         c.set_quote_signer(Some(test_signer()));
         testing_env!(ctx(accounts(0)).account_balance(NearToken::from_near(2)).build());
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.settle(id, good.clone(), sign_payload(&good))));
-        assert!(r.is_err(), "only the executor");
+        assert!(panic_text(r.err().expect("only the executor")).contains("only the executor"));
+    }
+
+    /// The message a contract panic carried, whichever way the test harness boxed it.
+    fn panic_text(e: Box<dyn std::any::Any + Send>) -> String {
+        e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
     }
 
     #[test]

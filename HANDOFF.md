@@ -731,3 +731,13 @@ Su main f3ae090, con i passi 9-9l nel formato Do/See: tutto riproduce, build mai
 - 5d: "Mark as remitted" chiama `remit_withholding` (USDC al proprietario, saldo e debito scendono insieme); `mark_withholding_remitted` resta per chi ha pagato da altrove.
 - WHITEPAPER: niente "independent" (revisioni interne di agenti separati), regole non "in order" (il rifiuto si ferma alla prima, le attese si sommano).
 - login.html: "you pay nothing" vale solo su testnet; su mainnet il wallet paga circa 7 NEAR.
+
+### 2.71 Nono giudice a freddo (6 novembre)
+
+Disco al 98%: tolte build Rust e node_modules dei giudici precedenti nello scratchpad (14 GB liberi). Su main 835057f: `setup` passa al primo colpo (la nuova attesa funziona), tutto il resto "matches", tabelle mainnet confermate riga per riga. Corretto:
+- Test `settle_quote_refuses_every_quote_that_is_not_the_vendors`: ora controlla il motivo di ogni rifiuto (`panic_text`), come dice il README. Solo test: wasm identico (sha256 515bf4f1..., 462773 byte).
+- Analytics a schermo coerente con gli export: "paid" conta solo Paid e Settled (+ N on the way), "paid or on the way" al posto di "spent"/"paid or settling".
+- CLI status: "counted against today's cap (paid, queued and held)" invece di "spent today".
+- Anteprima "will ...": nascosta all'inizio di ogni nuova lettura, non resta quella della fattura precedente.
+- Testi: l'agente non paga gas sul percorso del relayer, ma console e MCP usano quello diretto con i suoi 0,5 NEAR (README punto 3, tabella, WHITEPAPER 3.1, docs); "Open my treasury" nel passo 9; il "Paid" della lettura live era irraggiungibile dopo le letture registrate (ordini consumati); link ai PDF verso `DCSteve96/Bursar/web/samples`; abstract del WHITEPAPER sul pagamento cross-chain.
+- Non riprodotto: "Activate" che resta INACTIVE (test `activate.cjs`: entrambi in ~6 s; nel giro del giudice l'RPC rispondeva 429). Non toccato: le chiavi sparite dopo il riavvio del profilo Playwright (probabile del suo harness; il file delle chiavi le ripristina).

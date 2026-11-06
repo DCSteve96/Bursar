@@ -409,7 +409,7 @@
         <button type="button" class="btn-ghost sample" data-file="04-acme-hosting-0924-fraud">Acme with a new wallet</button>
         <button type="button" class="btn-ghost sample" data-file="06-acme-hosting-1002">Acme, an invoice nobody ordered</button>
       </div>
-      <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">The PDFs are in <a href="https://github.com/DCSteve96/treasury-console/tree/main/samples" target="_blank" rel="noopener">samples/</a>. A recorded reading already decided on the README treasury can be sent to yours; sent twice to the same treasury it returns <span class="mono">Blocked duplicate_invoice</span>: the contract remembers.</p>
+      <p class="muted" style="font-size:14px;margin:12px 0 0;max-width:70ch">The PDFs are in <a href="https://github.com/DCSteve96/Bursar/tree/main/web/samples" target="_blank" rel="noopener">web/samples/</a>. A recorded reading already decided on the README treasury can be sent to yours; sent twice to the same treasury it returns <span class="mono">Blocked duplicate_invoice</span>: the contract remembers.</p>
     </div>
     <div id="readErr" class="err" hidden></div>
     <div class="two" id="readOut" hidden style="margin-top:32px">
@@ -574,9 +574,9 @@
       <div class="card chart"><div class="eyebrow muted">Decisions <i class="help" tabindex="0" data-help="Every request the contract answered: paid, held for a person, refused, cancelled. Counts, not amounts.">?</i></div><div id="chDecisions"></div></div>
     </div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Spend by vendor</h3>
-    <div class="wrap"><table id="anVendors"><thead><tr><th>vendor</th><th>this month</th><th>budget</th><th>all time</th><th>withheld</th><th>paid</th><th>held or refused</th><th>share</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="anVendors"><thead><tr><th>vendor</th><th>this month</th><th>budget</th><th>all time, paid or on the way</th><th>withheld</th><th>paid</th><th>held or refused</th><th>share</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 12px">Spend by month</h3>
-    <div class="wrap"><table id="anMonths"><thead><tr><th>month</th><th>paid or settling</th><th>withheld</th><th>payments</th><th>refused</th><th>held</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="anMonths"><thead><tr><th>month</th><th>paid or on the way</th><th>withheld</th><th>payments</th><th>refused</th><th>held</th></tr></thead><tbody></tbody></table></div>
     <h3 class="heading-sm" style="margin:40px 0 4px">All payments, by vendor</h3>
     <p class="muted" style="margin:0 0 16px;font-size:14px;max-width:70ch">Every decision the contract recorded, grouped by vendor, newest first. Gross is what the invoice asked, withheld is what stayed in the treasury for the state, net is what the vendor received; a cross-chain payment the executor has not delivered yet shows as on the way.</p>
     <div id="anByVendor"></div>
@@ -1373,7 +1373,7 @@ async function handleFile(file) {
   if (!file) return;
   for (const k in stepEl) delete stepEl[k];
   $("#readErr").hidden = true; $("#readOut").hidden = false; $("#extraction").hidden = true; $("#receipt").hidden = true;
-  $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true;
+  $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true; $("#verdictPreview").hidden = true;
   const step = stepper($("#readSteps"));
   try {
     if (!settings.treasury) throw new Error("set the treasury account in Settings first");
@@ -1410,6 +1410,7 @@ function receiptDownload(read, tx, payment, name) {
 async function afterRead(read, vendors) {
   const { extraction, receipt, attestation, claim } = read;
   current = read;
+  $("#verdictPreview").hidden = true; // the previous invoice's verdict must not sit next to this one while it is verified
   showExtraction({ ...extraction, flags: claim.flags }); // every flag the contract will see, the reading checks and the chat check included
   const checks = $("#checks"); checks.innerHTML = `<li><span class="st wait"><i></i><i></i><i></i></span><span>verifying the receipt, fetching Intel collateral through the relay</span></li>`;
   $("#receipt").hidden = false;
@@ -1425,7 +1426,7 @@ async function afterRead(read, vendors) {
 async function loadSample(name) {
   for (const k in stepEl) delete stepEl[k];
   $("#readErr").hidden = true; $("#readOut").hidden = false; $("#extraction").hidden = true; $("#receipt").hidden = true;
-  $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true;
+  $("#claimBox").hidden = true; $("#claimEmpty").hidden = false; $("#decision").hidden = true; $("#submitErr").hidden = true; $("#verdictPreview").hidden = true;
   const step = stepper($("#readSteps"));
   try {
     if (!settings.treasury) throw new Error("set the treasury account in Settings first (or press \"Use the demo treasury\")");
@@ -2067,8 +2068,8 @@ function renderAnalytics() {
   const due = BigInt(stats.withheld_due || "0");
   $("#whCard").hidden = due === 0n && withheld(payments) === 0n;
   $("#whKv").innerHTML = [["to remit now", usdc(due)], ["kept this month", usdc(withheld(payments.filter((p) => isSpend(p) && monthOf(p.created_at) === month)))], ["kept all time", usdc(withheld(payments.filter(isSpend)))]].map(([k, v]) => `<span class="k">${k}</span><span class="v mono">${v}</span>`).join("");
-  $("#anStats").innerHTML = stat("spent all time", usdc(all)) + stat("spent this month", usdc(spent(payments.filter((p) => isSpend(p) && monthOf(p.created_at) === month)))) + stat("refused", usdc(spent(payments.filter((p) => p.status === "Blocked")))) + stat("waiting", usdc(spent(held()))) + stat("balance", usdc(stats.balance));
-  $("#anVendors tbody").innerHTML = vendors.map(([id, v]) => { const ps = payments.filter((p) => p.vendor_id === id); const tot = spent(ps.filter(isSpend)); const m = spent(ps.filter((p) => isSpend(p) && monthOf(p.created_at) === month)); const b = BigInt(v.monthly_budget); const share = all > 0n ? Number(tot * 100n / all) : 0; return `<tr><td><b>${esc(v.name)}</b><div class="mono muted">${esc(id)}</div></td><td>${usdc(m)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, Number(m * 100n / b))}%"></i></div>` : ""}</td><td>${b > 0n ? usdc(b) : "<span class=muted>none</span>"}</td><td>${usdc(tot)}</td><td>${(() => { const w = withheld(ps.filter(isSpend)); return w > 0n ? usdc(w) : `<span class="muted">-</span>`; })()}</td><td>${ps.filter(isSpend).length}</td><td>${ps.filter((p) => !isSpend(p)).length}</td><td style="min-width:140px">${share}%<div class="bar-meter"><i style="width:${share}%"></i></div></td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">no vendors</td></tr>`;
+  $("#anStats").innerHTML = stat("paid or on the way, all time", usdc(all)) + stat("paid or on the way, this month", usdc(spent(payments.filter((p) => isSpend(p) && monthOf(p.created_at) === month)))) + stat("refused", usdc(spent(payments.filter((p) => p.status === "Blocked")))) + stat("waiting", usdc(spent(held()))) + stat("balance", usdc(stats.balance));
+  $("#anVendors tbody").innerHTML = vendors.map(([id, v]) => { const ps = payments.filter((p) => p.vendor_id === id); const tot = spent(ps.filter(isSpend)); const m = spent(ps.filter((p) => isSpend(p) && monthOf(p.created_at) === month)); const b = BigInt(v.monthly_budget); const share = all > 0n ? Number(tot * 100n / all) : 0; return `<tr><td><b>${esc(v.name)}</b><div class="mono muted">${esc(id)}</div></td><td>${usdc(m)}${b > 0n ? `<div class="bar-meter"><i style="width:${Math.min(100, Number(m * 100n / b))}%"></i></div>` : ""}</td><td>${b > 0n ? usdc(b) : "<span class=muted>none</span>"}</td><td>${usdc(tot)}</td><td>${(() => { const w = withheld(ps.filter(isSpend)); return w > 0n ? usdc(w) : `<span class="muted">-</span>`; })()}</td><td>${ps.filter((p) => ["Paid", "Settled"].includes(p.status)).length}${(() => { const w = ps.filter((p) => ["Queued", "Settling"].includes(p.status)).length; return w ? ` <span class="muted">+ ${w} on the way</span>` : ""; })()}</td><td>${ps.filter((p) => !isSpend(p)).length}</td><td style="min-width:140px">${share}%<div class="bar-meter"><i style="width:${share}%"></i></div></td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">no vendors</td></tr>`;
   const months = {}; for (const p of payments) { const k = monthOf(p.created_at); months[k] ??= { spend: 0n, n: 0, refused: 0, held: 0, withheld: 0n }; if (isSpend(p)) { months[k].spend += BigInt(p.amount); months[k].n++; months[k].withheld += BigInt(p.withheld || "0"); } if (p.status === "Blocked") months[k].refused++; if (p.status === "Approval") months[k].held++; }
   $("#anMonths tbody").innerHTML = Object.keys(months).sort().reverse().map((k) => `<tr><td class="mono">${k}</td><td>${usdc(months[k].spend)}</td><td>${months[k].withheld > 0n ? usdc(months[k].withheld) : `<span class="muted">-</span>`}</td><td>${months[k].n}</td><td>${months[k].refused}</td><td>${months[k].held}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no payments yet</td></tr>`;
   renderCharts(); renderByVendor();
