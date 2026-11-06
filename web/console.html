@@ -566,7 +566,7 @@
     <div class="card" style="margin-top:24px" id="whCard" hidden>
       <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Withholding tax, to remit <i class="help" tabindex="0" data-help="Amounts the treasury kept back from vendors with a withholding rate set by your accountant. They are still in the treasury, owed to the state. When the company remits them, the owner presses Mark as remitted so the contract stops counting them as due.">?</i></div>
       <div class="kv" id="whKv"></div>
-      <div class="actions" style="margin-top:12px;align-items:center"><button id="whRemit" type="button" class="btn-inverse">Mark as remitted</button><span class="muted" style="font-size:13px">Owner only. Bursar does not pay the state; you do, and tell the contract here.</span></div>
+      <div class="actions" style="margin-top:12px;align-items:center"><button id="whRemit" type="button" class="btn-inverse">Mark as remitted</button><span class="muted" style="font-size:13px">Owner only. The withheld USDC goes to your own account in one transaction, and you pay the state with it; Bursar talks to no tax authority.</span></div>
       <div id="whErr" class="err" hidden></div>
     </div>
     <div class="charts">
@@ -1744,7 +1744,7 @@ $("#topupDeposit").addEventListener("click", () => topupRun($("#topupDeposit"), 
 $("#topupNearBtn").addEventListener("click", () => topupRun($("#topupNearBtn"), async () => {
   const v = $("#topupNear").value.replace(",", ".").trim(); if (!(Number(v) > 0)) throw new Error("an amount in NEAR");
   const yocto = BigInt(Math.round(Number(v) * 1e6)) * 10n ** 18n;
-  if (!(await ask({ eyebrow: "Top up", title: `Send ${v} NEAR to the treasury account?`, rows: [["from", settings.owner], ["to", settings.treasury]], note: "NEAR on the treasury pays the storage of each decision and the DAO bonds. It stays the company's: the owner can withdraw it from the contract.", ok: "Send NEAR" }))) return;
+  if (!(await ask({ eyebrow: "Top up", title: `Send ${v} NEAR to the treasury account?`, rows: [["from", settings.owner], ["to", settings.treasury]], note: "NEAR on the treasury pays the storage of each decision and the DAO bonds. The account has no key, so this NEAR cannot be taken back out: it is spent by the contract's own calls, and what is not spent stays locked as storage.", ok: "Send NEAR" }))) return;
   await ownerSend(settings.treasury, [{ transfer: yocto }]);
   $("#topupNear").value = "";
 }));
@@ -2327,9 +2327,10 @@ function renderSettings() {
 // What the browser key of a wallet owner may sign alone. Never a vendor or a payout (add_vendor, update_vendor,
 // confirm_vendor_payout: with request_payment they would let a stolen key pay any address), never the DAO (clear_dao),
 // an operator (add_operator, remove_operator), the limits (set_limits, set_order_bound: a stolen key must not widen what it
-// can pay), a withdrawal, the owner or the roles, a new build: those the wallet signs,
+// can pay), the company record (set_company: the buyer tax id check), pause, the withholding and in-flight counters, a
+// withdrawal, the owner or the roles, a new build: those the wallet signs,
 // through ownerCall, and shows the owner first.
-const WALLET_KEY_METHODS = ["add_order", "add_recurring_order", "close_order", "set_company", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "mark_withholding_remitted", "set_paused", "reset_in_flight"];
+const WALLET_KEY_METHODS = ["add_order", "add_recurring_order", "close_order", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment"];
 async function ownerCall(method, args, gasTgas = 30) {
   if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
   if (settings.ownerKeyKind === "wallet" && !WALLET_KEY_METHODS.includes(method)) {
