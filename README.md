@@ -248,7 +248,7 @@ See:
 - Overview with 15,000 test USDC and about 1.35 NEAR free: a new treasury holds 6 NEAR, most of it locked by the contract's storage.
 - Your treasury counted in the explorer of step 8.
 
-What the page did: it asked the testnet faucet for a payer account, deployed the policy contract from `web/contracts/bursar_policy.wasm` (from `contracts/bursar_policy.wasm.js` when opened as a file), created an agent with one function-call key, minted 15,000 test USDC, registered four demo vendors and their orders, and listed the treasury in the registry. The vendors are two companies and DesignCo (paid on Base) without tax ids, so the recorded readings keep their outcomes, and a freelancer with 20% withholding and a tax id; set one in Vendors to try that check. If the faucet is slow, the page waits for the account on chain; if it still stops, the button reads "Resume creating my treasury" and carries on from the last step done.
+What the page did: it asked the testnet faucet for a payer account, deployed the policy contract from `web/contracts/bursar_policy.wasm` (from `contracts/bursar_policy.wasm.js` when opened as a file), created an agent with one function-call key, minted 15,000 test USDC, registered four demo vendors (paid to the vendor accounts of the README deployment, `acmehosting.bursar-b48563e6.testnet` and the others) and their orders, and listed the treasury in the registry. The vendors are two companies and DesignCo (paid on Base) without tax ids, so the recorded readings keep their outcomes, and a freelancer with 20% withholding and a tax id; set one in Vendors to try that check. If the faucet is slow, the page waits for the account on chain; if it still stops, the button reads "Resume creating my treasury" and carries on from the last step done.
 
 With a wallet, on the live site:
 1. Pick the network and press "Continue with NEAR wallet".
@@ -257,13 +257,13 @@ With a wallet, on the live site:
 4. Press "Connect the wallet key" and approve the one transaction.
 
 See:
-- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (orders, limits, approvals, the vault, the company record, pause, balance sync, a request of its own), never a vendor or a payout, an operator, the DAO, a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first: a stolen browser key cannot add a vendor or point one at a new address and then pay it. A key added by a build before 6 November could also sign vendor and payout changes; Overview says so and "Replace the key" swaps it for a narrow one in one wallet transaction.
+- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (orders, approvals, the vault, the company record, pause, balance sync, the withholding counter, the in-flight counter, a request of its own), never a vendor or a payout, the limits, an operator, the DAO, a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first. What a stolen browser key can still do, honestly: request and approve payments to the vendors already registered, within the caps, budgets and orders the owner set, which it cannot widen; it cannot add a vendor, point one at a new address, or move USDC anywhere else. A key added by a build before 6 November could also sign vendor and payout changes; Overview says so and "Replace the key" swaps it for a narrow one in one wallet transaction.
 - For a new treasury, the same `OK` lines plus `OK owner ... is owned by you.testnet`: the contract is offered to your wallet account (`offer_ownership`) and the wallet accepts it (`accept_ownership`, one signature).
 - "you.testnet, owner, wallet key" at the bottom of the sidebar.
 
 The payer account's key stays in the browser (and in "Download the keys") to fund invites and the DAO, which need NEAR deposits a wallet key cannot attach; it holds no power over the contract. The other doors are an invite link from a colleague and a keys file from an earlier treasury. No password and no server.
 
-**9, continued: the recorded readings.** These are the real receipts the enclave signed on 20 October, fetched through the relay. Use a treasury with no DAO yet: create the DAO after this, or payment #1 opens a proposal instead of waiting for "Approve".
+**9, continued: the recorded readings.** These are the real receipts the enclave signed on 20 October, fetched through the relay (from `samples/readings.js` when the console is opened as a file). Use a treasury with no DAO yet: create the DAO after this, or payment #1 opens a proposal instead of waiting for "Approve".
 
 Do:
 1. Open Invoices and load the recorded readings one at a time.
@@ -475,7 +475,7 @@ See:
 - The page pointing the treasury at the test signer once (`set_quote_signer`, signed by the owner).
 - The quote dialog: what the vendor receives and at which address, what the treasury sends, a 64-character deposit account, and "signed by the test signer standing in for 1Click (stub), checked here and by the contract" (on mainnet: "1Click, checked here and by the contract").
 - One transaction by the executor key, `settle` with the signed bytes and the signature. The contract verifies the signature, checks the recipient, the amount, the asset, the floor and the expiry, registers the deposit account on the test USDC and sends the net amount in the same receipt.
-- `get_payment` showing `deposit_address` (an implicit account the executor never named) and `quote_id` (the base58 hash of the signed bytes); a few seconds later the stub reports delivery and `mark_settled` closes it.
+- `get_payment` showing `deposit_address` (an implicit account the executor never named) and `quote_id` (the base58 hash of the signed bytes); within half a minute the stub reports delivery and `mark_settled` closes it.
 - `cargo test settle` running a signed quote for another recipient, another amount, a fee over 2 percent, another chain, an expired one, a named deposit account, a wrong signature and a wrong key: every one refused, the test asserting its reason, and nothing moves.
 
 Who signs: a treasury the testnet wizard made names its owner as the executor, so the owner's key in this browser signs the settlement. A treasury with its own executor needs that key here (Settings, Keys).
@@ -507,7 +507,7 @@ See:
 
 The contract keeps timestamps, not hashes: the page matches them to the treasury's receipts read from nearblocks.
 
-**10. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. On mainnet the whole thing runs from the browser: sign in at `https://bursar.network/login` with a mainnet wallet, press "Create my treasury" and see the wallet sign five transactions (the treasury account with the contract inside and no access key, the agent with its one key, the executor with a key limited to `settle` and the two marks, the USDC registration, and the acceptance of the treasury, since ownership moves in two steps; about 7 NEAR, 4.7 of them the contract's storage on your own account); add a vendor on Base in Vendors and deposit USDC from Overview, Top up. Submit an invoice for that vendor (`web/samples/mainnet/` holds three small ones, 10 and 5 USDC on Base and 5 USDC on NEAR, made with `make_invoices.py --mainnet-demo`): `Queued`. In Attention, "Settle via Intents" (with a 1Click partner key pasted in Settings, see the limits below): see the 1Click quote (what the vendor receives, the one-off deposit account, 1Click's signature checked in the page), the executor key call `settle` with the signed quote, the contract verify the signature and every field of the quote, register the deposit account on the USDC contract itself and send the USDC in one receipt (your wallet signs nothing), and the page follow the swap until the vendor's chain confirms, then `mark_settled` with the destination transaction hash. Or turn on "Automatic settlement" in Attention and watch it happen with no click. The same loop runs headless with `npm run executor -- --once` and the executor key in the keystore.
+**10. Cross-chain payout (mainnet only).** NEAR Intents has no testnet. On mainnet the whole thing runs from the browser: sign in at `https://bursar.network/login` with a mainnet wallet, press "Create my treasury" and see the wallet sign five transactions (the treasury account with the contract inside and no access key, the agent with its one key, the executor with a key limited to `settle`, the two marks and `sync_dao_proposal`, the USDC registration, and the acceptance of the treasury, since ownership moves in two steps; about 7 NEAR, 4.7 of them the contract's storage on your own account); add a vendor on Base in Vendors and deposit USDC from Overview, Top up. Submit an invoice for that vendor (`web/samples/mainnet/` holds three small ones, 10 and 5 USDC on Base and 5 USDC on NEAR, made with `make_invoices.py --mainnet-demo`): `Queued`. In Attention, "Settle via Intents" (with a 1Click partner key pasted in Settings, see the limits below): see the 1Click quote (what the vendor receives, the one-off deposit account, 1Click's signature checked in the page), the executor key call `settle` with the signed quote, the contract verify the signature and every field of the quote, register the deposit account on the USDC contract itself and send the USDC in one receipt (your wallet signs nothing), and the page follow the swap until the vendor's chain confirms, then `mark_settled` with the destination transaction hash. Or turn on "Automatic settlement" in Attention and watch it happen with no click. The same loop runs headless with `npm run executor -- --once` and the executor key in the keystore.
 
 **Done on mainnet, 2 and 3 November 2026.** Everything above ran for real, from a browser, with small amounts. Judges can check each step on chain; every link is a public explorer. Payment #1 (2 November) was settled with the build of that day, where the owner registered the deposit account first (`set_settlement_account`); payment #4 (3 November, second table) was settled by the current build, on a quote whose signature the contract verified itself, and that method is gone.
 
@@ -554,7 +554,7 @@ The hackathon build is the demo above. The [roadmap](ROADMAP.md) has the full pl
 
 | Feature | Where | Why it matters here |
 |---|---|---|
-| Function-call access keys | `setup` step 7, `agent` | The agent's only key can call one method on one contract. Stolen key = nothing. |
+| Function-call access keys | `setup` step 7, `agent` | The agent's only key can call one method on one contract. A stolen agent key can only ask: claims within the caps, budgets and orders for registered vendors are paid, the rest is held or refused, and the owner's daily quotas and the five autopaid invoices per vendor per day bound even that. |
 | Meta transactions (NEP-366) | `relayer.ts`, `near.ts` | Through the relayer the agent pays no gas; the relayer only forwards `request_payment` from the agent. The direct path (console, MCP) pays gas from the agent's 0.5 NEAR. |
 | Sub-accounts | `setup.ts` | Agent, executor and treasury are separate accounts under the company. |
 | NEAR AI Cloud (TEE) | `ai.ts` | Invoices are sensitive. Inference runs in a TEE, with attestation and a signed receipt stored next to the payment. |
@@ -563,7 +563,7 @@ The hackathon build is the demo above. The [roadmap](ROADMAP.md) has the full pl
 | Access keys as identity | console vault | A device asking to be admitted signs with its wallet key; a device that holds the vault checks `view_access_key_list` of the owner account and admits the account's own full-access keys by itself. |
 | Sputnik DAO v2 / Trezu | `policy` contract | Human approval above a threshold, opened by the contract itself as a FunctionCall proposal; the callback stores the proposal id, `sync_dao_proposal` reads the verdict back. |
 | NEP-141, NEP-297 events | `policy` contract | USDC in, every decision out as an event, so dashboards need no database. |
-| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the everyday methods of the company's contract (orders, limits, approvals, the vault, the company record, pause, balance sync, request_payment): vendors and payouts, operators, the DAO, withdrawals, ownership, roles and code changes are signed by the wallet itself. |
+| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the everyday methods of the company's contract (orders, approvals, the vault, the company record, pause, balance sync, request_payment): vendors and payouts, limits, operators, the DAO, withdrawals, ownership, roles and code changes are signed by the wallet itself. A stolen browser key can pay registered vendors within the limits, nothing else. |
 
 ## Repository
 
@@ -597,7 +597,9 @@ web/contracts/        the policy wasm the console deploys for a new customer
 web/samples/          the sample PDFs and five recorded readings with their receipts
 web/brand/            mark, favicon, lockup
 relay/                Cloudflare Worker: the hosted reading relay (holds the NEAR AI key, forwards bytes untouched, daily caps), the Telegram inbox and the approvals from Telegram
-invoices/             make_invoices.py and ten fictional sample invoices (plus three small ones for the mainnet demo)
+invoices/             make_invoices.py and ten fictional sample invoices (the three small ones for the mainnet demo are in web/samples/mainnet/)
+video/                the demo video, a Remotion project
+CLAUDE.md, HANDOFF.md, ARCHITETTURA.md: the team's working notes, in Italian
 ```
 
 ## Where it sits next to NEAR Business
@@ -618,7 +620,7 @@ No template, starter kit or boilerplate: every file was written for this project
 | `app/` | @defuse-protocol/one-click-sdk-typescript | NEAR Intents 1-Click quotes and status |
 | `app/` | @modelcontextprotocol/sdk, zod | the MCP server and its tool schemas |
 | `app/` (dev) | typescript, tsx, vitest, @types/node | build and tests |
-| `web/` (CDN, pinned with integrity hashes) | @fastnear/near-connect 0.14.1 | the wallet picker and the wallets' own code |
+| `web/` (CDN, pinned by version, with integrity hashes where the import map allows; the DCAP verifier `@phala/dcap-qvl` 0.7.0 is loaded from esm.sh by version only) | @fastnear/near-connect 0.14.1 | the wallet picker and the wallets' own code |
 | `web/` | @noble/curves 2.4.0, @noble/hashes 2.4.0 | signing in the browser, receipt checks |
 | `web/` | pdf.js 4.10.38 | PDF pages to PNG in the browser |
 | `web/` | @phala/dcap-qvl 0.7.0 | the same quote verifier, in the browser |
