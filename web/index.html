@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bursar</title>
-<meta name="description" content="Bursar is an AI treasurer for small companies on NEAR. The AI reads invoices inside an enclave, the contract decides inside limits the AI cannot change, a dumb executor moves the money.">
+<meta name="description" content="Bursar is an AI treasurer for companies of any size, on NEAR. The AI reads invoices inside an enclave, the contract decides inside limits the AI cannot change, a dumb executor moves the money.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -45,7 +45,7 @@
       <span class="line">The contract <span class="accent">decides.</span></span>
       <span class="line dim">A dumb executor moves the money.</span>
     </h1>
-    <p class="sub muted" style="max-width:62ch;margin-top:32px">Bursar pays a small company's invoices without ever handing the AI a key. Invoices are read inside a NEAR AI Cloud enclave, a NEAR contract decides inside limits the owner set, and the only thing that moves USDC is a dumb executor the contract keeps on a leash.</p>
+    <p class="sub muted" style="max-width:62ch;margin-top:32px">Bursar pays a company's invoices without ever handing the AI a key. Invoices are read inside a NEAR AI Cloud enclave, a NEAR contract decides inside limits the owner set, and the only thing that moves USDC is a dumb executor the contract keeps on a leash.</p>
     <div class="actions">
       <a class="btn btn-signal" href="login">Log in</a>
       <a class="btn btn-ghost" href="explorer">See the live treasury</a>
@@ -61,7 +61,7 @@
     <div class="band-head"><div class="eyebrow">[ 01 / THREE ROLES, ONE KEY EACH ]</div><h2 class="heading">Nobody in the loop can both decide and move money.</h2></div>
     <div class="grid cols-3">
       <div class="card role"><span class="ai-tile" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><div class="n">THE AI READS</div><h3>Private, attested, signed.</h3><p>The invoice is rasterized and read by a model running in a TEE on NEAR AI Cloud. The answer comes back with an ECDSA signature over the exact bytes and an Intel TDX quote bound to a fresh nonce. The agent holds one function-call key that can only call <span class="mono">request_payment</span>.</p></div>
-      <div class="card role"><div class="n" style="margin-top:56px">THE CONTRACT DECIDES</div><h3>Allowlist, payout, caps, duplicates, DAO.</h3><p>The vendor must be registered by the owner. The payout on the invoice must equal the one on record, so the new bank details fraud dies here. Per-payment, daily and monthly caps apply. Above a threshold the contract opens a Sputnik DAO proposal and waits for the council.</p></div>
+      <div class="card role"><div class="n" style="margin-top:56px">THE CONTRACT DECIDES</div><h3>Allowlist, payout, caps, duplicates, DAO.</h3><p>The vendor must be registered by the owner. The payout on the invoice must equal the one on record, so the new bank details fraud dies here. Per-payment, daily and monthly caps apply. At or above a threshold the payment waits for a person: the owner or an approver, or a Sputnik DAO council when the company has one.</p></div>
       <div class="card role"><div class="n" style="margin-top:56px">A DUMB EXECUTOR MOVES</div><h3>Only where the owner said.</h3><p>NEAR vendors are paid in the same transaction. Vendors on Base, Arbitrum, Ethereum, Solana or Sui go through NEAR Intents, and the contract checks the destination against the owner's record before the executor can settle. Every decision is an on-chain event; there is no database.</p></div>
     </div>
   </div>
@@ -77,20 +77,23 @@
 
 <section class="band mint">
   <div class="in">
-    <div class="band-head"><div class="eyebrow">[ 03 / VERIFY IT YOURSELF ]</div><h2 class="heading">Every payment carries a receipt anyone can check, without the API key.</h2></div>
+    <div class="band-head"><div class="eyebrow">[ 03 / VERIFY IT YOURSELF ]</div><h2 class="heading">Every reading carries a receipt anyone can check, without the API key.</h2></div>
     <div class="grid cols-2">
-      <div class="card"><div class="code">npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json
+      <div class="card"><div class="code">BURSAR_TREASURY=treasury.bursar-b48563e6.testnet npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json
 
- OK  bytes              hashes match the stored bytes
- OK  signed_text        z-ai/glm-5.3-flash:dc283fe4...
- OK  signature          recovers to 0x3b753b44...
- OK  signer_kind        provider_tee
- OK  attestation_nonce  report echoes our fresh nonce
- OK  quote_report_data  TDX quote binds signer and nonce
- OK  quote_tcb          Intel collateral: TCB UpToDate
- OK  extraction         exactly this model output
- OK  on_chain           payment #1 carries this reference
-verified</div></div>
+ ok  bytes               request and response hashes match the stored bytes
+ ok  signed_text         signed text is z-ai/glm-5.3-flash:eea8915f29c4cca26e450...
+ ok  signature           ECDSA signature recovers to 0x3b753b4406613c5e...
+ ok  signer_kind         signed inside the model TEE (provider_tee)
+ ok  attestation_signer  attestation report lists signer 0x3b753b4406613c5e...
+ ok  attestation_nonce   report echoes our fresh nonce
+ ok  quote_report_data   TDX quote report_data binds signer and nonce
+ ok  quote_tcb           quote verified against Intel collateral: TCB UpToDate
+ ok  extraction          the claim was built from exactly this model output
+ ok  completion_id       completion id 9b1bbd6b036041ea8a8d9b83a7ba26be
+ ok  attestation_ref     claim carries nearai:z-ai/glm-5.3-flash:9b1bbd6b...
+ ok  on_chain            payment #1 on treasury.bursar-b48563e6.testnet carries this reference
+verified: the decision was made on this model output, inside an attested TEE</div></div>
       <div><p class="sub" style="margin:0">The receipt holds the exact request and response bytes, the enclave's signature, the attestation report with the TDX quote and the nonce the agent chose. Change one byte and the signature fails. The contract stores a compact reference to it next to the payment.</p><p class="muted fine" style="margin-top:16px">Step 6 of the README walks through it. The verifier does not yet replay the RTMR3 event log or check GPU evidence; the receipt keeps both.</p></div>
     </div>
   </div>
@@ -98,9 +101,9 @@ verified</div></div>
 
 <section class="band light">
   <div class="in">
-    <div class="band-head"><div class="eyebrow">[ 04 / TRY IT ]</div><h2 class="heading">Four invoices, four decisions, one command each.</h2></div>
+    <div class="band-head"><div class="eyebrow">[ 04 / TRY IT ]</div><h2 class="heading">Four invoices, four decisions, one command.</h2></div>
     <div class="grid cols-2">
-      <div class="card"><div class="eyebrow muted">From the browser</div><p class="fine" style="margin:12px 0 0">Log in with your NEAR wallet. No treasury yet? Bursar creates one on the spot, at no cost to you. Then drop a PDF and watch the enclave read it, the receipt verify, and the contract answer.</p><a class="btn btn-signal" href="login" style="margin-top:24px">Open the console</a></div>
+      <div class="card"><div class="eyebrow muted">From the browser</div><p class="fine" style="margin:12px 0 0">Log in with your NEAR wallet. No treasury yet? Bursar creates one on the spot: free on testnet, about 7 NEAR from your wallet on mainnet. Then drop a PDF and watch the enclave read it, the receipt verify, and the contract answer.</p><a class="btn btn-signal" href="login" style="margin-top:24px">Open the console</a></div>
       <div class="card"><div class="eyebrow muted">From the terminal</div><div class="code" style="margin-top:12px">npx tsx src/cli.ts setup --root you.testnet
 npm run relayer &amp;
 npm run agent -- --once        # NEAR_AI_API_KEY set
@@ -144,14 +147,14 @@ async function view(method, args = {}) {
   if (j.result.error) throw new Error(j.result.error);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
 }
-const WHAT = { Paid: "under the caps, paid on NEAR in one transaction", Queued: "cross-chain vendor, waiting for the executor", Approval: "above the threshold, waiting for the DAO", Blocked: "", Cancelled: "cancelled after the DAO's answer", Settled: "delivered on the vendor's chain", Settling: "USDC on its way through NEAR Intents" };
+const WHAT = { Paid: "under the caps, paid on NEAR in one transaction", Queued: "cross-chain vendor, waiting for the executor", Approval: "held for a person", Blocked: "", Cancelled: "cancelled after the DAO's answer", Settled: "delivered on the vendor's chain", Settling: "USDC on its way through NEAR Intents" };
 const REASON = { payout_changed: "the invoice asks for a different wallet than the one on record", duplicate_invoice: "same vendor and invoice number already accepted", unknown_vendor: "vendor not in the allowlist", transfer_failed: "token transfer failed, balance restored", dao_proposal_failed: "the DAO refused the proposal", over_payment_cap: "above the per-payment cap", over_daily_cap: "daily cap exceeded", over_monthly_budget: "monthly budget exceeded" };
 (async () => {
   try {
     const [stats, payments] = await Promise.all([view("get_stats"), view("list_payments", { from: 0, limit: 200 })]);
     const last = payments.slice(-5).reverse();
     $("#deck").innerHTML = last.map((p) => `<div class="dec"><div class="eyebrow muted">#${p.id} ${esc(p.vendor_id)} ${esc(p.invoice_number)}</div><div class="stamp ${esc(p.status)}" style="margin-top:12px">${esc(p.status)}</div><div class="mono" style="margin-top:8px">${usdc(p.amount)}${p.dao_proposal_id !== null ? ` · dao#${p.dao_proposal_id}` : ""}</div><div class="what">${esc(p.status === "Blocked" ? (REASON[p.reason] ?? p.reason) : (p.status === "Paid" && p.reason ? (p.dao_proposal_id != null ? "approved by the council, paid on NEAR" : "approved by a person, paid on NEAR") : WHAT[p.status] ?? ""))}</div></div>`).join("") || `<div class="dec muted">no payments yet</div>`;
-    $("#liveFoot").innerHTML = `${stats.payments} decisions on <span class="mono">${esc(treasury)}</span>, balance ${usdc(stats.balance)}. Every one was read by NEAR AI Cloud inside the TEE. <a href="explorer">Every treasury on the network</a>.`;
+    $("#liveFoot").innerHTML = `${stats.payments} decisions on <span class="mono">${esc(treasury)}</span>, balance ${usdc(stats.balance)}. Payments 1 to 6 are the README walkthrough, read by NEAR AI Cloud inside the TEE. <a href="explorer">Every treasury on the network</a>.`;
   } catch (e) { $("#deck").innerHTML = `<div class="dec muted">could not read ${esc(treasury)}: ${esc(e.message)}</div>`; }
 })();
 (function stars() {

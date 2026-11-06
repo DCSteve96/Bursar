@@ -42,22 +42,22 @@
   <ul>
     <li>the sender's Telegram name and username, the chat id and its title;</li>
     <li>the file name, its size, the caption, the time it arrived;</li>
-    <li>Telegram's file reference (<code>file_id</code>): the PDF itself stays on Telegram's servers and is fetched only when a person presses Read, or when the company's own agent processes an invoice the approver accepted;</li>
+    <li>Telegram's file reference (<code>file_id</code>): the PDF itself stays on Telegram's servers and is fetched, through the relay, only when a person presses Read, or when the company's own agent processes an invoice that was accepted, by the approver or because the vendor is trusted;</li>
     <li>for an approver's chat, the Telegram user id of the person who connected it, so that nobody else can decide in that chat;</li>
     <li>the state of the invoice (waiting, approved, being read) and the name of the person who approved or rejected it.</li>
   </ul>
-  <p>An entry is deleted when the invoice is decided, discarded or rejected, and the inbox holds at most the last 50 entries per treasury. Messages the bot sends (received, approved, paid, held, declined) are ordinary Telegram messages and live in the chat. The bot reads text only to recognise <code>/start</code>, <code>/help</code>, <code>/privacy</code> and a yes or no from the approver; everything else is answered with a hint and not stored. Photos and non-PDF files are not read.</p>
+  <p>An entry is deleted when the invoice is decided, discarded or rejected, and the inbox holds at most the last 50 entries per treasury. Messages the bot sends (received, approved, paid, held, declined) are ordinary Telegram messages and live in the chat. The bot reads text only to recognise /start, /help, /privacy, a yes or no and "approve all" from the approver. Photos and non-PDF files are not read.</p>
   <p>The bot holds no NEAR key and cannot move funds. Approving on Telegram marks the invoice for the company's own agent, which runs on the company's machine with a key limited to asking the contract; the contract decides within limits the company set.</p>
 
   <h2>The reading</h2>
-  <p>When an invoice is read, its pages are sent, as images and text, to a model running inside NEAR AI Cloud's trusted execution environment. The hosted relay forwards the bytes without storing them and keeps daily counters per network address to limit abuse. The enclave returns the extracted fields and a signed receipt; the contract records only the vendor id, the invoice number, the amount, the due date, a hash of the file, the flags and the receipt reference. The PDF is never written on chain.</p>
+  <p>When an invoice is read, its pages are sent, as images and text, to a model running inside NEAR AI Cloud's trusted execution environment. The hosted relay forwards the bytes without storing them and keeps daily counters per network address to limit abuse. The enclave returns the extracted fields and a signed receipt; the contract stores, for each payment, the vendor id, the invoice number, the amount, a hash of the file, the flags and the receipt reference, and the request that carries them also shows the payout, the tax ids, the withholding and the order reference the model read; the vendor list (names, tax ids, payout addresses) and the company record are on chain too. The PDF is never written on chain.</p>
 
   <h2>The console</h2>
   <p>The console is a web page. Keys, labels and the inbox token stay in the browser's local storage, or in a vault encrypted with a key only the owner's wallet can derive and stored on the company's own contract. The console talks to NEAR RPC nodes, to the relay and, when the company uses its own NEAR AI Cloud key, straight to the enclave. It sets no tracking cookies.</p>
 
   <h2>Your rights</h2>
-  <p>Disconnect a chat from the console's Settings to stop the bot reading it; its inbox entries are deleted with the next decision or discard. What is on chain (the fields above) is public and permanent by the nature of the blockchain, which is why the PDF, the names and the bank details are not written there. Questions: open an issue on the <a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">repository</a>.</p>
-  <p class="lead">Last updated 22 October 2026.</p>
+  <p>Disconnect a chat from the console's Settings to stop the bot reading it; its inbox entries are deleted with the next decision or discard. What is on chain (the fields above) is public and permanent by the nature of the blockchain, which is why the PDF is never written there. Questions: open an issue on the <a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">repository</a>.</p>
+  <p class="lead">Last updated 6 November 2026.</p>
 </main>
 <footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional. <a href="privacy" style="color:inherit">Privacy</a></footer>
 <script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>

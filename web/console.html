@@ -272,7 +272,7 @@
   <div class="pane" id="wizCreate" hidden>
     <div class="eyebrow muted">Step 2 of 3</div>
     <h3 id="wizCreateTitle">Creating your treasury</h3>
-    <p class="muted" id="wizCreateText">About a minute. Bursar asks the testnet faucet for a payer account, deploys the policy contract, writes your company on it, mints test USDC and registers four demo vendors. Nothing to pay.</p>
+    <p class="muted" id="wizCreateText">About a minute. On testnet Bursar asks the faucet for a payer account, deploys the policy contract, writes your company on it, mints test USDC and registers four demo vendors; nothing to pay. On mainnet your wallet funds the payer with about 7 NEAR (4.7 stay locked as the contract's storage), and you add vendors and USDC yourself.</p>
     <ul class="log" id="createSteps"></ul>
     <div id="createErr" class="err" hidden></div>
     <div class="actions" id="wizRetry" hidden><button type="button" class="btn-signal" id="wRetry">Try again</button><button type="button" class="btn-ghost" id="wCancel2">Close</button></div>
@@ -282,7 +282,7 @@
     <h3>Your treasury is ready</h3>
     <div id="created" hidden>
       <div class="kv" id="createdKv"></div>
-      <p class="muted" id="createdNote" hidden style="font-size:14px;margin:16px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs orders, approvals and the vault, never a vendor or a payout, a limit, an operator, the DAO or a withdrawal: those the wallet signs, and shows you first. Then it asks for one signature, no transaction: it locks your settings in the contract's vault.</p>
+      <p class="muted" id="createdNote" hidden style="font-size:14px;margin:16px 0 0">Your wallet will ask you to approve one transaction: it adds a key limited to this treasury to the browser, which signs payment requests, orders, approvals and cancellations, DAO proposals, balance sync and the vault, never a vendor or a payout, a limit, an operator, the DAO or a withdrawal: those the wallet signs, and shows you first. Then it asks for one signature, no transaction: it locks your settings in the contract's vault.</p>
       <p class="muted" id="createdKeysNote" hidden style="font-size:14px;margin:16px 0 0">The keys of this treasury live in this browser. Download them now: they are the only way back in from another browser.</p>
       <div class="actions" style="margin-top:16px"><button type="button" class="btn-signal" id="createdWallet" hidden>Connect the wallet key</button><a class="btn btn-signal" href="#start" id="createdGo">Continue</a><a id="dlKeys" class="btn btn-ghost" href="#" download>Download the keys</a></div>
     </div>
@@ -306,7 +306,7 @@
     <div class="band-head"><div class="eyebrow">[ NEW TREASURY ]</div><h2 class="heading" id="startTitle">Your own treasury on testnet, in one click.</h2></div>
     <div class="grid cols-2">
       <div class="card">
-        <div id="startWallet" class="who" hidden style="margin-bottom:16px"><div class="av" id="startAv"></div><div><div class="n" id="startOwner"></div><div class="r">will own the treasury. Bursar pays for the accounts and the contract: nothing to pay.</div></div></div>
+        <div id="startWallet" class="who" hidden style="margin-bottom:16px"><div class="av" id="startAv"></div><div><div class="n" id="startOwner"></div><div class="r">will own the treasury. On testnet the faucet pays for the accounts and the contract; on mainnet your wallet funds the payer with about 7 NEAR.</div></div></div>
         <p style="margin:0 0 16px" id="startText">This browser becomes the company: it asks the testnet faucet for an account, deploys the policy contract, mints test USDC, registers four vendors and what the company agreed to buy, and creates an agent with one function-call key. Every key is generated here and stays here. About a minute.</p>
         <div class="actions" style="margin:0;align-items:center">
           <button id="create" type="button" class="btn-signal">Create my treasury</button>
@@ -318,11 +318,11 @@
       <div class="card">
         <div class="eyebrow muted" style="margin-bottom:12px">What you get</div>
         <div class="kv">
-          <span class="k">treasury</span><span class="v" id="startOwned">the policy contract, owned by your new account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person approves above 2,000</span>
+          <span class="k">treasury</span><span class="v" id="startOwned">the policy contract, owned by your new account, 15,000 test USDC, caps 10,000 per payment and 20,000 per day, a person decides from 2,000 (on mainnet: no USDC yet, caps 1,000 and 5,000, a person from 500)</span>
           <span class="k">orders</span><span class="v">what the company agreed to buy: hosting 500 USDC a month, two purchase orders. An invoice outside them waits for you</span>
           <span class="k">agent</span><span class="v">a sub-account with one key that can only call <span class="mono">request_payment</span></span>
           <span class="k">vendors</span><span class="v">Acme Hosting and Legal Partners on NEAR, a freelancer with 20% withholding, DesignCo on Base, so the sample invoices and the recorded readings apply</span>
-          <span class="k">later</span><span class="v">a Sputnik DAO with your collaborators as council, from Settings; cross-chain settlement runs on mainnet only (NEAR Intents)</span>
+          <span class="k">later</span><span class="v">a Sputnik DAO with your collaborators as council, from Settings; cross-chain settlement runs on mainnet only (NEAR Intents); on testnet, ?intents=stub plays 1Click with the contract's test signer</span>
         </div>
       </div>
     </div>
@@ -332,9 +332,9 @@
 <!-- ============ INBOX: invoices received through Telegram ============ -->
 <section class="band view" id="inbox" hidden>
   <div class="in">
-    <div class="band-head"><div class="eyebrow">[ INBOX ]</div><h2 class="heading">Invoices received. Nothing is read, let alone paid, until a person presses Read, here or on Telegram.</h2></div>
+    <div class="band-head"><div class="eyebrow">[ INBOX ]</div><h2 class="heading">Invoices received. Nothing is read until a person presses Read here or approves it on Telegram (or the vendor is trusted and your agent runs with the inbox token); the contract decides either way.</h2></div>
     <div id="inboxOff" class="card" hidden>
-      <p style="margin:0 0 16px;max-width:70ch">Vendors send invoices as they always do. Connect a Telegram chat to this treasury and every PDF posted there lands here: you, a colleague, or a group with the vendor in it. Bursar keeps only the sender and the file name; the PDF stays on Telegram until someone presses Read.</p>
+      <p style="margin:0 0 16px;max-width:70ch">Vendors send invoices as they always do. Connect a Telegram chat to this treasury and every PDF posted there lands here: you, a colleague, or a group with the vendor in it. Bursar's relay keeps the sender, the chat, the file name, Telegram's file reference and the approval state until the invoice is decided (the privacy notice lists it all); the PDF stays on Telegram until someone presses Read, when the relay fetches it for this page.</p>
       <div class="actions" style="margin:0"><a class="btn btn-signal" href="#settings">Connect Telegram in Settings</a></div>
     </div>
     <div id="inboxOn" hidden>
@@ -500,8 +500,8 @@
 <!-- ============ VENDORS ============ -->
 <section class="band light view" id="vendors" hidden>
   <div class="in">
-    <div class="band-head"><div class="eyebrow">[ VENDORS ]</div><h2 class="heading">Who the company pays, and where. Written once, by the owner.</h2></div>
-    <div class="wrap"><table id="vendorsTable"><thead><tr><th>vendor</th><th>name</th><th>identifier</th><th>country</th><th>withholding</th><th>payout recorded by the owner</th><th>monthly budget</th><th>spent this month</th><th>orders</th><th>active</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="band-head"><div class="eyebrow">[ VENDORS ]</div><h2 class="heading">Who the company pays, and where. A payout pays only once the owner has confirmed it.</h2></div>
+    <div class="wrap"><table id="vendorsTable"><thead><tr><th>vendor</th><th>name</th><th>identifier</th><th>country</th><th>withholding</th><th>payout on record</th><th>monthly budget</th><th>spent this month</th><th>orders</th><th>active</th><th></th></tr></thead><tbody></tbody></table></div>
     <div class="card" style="margin-top:32px">
       <div class="eyebrow muted" style="margin-bottom:16px">Add a vendor</div>
       <div class="grid cols-3">
@@ -514,7 +514,7 @@
         <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Ethereum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
         <label style="grid-column: span 2"><span>Account or address <i class="help" tabindex="0" data-help="The only place this vendor will ever be paid. An invoice that asks for a different account or address is refused, not paid: this is what stops the new bank details fraud. Confirm it with the vendor by phone before saving.">?</i></span><input id="vPayout" placeholder="vendor.testnet or 0x..." autocomplete="off"></label>
       </div>
-      <div class="actions" style="margin-top:16px;align-items:center"><button id="vAdd" type="button" class="btn-signal">Add vendor</button><span class="muted" style="font-size:14px;max-width:60ch">Check the address with the vendor by phone or in person. An invoice can never change it; only you can.</span></div>
+      <div class="actions" style="margin-top:16px;align-items:center"><button id="vAdd" type="button" class="btn-signal">Add vendor</button><span class="muted" style="font-size:14px;max-width:60ch">Check the address with the vendor by phone or in person. An invoice can never change it. A collaborator can propose a change, which pays nothing until you confirm it.</span></div>
       <div id="vErr" class="err" hidden></div>
     </div>
   </div>
@@ -564,7 +564,7 @@
     </div>
     <div class="grid stats" id="anStats"></div>
     <div class="card" style="margin-top:24px" id="whCard" hidden>
-      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Withholding tax, to remit <i class="help" tabindex="0" data-help="Amounts the treasury kept back from vendors with a withholding rate set by your accountant. They are still in the treasury, owed to the state. When the company remits them, the owner presses Mark as remitted so the contract stops counting them as due.">?</i></div>
+      <div class="eyebrow muted" style="margin-bottom:8px;display:flex;align-items:center">Withholding tax, to remit <i class="help" tabindex="0" data-help="Amounts the treasury kept back from vendors with a withholding rate set by your accountant. They are still in the treasury, owed to the state. To remit, the owner presses Mark as remitted: the withheld USDC goes to the owner's account in one transaction, and the company pays the state with it.">?</i></div>
       <div class="kv" id="whKv"></div>
       <div class="actions" style="margin-top:12px;align-items:center"><button id="whRemit" type="button" class="btn-inverse">Mark as remitted</button><span class="muted" style="font-size:13px">Owner only. The withheld USDC goes to your own account in one transaction, and you pay the state with it; Bursar talks to no tax authority.</span></div>
       <div id="whErr" class="err" hidden></div>
@@ -631,7 +631,7 @@
           <label><span>Owner key kind</span><select id="ownerKeyKind"><option value="">full access (downloaded keys)</option><option value="wallet">function-call key added by the wallet</option></select></label>
           <label><span>Payer account (set at creation)</span><input id="payer" placeholder="bursar-1a2b3c4d.testnet" autocomplete="off"></label>
           <label><span>Payer key (full access)</span><input id="payerKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
-          <label><span>Executor account <i class="help" tabindex="0" data-help="Settles cross-chain payments through NEAR Intents from this page. Its key can only call settle, mark_settled and mark_settlement_failed on the treasury; the contract pins where the USDC may go."></i></span><input id="executor" placeholder="executor.you.near" autocomplete="off"></label>
+          <label><span>Executor account <i class="help" tabindex="0" data-help="Settles cross-chain payments through NEAR Intents from this page. Its key can only call settle, mark_settled, mark_settlement_failed and sync_dao_proposal on the treasury; the contract pins where the USDC may go."></i></span><input id="executor" placeholder="executor.you.near" autocomplete="off"></label>
           <label><span>Executor key (function-call)</span><input id="executorKey" type="password" placeholder="ed25519:..." autocomplete="off"></label>
           <label><span>NEAR Intents API key <i class="help" tabindex="0" data-help="A partner key from partners.near-intents.org. Since 27 October 2026 1Click quotes only confidential swaps, and those need a key; without one every pair answers 'not available'. Stays in this browser; it is sent only to 1Click, as X-API-Key.">?</i></span><input id="intentsKey" type="password" placeholder="JWT from partners.near-intents.org" autocomplete="off"></label>
           <label><span>Operator account (from an invite)</span><input id="operator" placeholder="anna.company.testnet" autocomplete="off"></label>
@@ -731,7 +731,7 @@
       <details class="adv" style="margin-top:20px">
         <summary>Already has a NEAR account? Give it a role directly</summary>
         <div class="grid cols-3" style="margin-top:12px">
-          <label><span>Account <i class="help" tabindex="0" data-help="Their own NEAR account. They sign in with their wallet; no invite link is needed.">?</i></span><input id="opAccount" placeholder="anna.testnet" autocomplete="off"></label>
+          <label><span>Account <i class="help" tabindex="0" data-help="Their own NEAR account. The role is recorded on the contract; this console signs collaborators in with an invite link, so use the invite above if they need the console.">?</i></span><input id="opAccount" placeholder="anna.testnet" autocomplete="off"></label>
           <label><span>May</span><div class="row" style="display:flex;gap:16px;padding-top:10px"><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opApprove" style="width:auto"> approve</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opVendors" style="width:auto"> vendors</label><label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="opOrders" style="width:auto"> orders</label></div></label>
           <label><span>&nbsp;</span><button id="opAdd" type="button" class="btn-inverse">Add the role</button></label>
         </div>
@@ -2520,7 +2520,7 @@ $("#inboxApproveAll").addEventListener("click", async () => {
   const items = inboxItems.filter((it) => (it.status || "waiting") === "waiting");
   if (!items.length) return;
   const who = settings.owner || settings.operator || "the console";
-  if (!(await ask({ eyebrow: "Inbox", title: `Approve all ${items.length} waiting invoice${items.length === 1 ? "" : "s"}?`, rows: items.slice(0, 8).map((it, i) => [`invoice ${i + 1}`, `${it.name}, from ${it.from}${it.vendor ? ` (${Object.fromEntries(state.vendors)[it.vendor]?.name || it.vendor})` : ""}`]).concat(items.length > 8 ? [["and", `${items.length - 8} more`]] : []), note: "Approve means the agent reads each one in the enclave and the contract decides each on its own limits: duplicates, changed payouts and anything over the caps are still refused or held. The chats are told.", ok: "Approve all" }))) return;
+  if (!(await ask({ eyebrow: "Inbox", title: `Approve all ${items.length} waiting invoice${items.length === 1 ? "" : "s"}?`, rows: items.slice(0, 8).map((it, i) => [`invoice ${i + 1}`, `${it.name}, from ${it.from}${it.vendor ? ` (${Object.fromEntries(state.vendors)[it.vendor]?.name || it.vendor})` : ""}`]).concat(items.length > 8 ? [["and", `${items.length - 8} more`]] : []), note: "Approve marks each one as accepted: your agent, if it runs with the inbox token, or the next person who presses Read, has it read in the enclave, and the contract decides each on its own limits: duplicates, changed payouts and anything over the caps are still refused or held. The chats are told.", ok: "Approve all" }))) return;
   const b = $("#inboxApproveAll"); b.disabled = true; $("#inboxErr").hidden = true;
   try {
     const r = await fetch(`${RELAY}/inbox/approve`, { method: "POST", headers: { ...inboxHeaders(), "content-type": "application/json" }, body: JSON.stringify({ treasury: settings.treasury, ids: items.map((it) => it.id), by: who }) });
@@ -2790,7 +2790,7 @@ async function createTreasuryWithWallet(company) {
       const wasm = await policyWasm();
       step("contract", "wait", `deploying to ${treasury}`);
       const caps = network === "mainnet" ? { per_payment_cap: "1000000000", daily_cap: "5000000000", approval_threshold: "500000000" } : { per_payment_cap: "10000000000", daily_cap: "20000000000", approval_threshold: "2000000000" };
-      // the payer owns the contract while it sets it up, then hands it to the wallet account (transfer_ownership below)
+      // the payer owns the contract while it sets it up, then offers it to the wallet account, which accepts (below)
       const init = { owner: payer, agent, executor, dao: null, usdc: usdcContract, ...caps };
       const t1 = await send(treasury, [A.createAccount(), A.transfer(NEAR(6)), A.deployContract(wasm), A.functionCall("new", init, 50)]);
       step("contract", "ok", `policy contract live at ${treasury}, with no access key`, t1.hash);
@@ -2816,7 +2816,7 @@ async function createTreasuryWithWallet(company) {
     else {
       step("executor", "wait", `creating ${executor}`);
       const t3 = await send(executor, [A.createAccount(), A.transfer(NEAR(0.2)), A.addFunctionCallKey(executorKey.pub, null, treasury, ["settle", "mark_settled", "mark_settlement_failed", "sync_dao_proposal"])]);
-      step("executor", "ok", `${executor} holds one key: settle, mark_settled, mark_settlement_failed on ${treasury}`, t3.hash);
+      step("executor", "ok", `${executor} holds one key: settle, mark_settled, mark_settlement_failed, sync_dao_proposal on ${treasury}`, t3.hash);
     }
     const reg = await view(usdcContract, "storage_balance_of", { account_id: treasury }).catch(() => null);
     if (reg) step("usdc", "ok", `${treasury} is registered on the USDC contract`);
@@ -3313,7 +3313,7 @@ async function replaceExecutor() {
   if (!settings.owner || !settings.ownerKey || !settings.treasury) throw new Error("sign in as the owner first");
   const owner = settings.owner, treasury = settings.treasury;
   const acct = `exec-${toHex(crypto.getRandomValues(new Uint8Array(3)))}.${owner}`, key = newKey();
-  const yes = await ask({ eyebrow: "Executor", title: "Replace the executor from this device?", rows: [["new executor", acct], ["funded with", `0.2 NEAR from ${owner}`], ["its key", `settle and the marks on ${treasury}, nothing else`], ["old executor", `${state.roles?.[2] || "none"}: keeps its NEAR, loses the role`]], note: "Two signatures: the wallet creates the account with one function-call key, then tells the contract who the executor is. The key stays in this browser: save the vault or download the keys backup after.", ok: "Replace" });
+  const yes = await ask({ eyebrow: "Executor", title: "Replace the executor from this device?", rows: [["new executor", acct], ["funded with", `0.2 NEAR from ${owner}`], ["its key", `settle, the two marks and sync_dao_proposal on ${treasury}, nothing else`], ["old executor", `${state.roles?.[2] || "none"}: keeps its NEAR, loses the role`]], note: "Two signatures: the wallet creates the account with one function-call key, then tells the contract who the executor is. The key stays in this browser: save the vault or download the keys backup after.", ok: "Replace" });
   if (!yes) return;
   await ownerSend(acct, [{ createAccount: true }, { transfer: NEAR(0.2) }, { addKey: { pubStr: key.pubStr, pub: key.pub, receiverId: treasury, allowance: null, methods: EXECUTOR_METHODS } }]);
   await ownerSend(treasury, [{ method: "set_roles", args: { executor: acct }, gasTgas: 30 }]);
