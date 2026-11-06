@@ -62,7 +62,7 @@ flowchart LR
    - at or above the approval threshold: a Sputnik DAO proposal is opened, a human approves it in Trezu; the proposal id is written back on the payment, and a rejected or expired proposal cancels it. The DAO that `setup` and the console create asks a 0.1 NEAR bond per proposal (Sputnik's default is 1 NEAR); the treasury pays it and gets it back when the council decides, and when the account cannot cover a bond the invoice still waits, without a proposal, until someone opens it or tops the account up; a DAO created earlier with the 1 NEAR default is moved to 0.1 NEAR from the console (Settings, Governance: one proposal, voted with the owner's seat)
 5. Payment:
    - vendor on NEAR: USDC is transferred in the same transaction (`Paid`)
-   - vendor on Base, Arbitrum, Solana or Sui: the **executor** (a plain process with the company's key, no AI) gets a NEAR Intents quote (EXACT_INPUT on the net amount the contract will send) with the vendor's recorded address as recipient and calls `settle` with the bytes 1Click signed and its signature. The contract verifies the signature against 1Click's key, checks that the quote pays the vendor's recorded address for exactly the net amount in USDC on the vendor's chain, that the swap keeps at least 98 percent of it and that it has not expired, registers the one-off deposit account on the token itself and sends the USDC there, in one receipt (`Settling`, then `Settled`). The executor names nothing; nobody signs anything by hand. A refunded settlement goes back in front of a person (`Approval`, reason `settlement_failed`), nothing is re-sent on the executor's own; one nobody can confirm is closed by the owner (`close_settlement`, delivered or not).
+   - vendor on Base, Arbitrum, Ethereum, Solana or Sui: the **executor** (a plain process with the company's key, no AI) gets a NEAR Intents quote (EXACT_INPUT on the net amount the contract will send) with the vendor's recorded address as recipient and calls `settle` with the bytes 1Click signed and its signature. The contract verifies the signature against 1Click's key, checks that the quote pays the vendor's recorded address for exactly the net amount in USDC on the vendor's chain, that the swap keeps at least 98 percent of it and that it has not expired, registers the one-off deposit account on the token itself and sends the USDC there, in one receipt (`Settling`, then `Settled`). The executor names nothing; nobody signs anything by hand. A refunded settlement goes back in front of a person (`Approval`, reason `settlement_failed`), nothing is re-sent on the executor's own; one nobody can confirm is closed by the owner (`close_settlement`, delivered or not).
    - a USDC transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked `transfer_failed`, nothing lost
 6. Everything is an on-chain event. The MCP server lets any assistant drive it, with exactly the agent's powers.
 7. Anyone can re-verify the TEE receipt behind a payment, without the API key and without trusting the agent (`bursar verify`).
@@ -257,7 +257,7 @@ With a wallet, on the live site:
 4. Press "Connect the wallet key" and approve the one transaction.
 
 See:
-- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (vendors, orders, limits, approvals, operators, the vault), never a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first.
+- For an existing treasury, the wallet adds a key limited to that contract: the everyday methods only (orders, limits, approvals, operators, the vault, pause), never a vendor or a payout, the DAO, a withdrawal, a change of owner or roles, or a new contract build. Those the wallet signs itself, and shows you first: a stolen browser key cannot add a vendor or point one at a new address and then pay it. A key added by a build before 6 November could also sign vendor and payout changes; Overview says so and "Replace the key" swaps it for a narrow one in one wallet transaction.
 - For a new treasury, the same `OK` lines plus `OK owner ... is owned by you.testnet`: the contract is offered to your wallet account (`offer_ownership`) and the wallet accepts it (`accept_ownership`, one signature).
 - "you.testnet, owner, wallet key" at the bottom of the sidebar.
 
@@ -365,7 +365,7 @@ A person in the console can also press "Request payment" without the agent key: 
 **9d. One chat per vendor.**
 
 Do:
-1. In Settings, Telegram inbox, pick a vendor in "Who is this chat for" and press Connect.
+1. In Settings, Telegram inbox, pick a vendor in "Who is this chat for" and press "Connect a Telegram chat".
 2. Open the link in Telegram and press Start.
 3. Post a PDF in that chat.
 4. Connect a second chat for DesignCo, post Acme's invoice there, Read it and press "Request payment".
@@ -437,7 +437,7 @@ See:
 More from the same chat:
 - **Many at once.** Type `approve all` in your approver chat: see the list of what waits and one button, "Approve all N". In the console, Inbox has "Approve all waiting (N)", and Attention has a checkbox per held payment with "Approve selected" and "Cancel selected" (four `approve_payment` calls per signature; with a DAO, "Vote approve selected", one vote per proposal). Each invoice is still a decision of its own on the contract, with its own limits: bulk means fewer signatures, never fewer checks.
 - **Reject.** Press Reject instead: the row leaves Inbox and the vendor reads "declined". Decide in the console instead of the phone: your Telegram message gets the same outcome under it.
-- **Trusted vendors.** Tick "Trusted vendor, accept without asking" when you connect a vendor's chat (or the "trusted" box next to it under Connected chats). Its invoices skip the question, you only get a notice, and the vendor reads "Accepted: the treasury contract decides next". The contract still applies every rule, so a changed payout, a cap, a missing order or a flag is held or blocked exactly as before.
+- **Trusted vendors.** Under "Trusted vendor", tick "accept without asking" when you connect a vendor's chat (or the "trusted" box next to it under Connected chats). Its invoices skip the question, you only get a notice, and the vendor reads "Accepted: the treasury contract decides next". The contract still applies every rule, so a changed payout, a cap, a missing order or a flag is held or blocked exactly as before.
 - **With the agent running.** A company that runs the agent with the inbox token from Settings, Keys, sees it take approved invoices on its own, and with trusted vendors nobody touches anything between the PDF and the payment:
 
 ```bash
@@ -503,7 +503,7 @@ Do:
 See:
 - One link per transaction the contract recorded a timestamp for (request payment, approve payment, settle, mark settled) and the destination chain transaction, in time order.
 - The same links as columns in both files (hyperlinks in Excel).
-- On testnet the column reads `-` for the NEAR transactions, because nearblocks does not index these treasuries; a payment settled through the stub shows `base stub` for its destination. On mainnet it is the table in step 10.
+- The NEAR transactions as links, read from the nearblocks API v3, on testnet too. A payment the CLI agent requested through the relayer reads `-`: its outer transaction is a meta transaction addressed to the agent, not to the treasury. A payment settled through the stub shows `base stub` for its destination. On mainnet it is the table in step 10.
 
 The contract keeps timestamps, not hashes: the page matches them to the treasury's receipts read from nearblocks.
 
@@ -563,7 +563,7 @@ The hackathon build is the demo above. The [roadmap](ROADMAP.md) has the full pl
 | Access keys as identity | console vault | A device asking to be admitted signs with its wallet key; a device that holds the vault checks `view_access_key_list` of the owner account and admits the account's own full-access keys by itself. |
 | Sputnik DAO v2 / Trezu | `policy` contract | Human approval above a threshold, opened by the contract itself as a FunctionCall proposal; the callback stores the proposal id, `sync_dao_proposal` reads the verdict back. |
 | NEP-141, NEP-297 events | `policy` contract | USDC in, every decision out as an event, so dashboards need no database. |
-| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the everyday methods of the company's contract: the browser manages the treasury; withdrawals, ownership, roles and code changes are signed by the wallet itself. |
+| Wallet sign-in (function-call key) | `web/login.html` | Any NEAR wallet through NEAR Connect adds a key limited to the everyday methods of the company's contract (orders, limits, approvals, operators, the vault): vendors and payouts, the DAO, withdrawals, ownership, roles and code changes are signed by the wallet itself. |
 
 ## Repository
 
@@ -643,7 +643,7 @@ AI-generated code: the project was built by one person working with Claude Code 
 - Intents cross-chain payouts are mainnet only; the testnet demo stops at `Queued` for the Base vendor. Since 27 October 2026 1Click only quotes confidential swaps, and those need a partner key from `partners.near-intents.org` (Settings, NEAR Intents API key, or `ONE_CLICK_JWT` for the executor); without one every pair answers "Quoting for this pair is not available", which is what our mainnet treasury got on 2 November. The contract verifies 1Click's signature on every quote it settles; if 1Click rotates its signing key, the owner sets the new one with `set_quote_signer`.
 - `bursar verify` checks the signature, the nonce, the quote's `report_data` binding and the quote against Intel collateral. It does not yet replay the RTMR3 event log against the quote (which images and compose file ran in the enclave) and does not check GPU evidence; the receipt keeps both, so it can be added without re-running anything.
 - The verifier was tested against synthetic receipts, tampering and receipts from the live NEAR AI Cloud gateway (step 6 verifies one); the TDX quote is checked against Intel's collateral (certificate chain, TCB status), so that check needs the network.
-- The "on chain" column and the links in the exports read the treasury's receipts from nearblocks; when it is down they read `-`, and it does not index our testnet treasuries, so on testnet the column stays empty.
+- The "on chain" column and the links in the exports read the treasury's transactions from the nearblocks API v3 (v1 and v2 were retired on testnet on 5 November 2026, on mainnet at the end of November); when it is down they read `-`, and requests the CLI agent sent through the relayer, which are meta transactions to the agent's account, are not matched.
 
 ## License
 

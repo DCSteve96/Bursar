@@ -353,6 +353,7 @@
     <div id="ovBody">
       <div class="grid stats" id="stats"></div>
       <p class="muted" id="flightNote" hidden><span id="flightText"></span> <button class="btn" type="button" id="resetFlight">Reset the counter</button><span class="err" id="flightErr" hidden></span></p>
+      <p class="err" id="keyWarn" hidden><span id="keyWarnText"></span> <button class="btn" type="button" id="keyNarrow">Replace the key</button></p>
       <p class="muted" id="syncNote" hidden><span id="syncText"></span> <button class="btn" type="button" id="syncBalance">Sync balance</button><span class="err" id="syncErr" hidden></span></p>
       <div class="card topup" id="topup" style="margin-top:24px">
         <div class="qr"><div id="topupQr"></div><div class="cap">scan with your wallet</div></div>
@@ -510,7 +511,7 @@
         <label><span>Country <i class="help" tabindex="0" data-help="Where the vendor is based. Shown next to the vendor so whoever keeps the books knows which rules apply. Informational.">?</i></span><span class="cty" id="vCty"><select id="vCountry"></select></span></label>
         <label><span>Withholding tax, % <i class="help" tabindex="0" data-help="Set by your accountant, not by Bursar. The share of each invoice total the treasury keeps back for the state (ritenuta d'acconto in Italy, TDS in India, retencion in Spain or Latin America). The vendor gets the rest; the kept share shows in Analytics as due until you remit it. 0 for companies and most foreign vendors. An invoice that shows a different withholding waits for a person.">?</i></span><input id="vWithhold" placeholder="0" inputmode="decimal" autocomplete="off"></label>
         <label><span>Monthly budget, USDC (0 = none) <i class="help" tabindex="0" data-help="The most this vendor is paid in one calendar month. Invoices past it are refused. 0 means no monthly limit.">?</i></span><input id="vBudget" placeholder="3000" autocomplete="off"></label>
-        <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
+        <label><span>Paid on <i class="help" tabindex="0" data-help="Where the vendor receives USDC: a NEAR account, or an address on Base, Arbitrum, Ethereum, Solana or Sui. Payouts on other chains go through NEAR Intents and run on mainnet only.">?</i></span><select id="vChain"><option value="near">NEAR account</option><option value="base">Base address</option><option value="arb">Arbitrum address</option><option value="sol">Solana address</option><option value="sui">Sui address</option><option value="eth">Ethereum address</option></select></label>
         <label style="grid-column: span 2"><span>Account or address <i class="help" tabindex="0" data-help="The only place this vendor will ever be paid. An invoice that asks for a different account or address is refused, not paid: this is what stops the new bank details fraud. Confirm it with the vendor by phone before saving.">?</i></span><input id="vPayout" placeholder="vendor.testnet or 0x..." autocomplete="off"></label>
       </div>
       <div class="actions" style="margin-top:16px;align-items:center"><button id="vAdd" type="button" class="btn-signal">Add vendor</button><span class="muted" style="font-size:14px;max-width:60ch">Check the address with the vendor by phone or in person. An invoice can never change it; only you can.</span></div>
@@ -569,7 +570,7 @@
       <div id="whErr" class="err" hidden></div>
     </div>
     <div class="charts">
-      <div class="card chart"><div class="eyebrow muted">Spend by month, last 12 <i class="help" tabindex="0" data-help="Gross amount of paid invoices per month: the lighter top of a bar is the withholding kept for the state, the rest went to vendors.">?</i></div><div id="chMonths"></div></div>
+      <div class="card chart"><div class="eyebrow muted">Spend by month, last 12 <i class="help" tabindex="0" data-help="Gross amount of invoices paid or on the way per month (a cross-chain payment counts once queued): the lighter top of a bar is the withholding kept for the state, the rest goes to vendors.">?</i></div><div id="chMonths"></div></div>
       <div class="card chart"><div class="eyebrow muted">Spend by vendor, all time</div><div id="chVendors"></div></div>
       <div class="card chart"><div class="eyebrow muted">Decisions <i class="help" tabindex="0" data-help="Every request the contract answered: paid, held for a person, refused, cancelled. Counts, not amounts.">?</i></div><div id="chDecisions"></div></div>
     </div>
@@ -833,6 +834,8 @@ const PROFILE_FIELDS = ["network", "treasury", "agent", "agentKey", "owner", "ow
 const operatorRole = () => { try { return JSON.parse(settings.operatorRole || "null") || {}; } catch { return {}; } };
 const canAct = (perm) => !!settings.ownerKey || (!!settings.operatorKey && !!settings.operator && !!operatorRole()[perm]);
 const actor = () => settings.ownerKey ? { signerId: settings.owner, secretKey: settings.ownerKey } : { signerId: settings.operator, secretKey: settings.operatorKey };
+/** A change made as the owner when an owner key is here (through ownerCall, so the wallet signs what the browser key may not), else as the operator. */
+const actorCall = (method, args, gasTgas) => settings.ownerKey ? ownerCall(method, args, gasTgas) : functionCall({ ...actor(), receiverId: settings.treasury, method, args, gasTgas });
 // Methods each permission unlocks: the invite key is limited to exactly these on the treasury.
 const ROLE_METHODS = { approve: ["approve_payment", "cancel_payment"], manage_vendors: ["add_vendor", "update_vendor"], manage_orders: ["add_order", "add_recurring_order", "close_order"] };
 // Several treasuries per browser: profiles are snapshots of the per-treasury fields, keyed by treasury account.
@@ -1622,7 +1625,37 @@ async function daoCall(method, args, gasTgas, depositYocto = 0n) {
   }
   return functionCall({ signerId: settings.owner, secretKey: settings.ownerKey, receiverId: dao(), method, args, gasTgas, deposit: depositYocto });
 }
+/** A wallet owner's browser key added by an earlier build may also sign vendor and payout changes (or remove the DAO):
+ * say so once per key, and offer to swap it for one limited to WALLET_KEY_METHODS, in a single wallet transaction. */
+let keyChecked = "";
+async function checkWalletKey() {
+  if (settings.ownerKeyKind !== "wallet" || !settings.ownerKey) { $("#keyWarn").hidden = true; return; }
+  const { pubStr } = keyOf(settings.ownerKey);
+  if (keyChecked === `${settings.treasury}|${pubStr}`) return;
+  keyChecked = `${settings.treasury}|${pubStr}`;
+  try {
+    const ak = await rpc("query", { request_type: "view_access_key", finality: "final", account_id: settings.owner, public_key: pubStr });
+    const extra = (ak?.permission?.FunctionCall?.method_names || []).filter((m) => !WALLET_KEY_METHODS.includes(m));
+    $("#keyWarn").hidden = !extra.length;
+    if (extra.length) $("#keyWarnText").textContent = `The key in this browser was added by an earlier build and can also sign ${extra.join(", ")}: a vendor or payout change, or removing the DAO, without the wallet. Replace it with one limited to the everyday methods (one wallet transaction adds the new key and deletes this one).`;
+  } catch (e) { console.warn("key check:", e.message || e); }
+}
+$("#keyNarrow").addEventListener("click", async () => {
+  const b = $("#keyNarrow"); b.disabled = true;
+  try {
+    const wallet = await ownerWallet(settings.owner);
+    const old = keyOf(settings.ownerKey).pubStr, key = newKey();
+    await wallet.signAndSendTransaction({ network: settings.network, signerId: settings.owner, receiverId: settings.owner, actions: [
+      { type: "AddKey", params: { publicKey: key.pubStr, accessKey: { permission: { receiverId: settings.treasury, allowance: "250000000000000000000000", methodNames: WALLET_KEY_METHODS } } } },
+      { type: "DeleteKey", params: { publicKey: old } }] });
+    $("#ownerKey").value = key.secretKey; saveSettings(); keyChecked = "";
+    await checkWalletKey();
+    vaultSave(wallet).catch((e) => console.warn("vault:", e.message));
+  } catch (e) { $("#keyWarnText").textContent = `the wallet did not replace the key: ${e.message || e}`; }
+  finally { b.disabled = false; }
+});
 function renderOverview() {
+  checkWalletKey();
   const { stats, limits, roles, payments, vendors, company } = state;
   $("#companyName").textContent = company?.name || settings.label || settings.treasury;
   $("#companyDesc").textContent = company?.description || "";
@@ -1630,7 +1663,7 @@ function renderOverview() {
   const month = monthOf(String(Date.now() * 1000000));
   const spentMonth = payments.filter((p) => ["Paid", "Settling", "Settled", "Queued"].includes(p.status) && monthOf(p.created_at) === month).reduce((a, p) => a + BigInt(p.amount), 0n);
   const budgets = vendors.reduce((a, [, v]) => a + BigInt(v.monthly_budget), 0n);
-  $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("spent this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (BigInt(stats.withheld_due || "0") > 0n ? stat("withheld for the state", usdc(stats.withheld_due), "warn") : "") + (stats.paused ? stat("paused", "yes", "bad") : "");
+  $("#stats").innerHTML = stat("balance", usdc(stats.balance)) + stat("paid or on the way this month", usdc(spentMonth)) + stat("vendor budgets", budgets > 0n ? usdc(budgets) + " / month" : "none") + stat("waiting for a person", held().length, held().length ? "warn" : "") + stat("decisions", stats.payments) + stat("per payment cap", usdc(limits.per_payment_cap)) + (BigInt(stats.withheld_due || "0") > 0n ? stat("withheld for the state", usdc(stats.withheld_due), "warn") : "") + (stats.paused ? stat("paused", "yes", "bad") : "");
   $("#ovAttention").innerHTML = held().slice(-5).reverse().map((p) => `<li><span class="st wait">#${num(p.id)}</span><span><b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}: ${esc(holdText(p.reason))}</span></li>`).join("") || `<li><span class="st ok">OK</span><span>nothing waits for you</span></li>`;
   $("#ovLast").innerHTML = payments.slice(-6).reverse().map((p) => `<li><span class="st ${p.status === "Blocked" ? "fail" : p.status === "Approval" ? "wait" : "ok"}">#${num(p.id)}</span><span>${statusPill(p)} <b>${esc(p.vendor_id)}</b> ${esc(p.invoice_number)}, ${usdc(p.amount)}</span></li>`).join("") || `<li><span class="st skip">-</span><span>no decisions yet</span></li>`;
   $("#foot").innerHTML = `${settings.ownerKey ? "signed in as the owner. " : settings.operator ? `signed in as ${esc(settings.operator)} (${esc(Object.keys(operatorRole()).filter((k) => operatorRole()[k]).join(", ") || "no permissions")}). ` : "read-only: no keys in this browser. "}owner ${esc(roles[0])}, agent ${esc(roles[1])}, executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}. Contract <a href="${EXPLORER[settings.network]}/address/${encodeURIComponent(settings.treasury)}" target="_blank" rel="noopener">${esc(settings.treasury)}</a> on ${esc(settings.network)}. <a href="dashboard?network=${encodeURIComponent(settings.network)}&treasury=${encodeURIComponent(settings.treasury)}">Public dashboard</a>.`;
@@ -1796,7 +1829,7 @@ document.addEventListener("click", async (e) => {
     if (act === "setTax") { tax = prompt("Identifier this vendor prints on its invoices (VAT number, EIN, CNPJ, or a supplier code you assign). Leave empty to stop checking it.", b.dataset.tax || ""); if (tax === null) return; }
     if (act === "setWithhold") { const w = prompt("Withholding tax to keep back on this vendor's invoices, in percent (for example 20). As set by your accountant. 0 for none.", String((Number(b.dataset.w) || 0) / 100)); if (w === null) return; bps = Math.round(Number(w.replace(",", ".") || "0") * 100); if (!Number.isFinite(bps) || bps < 0 || bps > 5000) throw new Error("a percentage between 0 and 50"); }
     const args = act === "openProposal" ? { id } : act === "confirmPayout" ? { vendor_id: b.dataset.id } : act === "orderBound" ? { vendor_id: b.dataset.id, bound: false } : act === "deactivate" ? { vendor_id: b.dataset.id, active: false } : act === "activate" ? { vendor_id: b.dataset.id, active: true } : act === "setTax" ? { vendor_id: b.dataset.id, tax_id: tax.trim() } : act === "setWithhold" ? { vendor_id: b.dataset.id, withholding_bps: bps } : act === "removeOp" ? { account: b.dataset.id } : { id };
-    const done = await functionCall({ ...(perm === "owner" ? { signerId: settings.owner, secretKey: settings.ownerKey } : actor()), receiverId: settings.treasury, method, args, gasTgas: 100 });
+    const done = perm === "owner" ? await ownerCall(method, args, 100) : await actorCall(method, args, 100);
     await loadTreasury();
     if (act === "approve" || act === "cancel") inboxFollowUp(id, done?.hash);
   } catch (err) { $("#attnErr").textContent = err.message; $("#attnErr").hidden = false; $("#sErr").textContent = err.message; $("#sErr").hidden = false; }
@@ -2028,7 +2061,7 @@ $("#vAdd").addEventListener("click", async () => {
     const id = $("#vId").value.trim().toLowerCase().replace(/[^a-z0-9]/g, ""), name = $("#vName").value.trim(), chain = $("#vChain").value, addr = $("#vPayout").value.trim();
     if (!id || !name || !addr) throw new Error("vendor id, name and payout are required");
     const payout = chain === "near" ? { Near: { account: addr.toLowerCase() } } : { Chain: { chain, address: addr } };
-    await functionCall({ ...actor(), receiverId: settings.treasury, method: "add_vendor", args: { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0"), tax_id: $("#vTax").value.trim() || null, country: $("#vCountry").value.trim().toUpperCase() || null, withholding_bps: Math.round(Number($("#vWithhold").value.replace(",", ".") || "0") * 100) }, gasTgas: 30 });
+    await actorCall("add_vendor", { vendor_id: id, name, payout, monthly_budget: toUnits($("#vBudget").value || "0"), tax_id: $("#vTax").value.trim() || null, country: $("#vCountry").value.trim().toUpperCase() || null, withholding_bps: Math.round(Number($("#vWithhold").value.replace(",", ".") || "0") * 100) }, 30);
     for (const f of ["vId", "vName", "vBudget", "vPayout", "vTax", "vCountry", "vWithhold"]) $("#" + f).value = "";
     $("#vCountry")._showFlag?.();
     await loadTreasury();
@@ -2134,7 +2167,7 @@ function reportRows() {
   const byVendor = vendors.map(([id, v]) => { const ps = rows.filter((r) => r.vendor_id === id), sp = ps.filter((r) => r.spend); return { vendor_id: id, name: v.name, tax_id: v.tax_id || "", country: v.country || "", rate: (v.withholding_bps || 0) / 100, payout: payoutText(v.payout), budget: toNum(v.monthly_budget), payments: ps.length, paid: ps.filter((r) => ["Paid", "Settled"].includes(r.status)).length, gross: sp.reduce((a, r) => a + r.gross, 0), withheld: sp.reduce((a, r) => a + r.withheld, 0), net: sp.reduce((a, r) => a + r.net, 0), transit: sp.reduce((a, r) => a + r.transit, 0), refused: ps.filter((r) => r.status === "Blocked").length, held: ps.filter((r) => r.status === "Approval").length, rows: ps }; });
   const unknown = rows.filter((r) => !vmap[r.vendor_id]);
   if (unknown.length) byVendor.push({ vendor_id: "", name: "(not a vendor)", tax_id: "", country: "", rate: 0, payout: "", budget: 0, payments: unknown.length, paid: 0, gross: 0, withheld: 0, net: 0, transit: 0, refused: unknown.filter((r) => r.status === "Blocked").length, held: 0, rows: unknown });
-  const months = {}; for (const r of rows) { const m = months[r.month] ??= { key: r.month, gross: 0, withheld: 0, net: 0, payments: 0, refused: 0, held: 0 }; if (r.spend) { m.gross += r.gross; m.withheld += r.withheld; m.net += r.net; m.payments++; } if (r.status === "Blocked") m.refused++; if (r.status === "Approval") m.held++; }
+  const months = {}; for (const r of rows) { const m = months[r.month] ??= { key: r.month, gross: 0, withheld: 0, net: 0, transit: 0, payments: 0, refused: 0, held: 0 }; if (r.spend) { m.gross += r.gross; m.withheld += r.withheld; m.net += r.net; m.transit += r.transit; m.payments++; } if (r.status === "Blocked") m.refused++; if (r.status === "Approval") m.held++; }
   const wh = {}; for (const r of rows) if (r.withheld > 0) { const k = `${r.month}|${r.vendor_id}`; const w = wh[k] ??= { month: r.month, vendor_id: r.vendor_id, vendor: r.vendor, tax_id: r.tax_id, rate: r.rate, gross: 0, withheld: 0, n: 0 }; w.gross += r.gross; w.withheld += r.withheld; w.n++; }
   return { rows, byVendor, months: Object.values(months).sort((a, b) => a.key < b.key ? 1 : -1), withholding: Object.values(wh).sort((a, b) => a.month < b.month ? 1 : a.month > b.month ? -1 : a.vendor.localeCompare(b.vendor)), stats, company, isSpend };
 }
@@ -2158,12 +2191,12 @@ async function downloadXlsx() {
   const wb = X.utils.book_new();
   const sheet = (name, aoa, widths) => { const ws = X.utils.aoa_to_sheet(aoa); ws["!cols"] = widths.map((w) => ({ wch: w })); X.utils.book_append_sheet(wb, ws, name); };
   const sum = (k) => rows.filter((r) => r.spend).reduce((a, r) => a + r[k], 0), month = monthOf(String(Date.now() * 1000000));
-  sheet("Summary", [["Bursar treasury report"], [], ["company", company?.name || ""], ["company tax id", company?.tax_id || ""], ["country", company?.country || ""], ["treasury contract", settings.treasury], ["network", settings.network], ["generated (UTC)", new Date().toISOString().replace("T", " ").slice(0, 19)], [], ["balance USDC", toNum(stats.balance)], ["gross paid all time USDC", sum("gross")], ["withheld all time USDC", sum("withheld")], ["net paid to vendors USDC", sum("net")], ["withholding to remit now USDC", toNum(stats.withheld_due)], ["gross paid this month USDC", rows.filter((r) => r.spend && r.month === month).reduce((a, r) => a + r.gross, 0)], ["payments recorded", rows.length], ["vendors", state.vendors.length], [], ["Amounts are USDC with two decimals. Gross is what the invoice asked; withheld is the share kept in the treasury for the state at the rate set per vendor; net is what the vendor received. Every row comes from the contract on chain."]], [34, 28]);
+  sheet("Summary", [["Bursar treasury report"], [], ["company", company?.name || ""], ["company tax id", company?.tax_id || ""], ["country", company?.country || ""], ["treasury contract", settings.treasury], ["network", settings.network], ["generated (UTC)", new Date().toISOString().replace("T", " ").slice(0, 19)], [], ["balance USDC", toNum(stats.balance)], ["gross paid or on the way, all time USDC", sum("gross")], ["withheld all time USDC", sum("withheld")], ["net paid to vendors USDC", sum("net")], ["net on the way to vendors USDC", sum("transit")], ["withholding to remit now USDC", toNum(stats.withheld_due)], ["gross paid or on the way this month USDC", rows.filter((r) => r.spend && r.month === month).reduce((a, r) => a + r.gross, 0)], ["payments recorded", rows.length], ["vendors", state.vendors.length], [], ["Amounts are USDC with two decimals. Gross is what the invoice asked; withheld is the share kept in the treasury for the state at the rate set per vendor; net is what the vendor received; on the way is a cross-chain payment the executor has not delivered yet, so gross equals withheld plus net plus on the way. Every row comes from the contract on chain."]], [34, 28]);
   await loadTxIndex(); txClaimed = new Set();
   const linkCell = (url) => url ? { t: "s", v: url.replace(/^https?:\/\//, "").slice(0, 60), l: { Target: url } } : "";
   sheet("Payments", [[...PAY_COLS.map(([h]) => h), ...TX_COLS.map(([h]) => h), "destination tx link"], ...rows.map((r) => [...PAY_COLS.map(([, k]) => r[k]), ...txCells(r).map(linkCell)])], [6, 12, 9, 16, 22, 16, 8, 14, 12, 12, 13, 13, 14, 10, 22, 22, 7, 24, 24, 24, 40, 40, 40, 40, 44]);
   sheet("By vendor", [["vendor id", "vendor", "tax id", "country", "withholding %", "payout on record", "monthly budget USDC", "payments", "paid", "gross USDC", "withheld USDC", "net paid USDC", "on the way USDC", "refused", "held"], ...byVendor.map((v) => [v.vendor_id, v.name, v.tax_id, v.country, v.rate, v.payout, v.budget, v.payments, v.paid, v.gross, v.withheld, v.net, v.transit, v.refused, v.held])], [16, 22, 16, 8, 13, 34, 18, 9, 6, 12, 13, 13, 14, 8, 6]);
-  sheet("By month", [["month", "gross USDC", "withheld USDC", "net paid USDC", "payments", "refused", "held"], ...months.map((m) => [m.key, m.gross, m.withheld, m.net, m.payments, m.refused, m.held])], [9, 12, 13, 13, 9, 8, 6]);
+  sheet("By month", [["month", "gross USDC", "withheld USDC", "net paid USDC", "on the way USDC", "payments", "refused", "held"], ...months.map((m) => [m.key, m.gross, m.withheld, m.net, m.transit, m.payments, m.refused, m.held])], [9, 12, 13, 13, 14, 9, 8, 6]);
   sheet("Withholding", [["month", "vendor id", "vendor", "vendor tax id", "rate %", "gross USDC", "withheld USDC", "invoices"], ...withholding.map((w) => [w.month, w.vendor_id, w.vendor, w.tax_id, w.rate, w.gross, w.withheld, w.n]), [], ["to remit now (contract)", "", "", "", "", "", toNum(stats.withheld_due)]], [9, 16, 22, 16, 7, 12, 13, 8]);
   X.writeFile(wb, reportName("xlsx"));
 }
@@ -2180,12 +2213,16 @@ async function loadTxIndex() {
   if (txIndex.treasury === t && Date.now() - txIndex.at < 60000) return txIndex;
   const receipts = [];
   try {
+    // nearblocks API v3 (v1 and v2 were retired on testnet on 5 November 2026, on mainnet at the end of November):
+    // results under `data`, the next page behind the opaque cursor in `meta.next_page`
+    let next = "";
     for (let page = 1; page <= 3; page++) {
-      const r = await fetch(`${NB_API[settings.network]}/v1/account/${encodeURIComponent(t)}/txns?per_page=100&page=${page}&order=desc`);
+      const r = await fetch(`${NB_API[settings.network]}/v3/accounts/${encodeURIComponent(t)}/txns?limit=100${next ? `&next=${encodeURIComponent(next)}` : ""}`);
       if (!r.ok) break;
-      const j = await r.json(); const rows = j.txns || [];
-      for (const x of rows) { const m = (x.actions || []).map((a) => a.method).filter((m) => PAYMENT_METHODS.has(m)); if (m.length && x.outcomes?.status !== false) receipts.push({ hash: x.transaction_hash, ts: Number(x.block_timestamp || 0), methods: m, by: x.predecessor_account_id }); }
-      if (rows.length < 100) break;
+      const j = await r.json(); const rows = j.data || [];
+      for (const x of rows) { const m = (x.actions || []).map((a) => a.method).filter((m) => PAYMENT_METHODS.has(m)); if (m.length && x.outcomes?.status !== false) receipts.push({ hash: x.transaction_hash, ts: Number(x.block_timestamp || x.block?.block_timestamp || 0), methods: m, by: x.predecessor_account_id || x.signer_account_id }); }
+      next = j.meta?.next_page || "";
+      if (rows.length < 100 || !next) break;
     }
     txIndex = { at: Date.now(), treasury: t, receipts };
   } catch (e) { console.warn("nearblocks:", e.message); }
@@ -2279,7 +2316,10 @@ function renderSettings() {
   $("#opsTable tbody").innerHTML = operators.map(([a, r]) => `<tr><td class="mono">${esc(a)}</td><td>${r.approve ? "yes" : "no"}</td><td>${r.manage_vendors ? "yes" : "no"}</td><td>${r.manage_orders ? "yes" : "no"}</td><td class="acts">${settings.ownerKey ? `<button type="button" class="btn-ghost small act" data-act="removeOp" data-id="${esc(a)}">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">no operators: only the owner acts</td></tr>`;
 }
 // The key a wallet owner keeps in this browser can call these and nothing else; the rest (ownership, withdrawals, roles, code) needs the wallet itself.
-const WALLET_KEY_METHODS = ["add_vendor", "update_vendor", "confirm_vendor_payout", "set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "add_operator", "remove_operator", "mark_withholding_remitted", "set_paused", "reset_in_flight", "clear_dao"];
+// What the browser key of a wallet owner may sign alone. Never a vendor or a payout (add_vendor, update_vendor,
+// confirm_vendor_payout: with request_payment they would let a stolen key pay any address), never the DAO (clear_dao),
+// a withdrawal, the owner or the roles, a new build: those the wallet signs, through ownerCall, and shows the owner first.
+const WALLET_KEY_METHODS = ["set_order_bound", "add_order", "add_recurring_order", "close_order", "set_company", "set_limits", "approve_payment", "cancel_payment", "open_dao_proposal_for", "sync_dao_proposal", "sync_balance", "set_vault", "request_payment", "add_operator", "remove_operator", "mark_withholding_remitted", "set_paused", "reset_in_flight"];
 async function ownerCall(method, args, gasTgas = 30) {
   if (!settings.owner || !settings.ownerKey) throw new Error("the owner account and key are not in Settings");
   if (settings.ownerKeyKind === "wallet" && !WALLET_KEY_METHODS.includes(method)) {
