@@ -97,7 +97,7 @@
   <div class="rule">
     <span class="k">unknown_vendor</span><span>The vendor must be in the owner's allowlist, by id.</span>
     <span class="k">payout_changed</span><span>The payout printed on the invoice must equal the one the owner recorded for that vendor. A "new bank details" invoice dies here, blocked, not paid.</span>
-    <span class="k">duplicate_invoice</span><span>One invoice number per vendor, ever.</span>
+    <span class="k">duplicate_invoice</span><span>The same invoice number (normalized) or the same file as an invoice this vendor was already paid for or is waiting on; a refused invoice can be sent again.</span>
     <span class="k">over_payment_cap</span><span>No single payment above the per-payment cap.</span>
     <span class="k">over_daily_cap</span><span>No more than the daily cap in one day, across all vendors.</span>
     <span class="k">over_monthly_budget</span><span>No more than the vendor's monthly budget in one month.</span>
@@ -165,7 +165,7 @@
   <h2>Signing in</h2>
   <p>No password, no server. Three doors on the <a href="login">sign-in page</a>:</p>
   <ul>
-    <li><strong>NEAR wallet.</strong> The wallet tells the console who you are. If your account owns a treasury (the registry lists it, the contract confirms it), you pick it and the wallet adds a key limited to that contract to your browser: it signs vendors, orders, limits and approvals, never a transfer. If your account owns none, the console creates one at this first sign-in, in three small windows: your company (name, what it does, country; tax id optional), the creation, and how invoices are read. Under the hood: a payer account from the testnet faucet, the policy contract deployed with your wallet as owner, test USDC, four demo vendors and their orders, an agent with one key. Bursar pays for the accounts and the contract storage; you pay nothing.</li>
+    <li><strong>NEAR wallet.</strong> The wallet tells the console who you are. If your account owns a treasury (the registry lists it, the contract confirms it), you pick it and the wallet adds a key limited to that contract to your browser: it signs orders, limits, approvals and the vault, never a vendor or a payout, an operator, the DAO, a withdrawal, the owner or a new build: those the wallet signs, and shows you first. If your account owns none, the console creates one at this first sign-in, in three small windows: your company (name, what it does, country; tax id optional), the creation, and how invoices are read. Under the hood: a payer account from the testnet faucet, the policy contract deployed with your wallet as owner, test USDC, four demo vendors and their orders, an agent with one key. Bursar pays for the accounts and the contract storage; you pay nothing.</li>
     <li><strong>Invite link.</strong> A colleague's link signs you in with exactly the role they chose.</li>
     <li><strong>Keys file.</strong> For a treasury created with throwaway keys ("Download the keys"), when there is no wallet at all.</li>
   </ul>
@@ -243,7 +243,7 @@ npm run dev verify 1                             # the receipt behind payment 1 
     <span class="k">agent</span><span>The process (or the browser) that reads invoices and asks the contract to pay. One key, one method.</span>
     <span class="k">executor</span><span>The process that settles cross-chain payments the contract queued. No AI, no choice of destination.</span>
     <span class="k">payout</span><span>Where a vendor gets paid: a NEAR account, or a chain and an address. Recorded by the owner, compared on every invoice.</span>
-    <span class="k">hold</span><span>A payment that waits for a person: over the threshold, outside the orders, or flagged by the model.</span>
+    <span class="k">hold</span><span>A payment that waits for a person: over the threshold, outside the orders, flagged by the model, with a tax id, buyer or withholding that does not match the record, or from a chat bound to another vendor.</span>
     <span class="k">receipt</span><span>The signed, attested record of one reading inside the enclave.</span>
     <span class="k">TEE</span><span>Trusted execution environment: hardware-isolated compute (Intel TDX here) that proves what ran with an attestation quote.</span>
     <span class="k">registry</span><span>The public list of treasuries the explorer and the sign-in page read.</span>
