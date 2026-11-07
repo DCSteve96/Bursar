@@ -603,7 +603,7 @@ web/brand/            mark, favicon, lockup
 relay/                Cloudflare Worker: the hosted reading relay (holds the NEAR AI key, forwards bytes untouched, daily caps), the Telegram inbox and the approvals from Telegram
 invoices/             make_invoices.py and ten fictional sample invoices (the three small ones for the mainnet demo are in web/samples/mainnet/)
 video/                the demo video, a Remotion project
-CLAUDE.md, HANDOFF.md, ARCHITETTURA.md: the team's working notes, in Italian
+CLAUDE.md, ARCHITECTURE.md, HANDOFF.md: notes for Claude Code, the architecture map, and the team's working log (translated from Italian)
 ```
 
 ## Where it sits next to NEAR Business
