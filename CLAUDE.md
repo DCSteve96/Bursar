@@ -1,62 +1,62 @@
-# Bursar: istruzioni per Claude Code
+# Bursar: notes for Claude Code
 
-Leggi questo file per intero prima di toccare qualsiasi cosa. Poi leggi `HANDOFF.md` (stato del progetto, decisioni prese, API verificate) e `README.md` (quello che vedranno i giudici).
+Read this file first, then `README.md` (what the project is and how to try it, written for judges and users) and `ARCHITECTURE.md` (how the pieces fit). `HANDOFF.md` is the team's working log: long, chronological, useful when you need to know why something is the way it is.
 
-## Cos'è
+## What it is
 
-Bursar è un tesoriere AI per aziende di ogni dimensione, piccole e grandi: legge fatture PDF in un TEE (NEAR AI Cloud), chiede a un contratto NEAR di pagarle, e il contratto decide dentro limiti che l'AI non può cambiare. Progetto per il NEAR HACKATHON (1-14 novembre 2026). Tracce: `realworld`, `business`, `privacy`, `security`.
+Bursar is an AI treasurer for companies of any size. It reads invoice PDFs inside a trusted execution environment (NEAR AI Cloud), asks a NEAR contract to pay them, and the contract decides within limits the AI cannot change. Built for the NEAR HACKATHON (1 to 14 November 2026). Tracks: `realworld`, `business`, `privacy`, `security`.
 
-Frase guida, da non perdere mai: **The AI reads. The contract decides. A dumb executor moves the money.**
+The sentence that must never get lost: **The AI reads. The contract decides. A dumb executor moves the money.**
 
-## Regole fisse (non negoziabili)
+## Fixed rules
 
-1. **Separato da Epoch.** Nessun riferimento a Epoch, Sui, $EPT, Walrus o ai prodotti Epoch nel codice, nei testi, nei post. Progetto a sé.
-2. **Non custodial.** I fondi stanno nel contratto dell'azienda, con le sue chiavi. L'AI non sceglie mai un indirizzo. L'executor può mandare fondi solo verso il payout registrato dal proprietario (il contratto lo verifica). Niente che renda Bursar un servizio di pagamento o un custode (MiCA). Nel README resta la frase "software, not a payment service".
-3. **Solo USDC** negli esempi e nei testi, mai USDT.
-4. **Fatture finte.** Mai dati di persone o aziende reali nei PDF di esempio, nel video o nei test.
-5. **Niente segreti nella repo.** Chiavi solo in `~/.near-credentials` o in variabili d'ambiente. `.env.*` è in `.gitignore`. Se Stefano incolla una chiave in chat, va considerata compromessa e ruotata.
-6. **Niente mainnet senza conferma esplicita di Stefano**, e niente transazioni firmate con le sue chiavi senza che lo chieda lui per quella specifica azione.
-7. **Git**: commit e push li fa Claude Code solo se Stefano lo ha autorizzato in questa repo. In dubbio, chiedi. Messaggi di commit in inglese, brevi, al presente.
-8. **Mercato internazionale, aziende di ogni dimensione.** Bursar parla a piccole e grandi aziende ovunque, non all'Italia: testi, esempi, placeholder, roadmap, post e `idea` della submission in chiave internazionale. Le funzioni di un paese (ritenuta, fatturazione elettronica) restano configurabili e in secondo piano, mai in primo.
-9. **Submission**: una sola, non modificabile. Mai inviare il POST a `nearhackathon.com/api/applications` senza che Stefano abbia confermato il payload completo stampato a schermo.
+1. **Non custodial.** The funds sit in the company's own contract, under the company's keys. The AI never chooses an address. The executor can only settle on a quote 1Click signed for the vendor's recorded payout, and the contract verifies it. Nothing may turn Bursar into a payment service or a custodian: the README keeps the sentence "software, not a payment service".
+2. **USDC only** in examples and texts.
+3. **Fictional invoices only.** No real person or company in the sample PDFs, the video or the tests.
+4. **No secrets in the repository.** Keys live in `~/.near-credentials` or in environment variables; `.env.*` is in `.gitignore`. A key pasted into a chat is compromised: rotate it.
+5. **No mainnet without the maintainer's explicit confirmation**, and no transaction signed with the maintainer's keys unless asked for that specific action.
+6. **Git:** commit and push only when the maintainer has authorised it in this repository. Commit messages in English, short, present tense.
+7. **International market, companies of every size.** Texts, examples, placeholders and roadmap speak to companies everywhere; country-specific features (withholding tax, e-invoicing) stay configurable and secondary.
+8. **One submission, never resent.** The hackathon application is posted once, only after the maintainer has confirmed the full payload printed on screen.
 
-## Stile dei testi (post, README, messaggi)
+## Writing style
 
-- Niente em-dash, mai. Niente emoji, mai.
-- Testi in inglese per i giudici e per X; a Stefano si risponde in italiano, e ogni testo inglese redatto per lui va accompagnato dalla traduzione italiana.
-- Post e messaggi da copiare: in un blocco di codice plain text. Se scrive da telefono, testo semplice diretto nel messaggio.
-- Risposte concise, oneste, dirette. Niente rassicurazioni vuote.
+- No em dashes, no emoji.
+- Texts for judges and the public are in English. Concise, honest, direct; no empty reassurance.
+- Every claim in the README, the white paper, the docs page and the console must match the code. When the code changes, the texts change in the same commit.
 
-## Struttura
+## Layout
 
 ```
-contracts/policy      contratto di policy, Rust, near-sdk 5 (67 unit test); build-hashes.py genera web/contracts/builds.json, da rilanciare dopo ogni ricompilazione del wasm
-contracts/test-usdc   NEP-141 usa e getta per testnet, con mint aperto
-contracts/registry    registro pubblico delle tesorerie (explorer e login lo leggono, 7 unit test)
+contracts/policy      the policy contract, Rust, near-sdk 5 (67 unit tests); build-hashes.py writes web/contracts/builds.json and the .js bundles, run it after every wasm build
+contracts/test-usdc   a throwaway NEP-141 for testnet, with open mint
+contracts/registry    the public registry of treasuries the explorer and the login page read (7 unit tests)
 app/src/              TypeScript, near-api-js 7
-  config.ts           tutta la configurazione da env; asset id USDC per chain (Intents)
-  near.ts             helper NEAR, meta transaction (NEP-366)
-  ai.ts               NEAR AI Cloud: attestazione prima, estrazione JSON, firma della risposta; parser offline per i PDF di esempio
-  agent.ts            watcher dell'inbox (cartella e fatture approvate da Telegram via relay), PDF -> PNG (pdftoppm) e testo (pdftotext), claim -> request_payment
-  relayer.ts          relayer NEP-366 che accetta solo request_payment dall'agente
-  executor.ts         NEAR Intents 1-Click per i fornitori su altre chain (solo mainnet)
-  mcp.ts              server MCP (submit_invoice, list_payments, get_payment, explain_decision, vendors, treasury_status)
-  setup.ts            crea account, deploya, finanzia, aggiunge fornitori, crea la DAO, lascia all'agente una sola chiave
+  config.ts           all configuration from env; USDC asset ids per chain (Intents)
+  near.ts             NEAR helpers, meta transactions (NEP-366)
+  ai.ts               NEAR AI Cloud: attestation first, JSON extraction, signed receipt; offline parser for the sample PDFs
+  agent.ts            inbox watcher (folder and Telegram approvals via the relay), PDF to PNG (pdftoppm) and text (pdftotext), claim to request_payment
+  relayer.ts          NEP-366 relayer that accepts only request_payment from the agent
+  executor.ts         NEAR Intents 1-Click for vendors on other chains (mainnet only)
+  quote.ts            the bytes 1Click signs for a quote, rebuilt so the contract can verify them
+  mcp.ts              MCP server (ten tools)
+  setup.ts            creates accounts, deploys, funds, adds vendors, creates the DAO, leaves the agent one key
   cli.ts              bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync
-web/                  index.html (landing), login.html (wallet, invito, chiavi), explorer.html (la rete), docs.html, dashboard.html (una tesoreria), console.html (la console: onboarding, lettura TEE, verifica, request_payment dal browser; app.html rimanda lì), meteor.js (estensione Meteor via SDK), vendor/ (SDK Meteor impacchettato), style.css, brand/, samples/, contracts/
-relay/                Cloudflare Worker: relay di lettura (tiene la chiave NEAR AI, inoltra i byte intatti, limiti giornalieri), inbox Telegram e approvazioni da Telegram (bottoni, take/outcome per l'agente)
-invoices/             make_invoices.py e 9 PDF di esempio (5 e 6 per la console, 7 e 8 per i tax id, 9 per la ritenuta)
+web/                  index.html (landing), login.html (wallet, invite, keys), explorer.html (the network), docs.html, dashboard.html (one treasury), console.html (the console), meteor.js, vendor/, style.css, brand/, samples/, contracts/
+relay/                Cloudflare Worker: reading relay (holds the NEAR AI key, forwards the bytes untouched, daily caps), Telegram inbox and approvals
+invoices/             make_invoices.py and the sample PDFs
+video/                the demo video, a Remotion project
 ```
 
-## Comandi
+## Commands
 
 ```bash
-# contratti
-(cd contracts/policy && cargo test && cargo build --release --target wasm32-unknown-unknown)
+# contracts
+(cd contracts/policy && cargo test && ./build.sh)
 (cd contracts/test-usdc && cargo build --release --target wasm32-unknown-unknown)
 (cd contracts/registry && cargo test && ./build.sh)
 # app
-cd app && npm install && npx tsc -p . --noEmit
+cd app && npm install && npx tsc -p . --noEmit && npm test
 npx tsx src/cli.ts setup --root <account>.testnet
 set -a; source .env.testnet; set +a
 npm run relayer &
@@ -64,16 +64,12 @@ npm run agent -- --once --offline
 npm run dev status
 ```
 
-Prerequisiti sul Mac: Rust stable con target `wasm32-unknown-unknown`, Node 22+, `poppler` (brew install poppler), Python 3 con `reportlab` solo per rigenerare le fatture.
+Prerequisites: Rust stable with the `wasm32-unknown-unknown` target, Node 22+, poppler (`pdftoppm`, `pdftotext`), Python 3 with `reportlab` (the sample invoices).
 
-## Come lavorare
+## How to work
 
-- Prima di cambiare il contratto: `cargo test`. Dopo: ricompila il wasm e, se la firma di un metodo cambia, aggiorna `near.ts`, `mcp.ts` e il README.
-- Testnet è il posto per provare tutto, tranne Intents (solo mainnet) e Trezu (solo mainnet).
-- Ogni funzione nuova deve avere un passo "do X, see Y" nel README: i giudici AI (Claude Code e Codex) eseguono il README.
-- Mantieni il wasm piccolo: 473 KB costano 4,7 NEAR di storage. Se aggiungi dipendenze Rust, controlla la dimensione.
-- Rileggi `https://nearhackathon.com/HACKATHON.md` prima della submission: le regole possono cambiare.
-
-## Prima di rendere pubblica la repo
-
-`HANDOFF.md`, `ARCHITETTURA.md` e questo stesso `CLAUDE.md` sono appunti interni in italiano: contengono riferimenti a Epoch, decisioni private e account di prova. Prima di passare la repo a pubblica vanno rimossi dalla history o sostituiti da una versione in inglese senza quei contenuti (un `CLAUDE.md` breve per i giudici AI va bene). Il README è l'unico documento pensato per l'esterno.
+- Before changing the contract: `cargo test`. After: rebuild the wasm, run `build-hashes.py`, and if a method's signature changed update `near.ts`, `mcp.ts`, the console and the README.
+- Testnet is where everything is tried, except NEAR Intents and Trezu (mainnet only; the console's `?intents=stub` stands in for 1Click on testnet).
+- Every new feature gets a "do X, see Y" step in the README: AI judges execute the README.
+- Keep the wasm small: the contract's storage costs NEAR, and `upgrade` must fit in the gas reserve (60 TGas).
+- Re-read `https://nearhackathon.com/HACKATHON.md` before submitting: the rules can change.
