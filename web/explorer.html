@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bursar explorer</title>
+<title>Bursar live network</title>
 <meta name="description" content="Every Bursar treasury on the network, read from the chain: how many companies, how much USDC they hold and moved, and the last decisions the contracts made.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="brand/icon-192.png">
@@ -15,57 +15,87 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bursar">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="site.css">
 <style>
-  .deck { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-  .dec { border: 1px solid var(--line-dark); border-radius: 4px; padding: 20px; min-width: 0; }
-  .dec .stamp { font-size: 32px; }
-  .dec .what { margin-top: 12px; font-size: 14px; color: var(--mute-dark); }
-  .dec .where { margin-top: 10px; font: 500 12px var(--mono); color: var(--mute-dark); overflow-wrap: anywhere; }
-  .net { display: inline-flex; gap: 8px; margin-top: 24px; }
-  .net button { font: 500 13px/1 var(--mono); padding: 8px 14px; background: transparent; border: 1px solid var(--line-dark); color: var(--mute-dark); border-radius: 4px; }
-  .net button[aria-pressed="true"] { background: var(--paper); color: var(--void); border-color: var(--paper); }
-  .stat .v.big { color: var(--signal); }
-  .light .stat .v.big { color: var(--paid-light); }
-  .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); margin-right: 8px; vertical-align: middle; animation: pulse 1.6s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
-  td a { color: inherit; }
+  .top { padding: 72px 0 40px; }
+  .top .wrap { display: flex; flex-direction: column; gap: 24px; }
+  .top .hero-h { font-size: clamp(40px, 5.8vw, 72px); max-width: 940px; }
+  .top-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+  .seg button { min-height: 44px; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .stats { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .stat .v.accent { color: var(--accent); }
+  .stat .v { overflow-wrap: normal; word-break: keep-all; font-size: clamp(26px, 2.4vw, 34px); }
+  .stat .v .u { display: inline-block; font-size: 16px; color: var(--text-3); font-weight: 600; }
+  .stat .skel { height: 34px; width: 70%; margin-top: 10px; }
+  .stat .mix { margin-top: 16px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 13px; color: var(--text-3); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .legend .paid { background: var(--paid); } .legend .hold { background: var(--hold); } .legend .refuse { background: var(--refuse); } .legend .off { background: var(--text-4); }
+  .err { padding: 14px 18px; border-radius: 14px; background: rgba(255, 128, 112, .12); color: var(--refuse-text); font-size: 15px; }
+  .sec-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
+  .dec-row { display: grid; grid-template-columns: 112px minmax(0, 1.3fr) minmax(0, 2fr) 150px; gap: 16px; align-items: center; }
+  .dec-row .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .dec-row .who .mono { color: var(--text); }
+  .dec-row .when { font-size: 13px; color: var(--text-4); }
+  .dec-row .why { color: var(--text-3); font-size: 15px; }
+  .dec-row .amt { text-align: right; font-family: var(--font-mono); font-size: 15px; }
+  @media (max-width: 760px) { .dec-row { grid-template-columns: auto minmax(0, 1fr); } .dec-row .why { grid-column: 1 / -1; } .dec-row .amt { grid-column: 1 / -1; text-align: left; } }
+  .table td a { color: var(--text); }
+  .table td a.btn { color: var(--text); }
+  .table td .skel { margin-top: 4px; }
+  #companies td { vertical-align: middle; white-space: nowrap; }
+  #companies td.mono, #companies td .mono { overflow-wrap: normal; }
+  #companies td[colspan] { white-space: normal; }
+  .lastd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #foot a { color: var(--text-2); }
 </style>
 </head>
-<body>
-<header class="bar"><div class="in">
-  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <nav><a href="explorer" aria-current="page">Explorer</a><a href="docs">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login" class="btn btn-ghost">Log in</a></nav>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works">How it works</a><a href="explorer" aria-current="page">Live</a><a href="verify">Verify</a><a href="docs">Docs</a><a href="code">Code</a></nav>
+  <a class="btn btn-ghost small" href="login">Log in</a>
 </div></header>
 
-<section class="band" style="border-top:0">
-  <div class="in">
-    <div class="eyebrow accent">[ EXPLORER / <span id="netLabel">TESTNET</span> ]</div>
-    <h1 class="heading" style="margin-top:16px">Every treasury on the network, read from the chain right now.</h1>
-    <p class="sub muted" style="max-width:62ch;margin-top:16px">Each company runs its own policy contract. This page lists them from the public registry and adds up what the contracts report. Nothing here is private: every number is an on-chain event. Vendor names and invoice numbers stay on each company's own dashboard.</p>
-    <div class="net" role="group" aria-label="Network"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
-    <div class="grid stats" id="stats" style="margin-top:32px"></div>
-    <div id="err" class="err" hidden style="margin-top:16px"></div>
+<section class="top">
+  <div class="wrap">
+    <div class="top-row">
+      <div class="stack reveal" style="gap:24px">
+        <span class="eyebrow" style="align-self:flex-start"><span class="live-dot" aria-hidden="true"></span>Explorer · <span id="netLabel">TESTNET</span></span>
+        <h1 class="hero-h">Every treasury on the network, read from the chain right now.</h1>
+      </div>
+      <div class="seg net reveal-2" role="group" aria-label="Network"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
+    </div>
+    <p class="lead reveal-2" style="max-width:62ch">Each company runs its own policy contract. This page lists them from the public registry and adds up what the contracts report. Nothing here is private: every number is an on-chain event. Vendor names and invoice numbers stay on each company's own dashboard.</p>
+    <div class="stats reveal-3" id="stats" aria-live="polite"></div>
+    <div id="err" class="err" role="alert" hidden></div>
   </div>
 </section>
 
-<section class="band">
-  <div class="in">
-    <div class="band-head"><div class="eyebrow"><span class="pulse" aria-hidden="true"></span>[ LAST DECISIONS, ALL COMPANIES ]</div><h2 class="heading">What the contracts decided last.</h2></div>
-    <div class="deck" id="deck"><div class="dec muted">loading...</div></div>
+<section class="tight">
+  <div class="wrap">
+    <div class="sec-row reveal">
+      <div class="stack" style="gap:14px;max-width:700px"><span class="sec-label">Last decisions, all companies</span><h2 class="h2">What the contracts decided last.</h2></div>
+      <div class="seg" id="filter" role="group" aria-label="Show"><button type="button" data-f="all" aria-pressed="true">All</button><button type="button" data-f="paid" aria-pressed="false">Paid</button><button type="button" data-f="hold" aria-pressed="false">Held</button><button type="button" data-f="refuse" aria-pressed="false">Refused</button></div>
+    </div>
+    <div class="card flat rows reveal-2" id="deck"></div>
   </div>
 </section>
 
-<section class="band light">
-  <div class="in">
-    <div class="band-head"><div class="eyebrow">[ COMPANIES ]</div><h2 class="heading">One contract each, with its own keys.</h2></div>
-    <div class="wrap"><table id="companies"><thead><tr><th>treasury</th><th>since</th><th>decisions</th><th>held for a person</th><th>last decision</th><th></th></tr></thead><tbody><tr><td colspan="6" class="muted">loading...</td></tr></tbody></table></div>
-    <p class="muted" id="foot" style="margin-top:24px;font-size:14px"></p>
+<section class="tight">
+  <div class="wrap">
+    <div class="head reveal"><span class="sec-label">Companies</span><h2 class="h2">One contract each, with its own keys.</h2></div>
+    <div class="table reveal-2"><table id="companies"><thead><tr><th>treasury</th><th>since</th><th>decisions</th><th>held for a person</th><th>last decision</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p class="faint" id="foot" style="margin-top:20px;font-size:14px;max-width:900px"></p>
   </div>
 </section>
 
-<footer>Bursar is software, not a payment service. Funds stay in each company's own contract, with the company's keys.</footer>
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in each company's own contract, under the company's keys. USDC only. Sample invoices are fictional.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
 
 <script src="contracts/builds.js"></script>
 <script>
@@ -124,9 +154,13 @@ const ago = (ms) => { const s = Math.max(0, (Date.now() - ms) / 1000); if (s < 9
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
 const ms = (ns) => Math.floor(Number(ns) / 1e6); // payments carry nanoseconds; the registry milliseconds
 const WHAT = { Paid: "under the caps, paid on NEAR in one transaction", Queued: "cross-chain vendor, waiting for the executor", Approval: "held for a person", Blocked: "", Cancelled: "cancelled after the DAO's answer", Settled: "delivered on the vendor's chain", Settling: "USDC on its way through NEAR Intents" };
-const REASON = { payout_unconfirmed: "payout recorded by an operator, waiting for the owner", many_invoices: "daily allowance of invoices paid without a person used up", hold_quota_reached: "the agent's daily quota of holds is spent", dao_bond_missing: "no NEAR for the DAO bond", no_invoice_identity: "no invoice number and no file hash", payout_changed: "the invoice asks for a different wallet than the one on record", duplicate_invoice: "same vendor and invoice number already accepted", unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner", transfer_failed: "token transfer failed, balance restored", dao_proposal_failed: "the DAO refused the proposal", over_payment_cap: "above the per-payment cap", over_daily_cap: "daily cap exceeded", over_monthly_budget: "monthly budget exceeded", insufficient_treasury: "not enough USDC in the treasury", over_threshold: "above the threshold", no_order: "no purchase order or standing order covers it", flagged: "the reading carries flags", identity_mismatch: "the vendor's tax id is not the recorded one", buyer_mismatch: "not addressed to the company's tax id", withholding_mismatch: "the withholding shown differs from what the accountant set" };
+const REASON = { payout_unconfirmed: "payout recorded by an operator, waiting for the owner", many_invoices: "daily allowance of invoices paid without a person used up", hold_quota_reached: "the agent's daily quota of holds is spent", dao_bond_missing: "no NEAR for the DAO bond", no_invoice_identity: "no invoice number and no file hash", payout_changed: "the invoice asks for a different wallet than the one on record", duplicate_invoice: "same vendor and invoice number already accepted", unknown_vendor: "vendor not in the allowlist", vendor_inactive: "vendor deactivated by the owner", transfer_failed: "token transfer failed, balance restored", dao_proposal_failed: "the DAO refused the proposal", over_payment_cap: "above the per-payment cap", over_daily_cap: "daily cap exceeded", over_monthly_budget: "monthly budget exceeded", insufficient_treasury: "not enough USDC in the treasury", over_threshold: "amount at or above the approval threshold", no_order: "no purchase order or standing order covers it", flagged: "the reading carries flags", identity_mismatch: "the vendor's tax id is not the recorded one", buyer_mismatch: "not addressed to the company's tax id", withholding_mismatch: "the withholding shown differs from what the accountant set", paused: "the treasury is paused", zero_amount: "zero amount", dao_rejected: "the council rejected it", settlement_closed: "settlement closed by the owner, not delivered" };
 const held = (p) => p.status === "Approval";
-const whatOf = (p) => p.status === "Paid" && p.reason ? (p.dao_proposal_id != null ? "approved by the council, paid on NEAR" : "approved by a person, paid on NEAR") : p.status === "Blocked" ? (REASON[p.reason] ?? p.reason) : p.status === "Approval" ? `held: ${(p.reason || "").split("+").map((r) => REASON[r.trim()] ?? r.trim()).filter(Boolean).join("; ") || "waiting for a person"}` : WHAT[p.status] ?? "";
+// one colour per state, the same on every page: green paid or settled, amber held or on the way, coral refused
+const kind = (s) => ["Paid", "Settled"].includes(s) ? "paid" : ["Queued", "Settling", "Approval"].includes(s) ? "hold" : s === "Cancelled" ? "off" : "refuse";
+const label = (s) => s === "Approval" ? "Held" : s === "Blocked" ? "Refused" : s;
+const cancelText = (p) => /^dao_/.test(p.reason || "") ? `cancelled after the DAO's answer${REASON[p.reason] ? `: ${REASON[p.reason]}` : ""}` : p.reason === "settlement_closed" ? REASON.settlement_closed : "cancelled by a person";
+const whatOf = (p) => p.status === "Paid" && p.reason ? (p.dao_proposal_id != null ? "approved by the council, paid on NEAR" : "approved by a person, paid on NEAR") : p.status === "Blocked" ? (REASON[p.reason] ?? p.reason) : p.status === "Approval" ? `held: ${(p.reason || "").split("+").map((r) => REASON[r.trim()] ?? r.trim()).filter(Boolean).join("; ") || "waiting for a person"}` : p.status === "Cancelled" ? cancelText(p) : WHAT[p.status] ?? "";
 function setNet(n) {
   network = n;
   for (const b of document.querySelectorAll(".net button")) b.setAttribute("aria-pressed", String(b.dataset.net === n));
@@ -135,18 +169,35 @@ function setNet(n) {
   load();
 }
 document.querySelector(".net").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.net !== network) setNet(b.dataset.net); });
-const stat = (k, v, big) => `<div class="stat"><div class="k">${k}</div><div class="v${big ? " big" : ""}">${v}</div></div>`;
+// the filter only looks at decisions already read: no new request
+let decisions = [], filter = "all";
+const FILTER_NONE = { paid: "no paid decisions among those read", hold: "no held decisions among those read", refuse: "no refused decisions among those read" };
+function renderDeck() {
+  const list = (filter === "all" ? decisions : decisions.filter((p) => kind(p.status) === filter)).slice(0, 10);
+  $("#deck").innerHTML = list.map((p, i) => `<div class="row in dec-row" style="animation-delay:${i * 60}ms"><span class="pill ${kind(p.status)}">${esc(label(p.status))}</span><span class="who"><span class="mono">${esc(p.treasury)} #${p.id}</span><span class="when">${esc(ago(p.updated_at))}</span></span><span class="why">${esc(whatOf(p))}${p.dao_proposal_id !== null && p.dao_proposal_id !== undefined ? ` <span class="mono faint">dao#${p.dao_proposal_id}</span>` : ""}</span><span class="amt">${usdc(p.amount)}</span></div>`).join("")
+    || `<div class="row muted">${decisions.length ? FILTER_NONE[filter] : "no decisions yet"}</div>`;
+}
+$("#filter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; filter = b.dataset.f; for (const x of document.querySelectorAll("#filter button")) x.setAttribute("aria-pressed", String(x === b)); renderDeck(); });
+const unit = (s) => esc(s).replace(/ USDC$/, ` <span class="u">USDC</span>`);
+const stat = (k, v, note, opts = {}) => `<div class="stat"${opts.title ? ` title="${esc(opts.title)}"` : ""}><div class="k">${k}</div><div class="v${opts.accent ? " accent" : ""}">${v}</div>${note ? `<div class="n">${note}</div>` : ""}${opts.extra || ""}</div>`;
+const skelStat = (k) => `<div class="stat"><div class="k">${k}</div><div class="skel" aria-hidden="true"></div><div class="skel" aria-hidden="true" style="height:12px;width:45%;margin-top:14px"></div></div>`;
+const skelRow = `<div class="row dec-row" aria-hidden="true"><span class="skel" style="width:90px;height:26px"></span><span class="skel"></span><span class="skel"></span><span class="skel" style="width:100px;justify-self:end"></span></div>`;
+const skelTr = `<tr aria-hidden="true">${[140, 80, 30, 30, 120, 90].map((w) => `<td><div class="skel" style="width:${w}px"></div></td>`).join("")}</tr>`;
+const progress = (msg) => `<tr><td colspan="6" class="muted">${esc(msg)}</td></tr>${skelTr}${skelTr}`;
 async function load() {
   $("#err").hidden = true;
-  $("#stats").innerHTML = stat("companies", "...") + stat("treasury balance", "...") + stat("paid out", "...") + stat("decisions", "...");
-  $("#deck").innerHTML = `<div class="dec muted">loading...</div>`;
-  $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">loading...</td></tr>`;
+  decisions = [];
+  $("#stats").innerHTML = skelStat("Companies") + skelStat("USDC held") + skelStat("Paid out today") + skelStat("Decisions");
+  $("#deck").innerHTML = skelRow + skelRow + skelRow;
+  $("#companies tbody").innerHTML = progress("loading...");
+  $("#foot").textContent = "";
   try {
     const reg = REGISTRY[network];
     if (!reg) throw new Error(`no registry on ${network} yet: Bursar runs on testnet for the hackathon`);
     const entries = [];
     for (let from = 0; ; from += 100) { const page = await view(reg, "list", { from, limit: 100 }).catch((e) => { if (/does not exist|UNKNOWN_ACCOUNT|doesn't exist/i.test(e.message)) return []; throw e; }); entries.push(...page); if (page.length < 100) break; }
     const builds = await knownBuilds(); let unknownCode = 0, unread = 0, done = 0;
+    if (entries.length) $("#companies tbody").innerHTML = progress(`reading 0 of ${entries.length} treasuries...`);
     const companies = (await mapLimit(entries, 4, async ([treasury, e]) => {
       try {
         const [hash, roles, stats, payments] = await Promise.all([codeHash(treasury), view(treasury, "get_roles"), view(treasury, "get_stats"), view(treasury, "list_payments", { from: 0, limit: 200 })]);
@@ -154,7 +205,7 @@ async function load() {
         if (roles[0] !== e.owner) return null; // the registry entry does not match the contract: dropped
         return { treasury, since: e.registered_at, stats, payments, build: builds[hash] };
       } catch { unread++; return null; } // the RPC did not answer for this one after the retries: counted, not hidden
-      finally { done++; if (done % 12 === 0) $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">reading ${done} of ${entries.length} treasuries...</td></tr>`; }
+      finally { done++; if (done % 12 === 0) $("#companies tbody").innerHTML = progress(`reading ${done} of ${entries.length} treasuries...`); }
     })).filter(Boolean);
     const all = companies.flatMap((c) => c.payments.map((p) => ({ ...p, treasury: c.treasury, updated_at: ms(p.updated_at), created_at: ms(p.created_at) })));
     const today = day(Date.now()), month = today.slice(0, 7);
@@ -162,27 +213,26 @@ async function load() {
     const sum = (list) => list.reduce((a, p) => a + BigInt(p.amount), 0n);
     const balance = companies.reduce((a, c) => a + BigInt(c.stats.balance), 0n);
     const paid = all.filter(moved), blocked = all.filter((p) => p.status === "Blocked"), waiting = all.filter(held);
+    const allTime = usdc(sum(paid)), thisMonth = usdc(sum(paid.filter((p) => day(p.updated_at).startsWith(month))));
+    const n = { paid: 0, hold: 0, refuse: 0, off: 0 }; for (const p of all) n[kind(p.status)]++;
+    const mix = all.length ? `<div class="mix" role="img" aria-label="${n.paid} paid, ${n.hold} held or on the way, ${n.refuse} refused, ${n.off} cancelled">${["paid", "hold", "refuse"].filter((k) => n[k]).map((k) => `<i class="${k}" style="flex:${n[k]} 1 0"></i>`).join("")}${n.off ? `<i style="flex:${n.off} 1 0;background:var(--text-4)"></i>` : ""}</div>` : "";
+    const legend = `<div class="legend"><span><i class="paid"></i>${n.paid} paid</span><span><i class="hold"></i>${n.hold} held or on the way</span><span><i class="refuse"></i>${blocked.length} refused</span>${n.off ? `<span><i class="off"></i>${n.off} cancelled</span>` : ""}</div>`;
     $("#stats").innerHTML =
-      stat("companies", companies.length, true) +
-      stat("treasury balance", usdc(balance)) +
-      stat("paid out, all time", usdc(sum(paid))) +
-      stat("paid out today", usdc(sum(paid.filter((p) => day(p.updated_at) === today)))) +
-      stat("paid out this month", usdc(sum(paid.filter((p) => day(p.updated_at).startsWith(month))))) +
-      stat("decisions", all.length) +
-      stat("blocked", blocked.length) +
-      stat("waiting for a person", waiting.length);
-    const last = all.sort((a, b) => b.updated_at - a.updated_at).slice(0, 10);
-    $("#deck").innerHTML = last.map((p) => `<div class="dec"><div class="eyebrow muted">${esc(ago(p.updated_at))}</div><div class="stamp ${esc(p.status)}" style="margin-top:12px">${esc(p.status)}</div><div class="mono" style="margin-top:8px">${usdc(p.amount)}${p.dao_proposal_id !== null && p.dao_proposal_id !== undefined ? ` · dao#${p.dao_proposal_id}` : ""}</div><div class="what">${esc(whatOf(p))}</div><div class="where">${esc(p.treasury)} #${p.id}</div></div>`).join("") || `<div class="dec muted">no decisions yet</div>`;
+      stat("Companies", companies.length, `${entries.length} registered`, { accent: true }) +
+      stat("USDC held", unit(usdc(balance)), "treasury balance, all companies") +
+      stat("Paid out today", unit(usdc(sum(paid.filter((p) => day(p.updated_at) === today)))), `all time ${allTime}<br>this month ${thisMonth}`, { title: `paid out, all time: ${allTime}; this month: ${thisMonth}` }) +
+      stat("Decisions", all.length, waiting.length ? `${waiting.length} waiting for a person` : "", { extra: mix + legend });
+    decisions = all.sort((a, b) => b.updated_at - a.updated_at);
+    renderDeck();
     $("#companies tbody").innerHTML = companies.sort((a, b) => b.since - a.since).map((c) => {
       const lastP = c.payments[c.payments.length - 1];
-      return `<tr><td class="mono id"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="s ${esc(lastP.status)}">${esc(lastP.status)}</span> <span class="mono">${usdc(lastP.amount)}</span>` : `<span class="muted">none yet</span>`}</td><td><a href="dashboard?network=${network}&treasury=${encodeURIComponent(c.treasury)}">dashboard</a></td></tr>`;
+      return `<tr><td class="mono"><a href="${EXPLORER[network]}/address/${encodeURIComponent(c.treasury)}" target="_blank" rel="noopener">${esc(c.treasury)}</a></td><td class="mono">${esc(day(c.since))}</td><td>${c.payments.length}</td><td>${c.payments.filter(held).length || ""}</td><td>${lastP ? `<span class="lastd"><span class="pill ${kind(lastP.status)}">${esc(label(lastP.status))}</span><span class="mono">${usdc(lastP.amount)}</span></span>` : `<span class="muted">none yet</span>`}</td><td><a class="btn btn-ghost small" href="dashboard?network=${network}&treasury=${encodeURIComponent(c.treasury)}">Dashboard</a></td></tr>`;
     }).join("") || `<tr><td colspan="6" class="muted">no companies registered yet</td></tr>`;
     $("#foot").innerHTML = `${entries.length} registered, ${companies.length} verified against their contracts (code hash of a known Bursar build, owner as recorded)${unknownCode ? `, ${unknownCode} dropped: not a Bursar contract` : ""}${unread ? `, ${unread} not read: the RPC did not answer, reload to retry` : ""}. Registry <a href="${EXPLORER[network]}/address/${encodeURIComponent(reg)}" target="_blank" rel="noopener">${esc(reg)}</a> on ${network}; a treasury lists itself when it is created from the console or by <span class="mono">bursar setup</span>. Amounts are USDC with six decimals, read over RPC with no database in between.`;
-  } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; $("#deck").innerHTML = `<div class="dec muted">${esc(e.message)}</div>`; $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
+  } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; $("#stats").innerHTML = ""; $("#deck").innerHTML = `<div class="row muted">${esc(e.message)}</div>`; $("#companies tbody").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
 }
 setNet(network);
 </script>
-<script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
-<script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>
+<script src="site.js"></script>
 </body>
 </html>

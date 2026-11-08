@@ -11,7 +11,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; overflow-x: clip; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 var(--font-body); -webkit-font-smoothing: antialiased; overflow-x: clip; }
 a { color: var(--accent); } a:hover { color: var(--accent-hover); }
 h1, h2, h3, h4 { margin: 0; font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; text-wrap: balance; }
@@ -63,7 +63,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 input, select { font: 16px/1.5 var(--font-body); padding: 12px 18px; border-radius: var(--radius-pill); border: 1px solid var(--line-2); background: var(--surface); color: var(--text); width: 100%; }
 input:focus { border-color: var(--accent); }
 .seg { display: inline-flex; padding: 4px; border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--line); gap: 4px; }
-.seg a, .seg button { padding: 9px 18px; border-radius: var(--radius-pill); border: 0; background: transparent; color: var(--text-2); font: 600 14px/1.2 var(--font-body); text-decoration: none; cursor: pointer; }
+.seg a, .seg button { min-height: 44px; padding: 9px 18px; border-radius: var(--radius-pill); border: 0; background: transparent; color: var(--text-2); font: 600 14px/1.2 var(--font-body); text-decoration: none; cursor: pointer; }
 .seg [aria-current], .seg [aria-pressed="true"] { background: var(--text); color: var(--bg); }
 .seg a.on, .seg button.on { background: rgba(157, 240, 196, .12); color: var(--accent); }
 
