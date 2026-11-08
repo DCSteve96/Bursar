@@ -135,6 +135,7 @@ table { width: 100%; border-collapse: collapse; font-size: 15px; }
 th, td { text-align: left; padding: 16px 20px; border-top: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
 th { font: 600 12px/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-4); border-top: 0; }
 td .mono { font-size: 14px; }
+td.id, td.nowrap { white-space: nowrap; }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 26px; min-width: 0; }
 .stat .k { color: var(--text-2); font-weight: 600; font-size: 15px; }
 .stat .v { font: 700 34px/1.1 var(--font-display); margin-top: 10px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

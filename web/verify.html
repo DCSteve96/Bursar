@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar receipt verifier</title>
+<meta name="description" content="Check a Bursar reading receipt in your browser: the exact bytes, the enclave's signature, the Intel TDX attestation and the payment on chain. Nothing is uploaded.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="brand/icon-192.png">
+<meta name="theme-color" content="#0d0f0e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bursar">
+<link rel="stylesheet" href="site.css">
+<style>
+  .vhero { padding: 90px 0 40px; }
+  .vhero .wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 22px; }
+  .bench { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .bench { grid-template-columns: 1fr; } }
+  .drop { min-height: 220px; justify-content: center; }
+  .drop:hover { border-color: #3a4640; }
+  .drop .big { font: 700 22px/1.25 var(--font-display); color: var(--text); }
+  .hex { font: 13px/1.7 var(--font-mono); color: var(--text-2); overflow-wrap: anywhere; padding: 14px 16px; border-radius: 16px; background: var(--terminal); border: 1px solid #1d221f; }
+  .netrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .netrow .seg button { min-height: 36px; }
+  .term-bar .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .term-body { min-height: 320px; }
+  .piece .n { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; color: var(--text-4); }
+  .piece h3 { font-size: 24px; }
+  .copyrow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .code.wrapline { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .limits ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--text-2); }
+</style>
+</head>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works">How it works</a><a href="explorer">Live</a><a href="verify" aria-current="page">Verify</a><a href="docs">Docs</a><a href="code">Code</a></nav>
+  <a class="btn btn-ghost small" href="login">Log in</a>
+</div></header>
+
+<section class="vhero rel">
+  <div class="glow" style="width:460px;height:460px;background:rgba(157,240,196,.10);top:-140px;left:-120px"></div>
+  <div class="wrap rel">
+    <span class="eyebrow reveal"><span class="live-dot" style="width:8px;height:8px;border-radius:50%;background:var(--accent)"></span>Receipt verifier</span>
+    <h1 class="hero-h reveal" style="max-width:980px">Don't trust the AI. <span class="accent">Check its receipt.</span></h1>
+    <p class="lead reveal-2" style="max-width:680px">Every reading comes with a signed, attested receipt. The checks run in your browser. Nothing is uploaded.</p>
+  </div>
+</section>
+
+<section class="tight" id="bench">
+  <div class="wrap bench">
+    <div class="stack reveal" style="gap:20px">
+      <div class="drop" id="drop" role="button" tabindex="0" aria-describedby="dropHint">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M20 15v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4"/></svg>
+        <span class="big">Drop a receipt.json, or click to choose a file</span>
+        <span class="muted" id="dropHint" style="font-size:14px;max-width:420px">The console's "Download receipt JSON" and the agent's <span class="mono">app/.bursar/receipts/&lt;id&gt;.json</span> produce them.</span>
+        <input type="file" id="file" accept=".json,application/json">
+      </div>
+      <div class="netrow">
+        <span class="muted" style="font-size:14px" id="netLabel">Network for a dropped file</span>
+        <div class="seg" role="group" aria-labelledby="netLabel" id="net"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
+      </div>
+      <div class="card stack" style="gap:16px;padding:26px">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><span class="mono faint" style="font-size:13px">response body, first 60 bytes</span><span class="mono faint" style="font-size:13px" id="bodyLen"></span></div>
+        <div class="hex" id="hex" aria-live="polite">…</div>
+        <p class="faint" id="flipNote" style="font-size:13px;min-height:1.6em"></p>
+        <button type="button" class="switch" id="tamper" aria-pressed="false" disabled><span class="knob"></span>Tamper with 1 byte</button>
+      </div>
+    </div>
+    <div class="card terminal reveal-2">
+      <div class="term-bar"><i></i><i></i><i></i><span class="mono" id="termTitle">bursar verify receipt-01-acme-hosting-0923.json</span></div>
+      <div class="term-body" id="checks" aria-live="polite"><div class="chk wait"><span class="mk">…</span><span>loading the demo receipt</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="tight" id="pieces">
+  <div class="wrap">
+    <div class="head reveal"><span class="sec-label">What's in a receipt</span><h2 class="h2">Four pieces, each one checks the others.</h2></div>
+    <div class="grid four">
+      <article class="card lift piece stack reveal" style="gap:14px">
+        <span class="n">01 · BYTES</span>
+        <h3 class="h3">Exact bytes</h3>
+        <p class="soft">The request and the response exactly as they were sent and received, page images included, with their SHA-256. Change one byte and the hashes no longer match.</p>
+      </article>
+      <article class="card lift piece stack reveal-2" style="gap:14px">
+        <span class="n">02 · SIGNATURE</span>
+        <h3 class="h3">Signature</h3>
+        <p class="soft">An ECDSA signature by the enclave over <span class="mono" style="color:var(--text)">model:sha256(request):sha256(response)</span>. It recovers to the signing address, and that address must be the one in the attestation.</p>
+      </article>
+      <article class="card lift piece stack reveal-3" style="gap:14px">
+        <span class="n">03 · ATTESTATION</span>
+        <h3 class="h3">Attestation</h3>
+        <p class="soft">An Intel TDX quote whose report data binds the signing key to a fresh nonce, so the report was produced for this request and no other.</p>
+      </article>
+      <article class="card lift piece stack reveal-3" style="gap:14px">
+        <span class="n">04 · TCB</span>
+        <h3 class="h3">TCB status</h3>
+        <p class="soft">The quote is checked against Intel's collateral, fetched through the relay because Intel's service has no CORS. The CLI does the same.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="tight" id="more">
+  <div class="wrap grid two">
+    <article class="card stack reveal" style="gap:18px">
+      <span class="sec-label">From the terminal</span>
+      <h3 class="h3">Same checks, no browser.</h3>
+      <p class="soft">In <span class="mono" style="color:var(--text)">app/</span>, on the demo treasury:</p>
+      <div class="code wrapline" id="cmd">BURSAR_TREASURY=treasury.bursar-b48563e6.testnet npm run dev verify test/fixtures/receipt-01-acme-hosting-0923.json</div>
+      <div class="copyrow"><button type="button" class="btn btn-ghost small" id="copy">Copy</button><span class="faint" id="copied" role="status" style="font-size:14px"></span></div>
+    </article>
+    <article class="card stack limits reveal-2" style="gap:18px">
+      <span class="sec-label hold">Honest limits</span>
+      <h3 class="h3">What it does not check yet.</h3>
+      <ul>
+        <li>The verifier does not yet replay the RTMR3 event log against the quote, and does not check GPU evidence. The receipt keeps both, so they can be added without re-running anything.</li>
+        <li>A refused payment is stored small on chain: the contract keeps the first 64 characters of its attestation reference, so its reference matches on those 64 characters.</li>
+        <li>When the quote verifier or the relay cannot be reached, the browser shows the TCB check as skipped; the CLI checks it.</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in the company's own contract, under the company's keys. USDC only. Sample invoices are fictional.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
+
+<script type="importmap">
+{"integrity":{
+ "https://cdn.jsdelivr.net/npm/@noble/curves@2.4.0/secp256k1.js/+esm":"sha384-U8u7Yj9G2p1J2sbFLRMMbluQ+rI72TXThFbG2REFR0wJBJqj4a3TyH8E0c+T5Whj",
+ "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha3.js/+esm":"sha384-T/g+9URdccxfcSPtcsBEDZJuEySLerd0R/XQNfSqPX9DOZJBg+EOs7NkQsESyxhs",
+ "https://cdn.jsdelivr.net/npm/@noble/hashes@2.4.0/sha2.js/+esm":"sha384-wN/UYopFkl0XwJYRTsb6/85Lf2xkRGIzqXvTh/i8CHIm52TagX2mt5YAwZYIcqiD"
+}}
+</script>
+<script src="verify.js"></script>
+<script type="module">
+const { verifyReceipt, renderChecks, loadReceipt } = window.BursarVerify;
+const DEMO = { url: "samples/receipt-01-acme-hosting-0923.json", treasury: "treasury.bursar-b48563e6.testnet", network: "testnet" };
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const te = new TextEncoder();
+const hex2 = (b) => b.toString(16).padStart(2, "0");
+let current = null; // { rf, name, demo }
+let tampered = false, network = "testnet", seq = 0;
+
+// one byte of the response body changes: the first digit of the model's answer, so the JSON still parses and the
+// extraction check sees a different value; without a digit, the first letter of the answer
+function flip(body) {
+  const start = Math.max(0, body.indexOf('"content"'));
+  let i = body.slice(start).search(/[0-9]/);
+  if (i >= 0) { i += start; const d = String((Number(body[i]) + 1) % 10); return { body: body.slice(0, i) + d + body.slice(i + 1), at: i, from: body[i], to: d }; }
+  i = body.slice(start).search(/[a-zA-Z]/); i = i >= 0 ? i + start : 0;
+  const c = body[i] === body[i].toUpperCase() ? body[i].toLowerCase() : body[i].toUpperCase();
+  return { body: body.slice(0, i) + (c === body[i] ? "_" : c) + body.slice(i + 1), at: i, from: body[i], to: c === body[i] ? "_" : c };
+}
+function showBytes(body, f) {
+  const u = te.encode(body);
+  $("#bodyLen").textContent = `${u.length.toLocaleString("en-US")} bytes`;
+  $("#hex").textContent = Array.from(u.subarray(0, 60), hex2).join(" ") || "(empty)";
+  if (f) { const off = te.encode(body.slice(0, f.at)).length; $("#flipNote").innerHTML = `byte ${off.toLocaleString("en-US")} changed: <span class="mono">0x${hex2(f.from.charCodeAt(0))}</span> ("${esc(f.from)}") to <span class="mono">0x${hex2(f.to.charCodeAt(0))}</span> ("${esc(f.to)}")`; }
+  else $("#flipNote").textContent = "";
+}
+function fail(msg) {
+  $("#checks").innerHTML = `<div class="verdict bad">${esc(msg)}</div>`;
+  $("#hex").textContent = "…"; $("#bodyLen").textContent = ""; $("#flipNote").textContent = "";
+  $("#tamper").disabled = true;
+}
+async function run() {
+  if (!current) return;
+  const my = ++seq;
+  const rf = JSON.parse(JSON.stringify(current.rf));
+  const r = rf?.ai?.receipt;
+  let f = null;
+  if (r && typeof r.response_body === "string") { if (tampered) { f = flip(r.response_body); r.response_body = f.body; } showBytes(r.response_body, f); }
+  $("#termTitle").textContent = `bursar verify ${current.name}`;
+  const box = $("#checks"); box.classList.remove("shake");
+  box.innerHTML = `<div class="chk wait"><span class="mk">…</span><span>running the checks in this browser</span></div>`;
+  const opts = current.demo ? { treasury: DEMO.treasury, network: DEMO.network, onChain: true }
+    : rf.payment ? { treasury: rf.payment.treasury, network, onChain: true } : { network, onChain: false };
+  try {
+    const v = await verifyReceipt(rf, opts);
+    if (my !== seq) return;
+    renderChecks(box, v, tampered);
+    if (tampered) { void box.offsetWidth; box.classList.add("shake"); }
+  } catch (e) { if (my === seq) fail(`The checks could not run: ${e.message}`); }
+}
+function use(rf, name, demo) {
+  if (!rf || typeof rf !== "object") return fail(`${name} is not a receipt: it holds no JSON object.`);
+  if (!rf.ai?.receipt) return fail(`${name} has no ai.receipt: it was not read by NEAR AI Cloud (the offline parser leaves no receipt to verify).`);
+  current = { rf, name, demo };
+  tampered = false; $("#tamper").setAttribute("aria-pressed", "false"); $("#tamper").disabled = false;
+  run();
+}
+function readFile(file) {
+  if (!file) return;
+  $("#termTitle").textContent = `bursar verify ${file.name}`;
+  const fr = new FileReader();
+  fr.onload = () => { let rf; try { rf = JSON.parse(fr.result); } catch { current = null; return fail(`${file.name} is not JSON.`); } use(rf, file.name, false); };
+  fr.onerror = () => fail(`${file.name} could not be read.`);
+  fr.readAsText(file);
+}
+
+const drop = $("#drop"), input = $("#file");
+drop.addEventListener("click", () => input.click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
+input.addEventListener("click", (e) => e.stopPropagation());
+input.addEventListener("change", () => { readFile(input.files[0]); input.value = ""; });
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+drop.addEventListener("drop", (e) => { e.preventDefault(); readFile(e.dataTransfer.files[0]); });
+$("#net").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-net]"); if (!b || b.dataset.net === network) return;
+  network = b.dataset.net; $("#net").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  if (current && !current.demo) run();
+});
+$("#tamper").addEventListener("click", () => { if (!current) return; tampered = !tampered; $("#tamper").setAttribute("aria-pressed", String(tampered)); run(); });
+$("#copy").addEventListener("click", async () => {
+  const text = $("#cmd").textContent;
+  try { await navigator.clipboard.writeText(text); }
+  catch { const r = document.createRange(); r.selectNodeContents($("#cmd")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); try { document.execCommand("copy"); } catch {} }
+  $("#copied").textContent = "Copied"; setTimeout(() => { $("#copied").textContent = ""; }, 2000);
+});
+
+loadReceipt(DEMO.url).then((rf) => use(rf, DEMO.url.split("/").pop(), true)).catch((e) => fail(`Could not load the demo receipt: ${e.message}`));
+</script>
+<script src="site.js"></script>
+</body>
+</html>
