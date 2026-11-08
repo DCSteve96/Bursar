@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Bursar works</title>
+<meta name="description" content="How Bursar pays an invoice: the AI reads it in a TEE, the agent files a claim, the contract decides, the executor settles on a quote the contract verifies, and anyone can verify the receipt.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="brand/icon-192.png">
+<meta name="theme-color" content="#0d0f0e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bursar">
+<link rel="stylesheet" href="site.css">
+<style>
+<style>
+  .page-hero { padding: 96px 0 40px; }
+  .page-hero .eyebrow, .outcome .tag { align-self: flex-start; }
+  .page-hero .wrap { display: flex; flex-direction: column; gap: 24px; max-width: 980px; margin: 0 auto; }
+  .rail { position: relative; }
+  .rail::before { content: ""; position: absolute; left: 27px; top: 28px; bottom: 28px; width: 2px; background: linear-gradient(180deg, var(--accent) 0%, #262c28 100%); opacity: .5; }
+  .rail .step { position: relative; }
+  .rail .step .num { position: relative; z-index: 1; background: var(--bg); }
+  .step .card { display: flex; flex-direction: column; gap: 14px; }
+  .step .card .h3 { font-size: 26px; }
+  .step ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--text-2); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .outcomes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .outcome { padding: 16px 18px; border-radius: 18px; background: #121513; border: 1px solid #20251f; display: flex; flex-direction: column; gap: 8px; font-size: 15px; color: var(--text-2); }
+  .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  @media (max-width: 760px) { .rail::before { left: 21px; } .step { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; } .step .num { width: 44px; height: 44px; font-size: 17px; } .step .card .h3 { font-size: 23px; } }
+</style>
+</head>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works" aria-current="page">How it works</a><a href="explorer">Live</a><a href="verify">Verify</a><a href="docs">Docs</a><a href="code">Code</a></nav>
+  <a class="btn btn-ghost small" href="login">Log in</a>
+</div></header>
+
+<main>
+<section class="page-hero rel">
+  <div class="glow" style="width:480px;height:480px;background:rgba(157,240,196,.10);top:-140px;left:-120px"></div>
+  <div class="wrap rel">
+    <span class="eyebrow reveal">How it works</span>
+    <h1 class="hero-h reveal">From a PDF to USDC on chain, in six steps.</h1>
+    <p class="lead reveal-2" style="max-width:720px">Every step is done by a different actor with a different key. None of them can do the next one's job.</p>
+  </div>
+</section>
+
+<section class="tight" id="steps">
+  <div class="wrap" style="max-width:980px">
+    <ol class="steps rail" style="list-style:none;margin:0;padding:0">
+
+      <li class="step reveal">
+        <span class="num">1</span>
+        <article class="card">
+          <span class="kicker">Inbox</span>
+          <h2 class="h3">An invoice arrives.</h2>
+          <p class="soft">Three ways in: a PDF dropped in the console, a PDF posted in a connected Telegram chat, or a file in the inbox folder the agent watches. Nobody types an amount or an address.</p>
+          <p class="soft">A Telegram invoice waits in the console's Inbox until a person presses Read. The owner can approve it from Telegram, or mark the vendor as trusted, and then a company running the agent with the inbox token has it read without anyone touching it. Telegram carries a yes; the contract still decides.</p>
+        </article>
+      </li>
+
+      <li class="step reveal">
+        <span class="num">2</span>
+        <article class="card">
+          <span class="kicker">NEAR AI Cloud, Intel TDX</span>
+          <h2 class="h3">The AI reads it inside a TEE.</h2>
+          <p class="soft">The page or the agent renders the PDF to images and extracts its text layer, then asks a model running in an Intel TDX enclave on NEAR AI Cloud. Before the call it fetches the enclave's attestation for a fresh nonce. The answer comes back with an ECDSA signature over the exact request and response bytes.</p>
+          <p class="soft">With the company's own NEAR AI key the invoice goes straight to the enclave over TLS and passes through no Bursar server. The demo's shared "Bursar reading" relay forwards the bytes untouched, so the receipt still verifies, but they do pass through it.</p>
+          <div class="chips"><span class="tag mono">Qwen/Qwen3-VL-30B-A3B-Instruct</span><span class="tag mono">fallback z-ai/glm-5.3-flash</span></div>
+        </article>
+      </li>
+
+      <li class="step reveal">
+        <span class="num">3</span>
+        <article class="card">
+          <span class="kicker">Agent, one function-call key</span>
+          <h2 class="h3">The agent files a claim.</h2>
+          <p class="soft">The claim says what the invoice shows: vendor, invoice number, amount, due date, the payout printed on it, the tax ids, withholding, order reference, the model's flags, the file hash and the attestation reference. The agent does not know the vendor's payout; it reports, and the contract compares.</p>
+          <p class="soft"><span class="mono" style="color:var(--text)">request_payment</span> is the only method its key can call. Sent through the relayer as a NEP-366 meta transaction, it pays no gas; the relayer forwards nothing else. The console's direct request and the MCP server pay gas from the agent's own small balance.</p>
+        </article>
+      </li>
+
+      <li class="step reveal">
+        <span class="num">4</span>
+        <article class="card">
+          <span class="kicker">Policy contract, on NEAR</span>
+          <h2 class="h3">The contract decides, in the same transaction.</h2>
+          <p class="soft">Deterministic and on chain: is the vendor registered and active, does the printed payout equal the recorded one, is it a duplicate, does it fit the per-payment cap, the daily cap and the vendor's monthly budget, does an order cover it, is it at or above the approval threshold. The limits are the owner's; the AI cannot change them.</p>
+          <div class="outcomes">
+            <div class="outcome"><span class="tag paid">paid</span>Inside every limit. A NEAR vendor is paid at once; a cross-chain vendor is queued.</div>
+            <div class="outcome"><span class="tag hold">hold</span>Held for a person: the owner, an approver, or a DAO council.</div>
+            <div class="outcome"><span class="tag refuse">refuse</span>Refused, with the reason. Nothing moves.</div>
+          </div>
+        </article>
+      </li>
+
+      <li class="step reveal">
+        <span class="num">5</span>
+        <article class="card">
+          <span class="kicker">Settlement</span>
+          <h2 class="h3">Money moves to the recorded payout.</h2>
+          <p class="soft">A vendor on NEAR is paid by the contract itself, in the same receipt. A vendor on Base, Arbitrum, Ethereum, Solana or Sui is queued for the executor, a plain process with no AI. It brings a quote 1Click signed for that payment, and the contract verifies the signature on chain (<span class="mono" style="color:var(--text)">env::ed25519_verify</span>), then the recipient (the vendor's recorded address), the exact net amount, USDC on the vendor's chain, a floor of 98 percent and the expiry, before any USDC leaves.</p>
+          <p class="soft">NEAR Intents is mainnet only. On testnet the console's <span class="mono" style="color:var(--text)">?intents=stub</span> stands in for 1Click, with a test signer the owner sets once.</p>
+        </article>
+      </li>
+
+      <li class="step reveal">
+        <span class="num">6</span>
+        <article class="card">
+          <span class="kicker">Receipt</span>
+          <h2 class="h3">A receipt anyone can verify.</h2>
+          <p class="soft">Each decision is an on-chain event (NEP-297), and the payment points to the signed, attested receipt of its reading. Anyone can check that receipt without the API key and without trusting the agent: the bytes, the signature, the nonce, the TDX quote, and the payment on chain.</p>
+          <div class="ctas"><a class="btn btn-ghost small" href="verify">Verify a receipt</a><span class="mono faint" style="align-self:center">bursar verify &lt;receipt.json&gt;</span></div>
+        </article>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="tight" id="rules">
+  <div class="wrap">
+    <div class="head reveal"><span class="sec-label">The rules</span><h2 class="h2">What stops a payment, and what waits for a person.</h2><p class="soft">A refusal stops at the first rule broken. Holds add up: one payment can be held for several reasons at once, for example <span class="mono">no_order+identity_mismatch</span>.</p></div>
+    <div class="grid two">
+      <article class="card reveal stack" style="gap:18px">
+        <span class="icon refuse"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg></span>
+        <h3 class="h3">Refused</h3>
+        <p class="soft">Nothing moves. A refused invoice can be sent again once the cause is fixed.</p>
+        <div class="chips">
+          <span class="tag refuse mono">unknown_vendor</span><span class="tag refuse mono">vendor_inactive</span><span class="tag refuse mono">payout_changed</span><span class="tag refuse mono">duplicate_invoice</span><span class="tag refuse mono">over_payment_cap</span><span class="tag refuse mono">over_daily_cap</span><span class="tag refuse mono">over_monthly_budget</span><span class="tag refuse mono">insufficient_treasury</span><span class="tag refuse mono">zero_amount</span><span class="tag refuse mono">no_invoice_identity</span><span class="tag refuse mono">paused</span><span class="tag refuse mono">hold_quota_reached</span><span class="tag refuse mono">transfer_failed</span>
+        </div>
+        <p class="faint" style="font-size:14px">A transfer the token rejects is rolled back in the callback: balance restored, payment marked <span class="mono">transfer_failed</span>.</p>
+      </article>
+      <article class="card reveal-2 stack" style="gap:18px">
+        <span class="icon hold"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+        <h3 class="h3">Held for a person</h3>
+        <p class="soft">Not paid, not refused. The owner or an approver decides, or the DAO council when there is one.</p>
+        <div class="chips">
+          <span class="tag hold mono">over_threshold</span><span class="tag hold mono">no_order</span><span class="tag hold mono">flagged</span><span class="tag hold mono">identity_mismatch</span><span class="tag hold mono">buyer_mismatch</span><span class="tag hold mono">withholding_mismatch</span><span class="tag hold mono">many_invoices</span><span class="tag hold mono">payout_unconfirmed</span>
+        </div>
+        <p class="faint" style="font-size:14px">A held payment the council rejects is cancelled (<span class="mono">dao_rejected</span>). A cross-chain settlement that comes back refunded returns to a person (<span class="mono">settlement_failed</span>).</p>
+      </article>
+    </div>
+    <article class="card reveal" style="margin-top:20px;display:flex;flex-direction:column;gap:14px">
+      <h3 class="h3">Reading checks</h3>
+      <p class="soft">The claim takes the amount from the string the model copied off the page, parsed by Bursar (European 1.234,56 included) and reconciled with the printed subtotal and tax. The total must appear in the PDF's text layer, no larger amount may appear in it, the model's confidence must be at least 0.6 and the currency must be USDC. Each failure is a flag, and the contract holds anything flagged; a scan with no text layer is always held.</p>
+      <p class="soft">A notice of new payment details that points at the registered payout is not a hold. A different payout is refused, whatever the notice says.</p>
+    </article>
+  </div>
+</section>
+
+<section class="tight" id="people">
+  <div class="wrap">
+    <div class="head reveal"><span class="sec-label">People, roles, DAO</span><h2 class="h2">People set the rules and decide the exceptions.</h2></div>
+    <div class="grid">
+      <article class="card lift reveal stack" style="gap:16px">
+        <span class="icon paid"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></span>
+        <h3 class="h3">Owner</h3>
+        <p class="soft">The owner's wallet signs vendors and payouts, limits, operators, the DAO, withdrawals, ownership and upgrades. A payout set by an operator pays nothing until the owner confirms it. Signed in with a wallet, the browser gets a key limited to ten everyday methods; everything else goes back to the wallet.</p>
+      </article>
+      <article class="card lift reveal-2 stack" style="gap:16px">
+        <span class="icon info"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m17 6 3 3"/></svg></span>
+        <h3 class="h3">Operators</h3>
+        <p class="soft">Colleagues get an invite link with a key limited to their role: approve (approve or cancel a held payment), manage vendors, or manage orders. The owner can revoke a role at any time.</p>
+      </article>
+      <article class="card lift reveal-3 stack" style="gap:16px">
+        <span class="icon hold"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M5 21V10l7-5 7 5v11"/><path d="M9 21v-6h6v6"/></svg></span>
+        <h3 class="h3">Sputnik DAO</h3>
+        <p class="soft">Optional. When a DAO is set, every held payment opens a proposal, opened by the contract itself with a small bond the treasury pays and gets back, and the council votes in the console or in Trezu. A rejected proposal cancels the payment. Without a DAO, the owner or an approver decides.</p>
+      </article>
+    </div>
+    <div class="ctas reveal" style="margin-top:48px">
+      <a class="btn btn-primary" href="explorer">See it live</a>
+      <a class="btn btn-ghost" href="docs">Read the full docs</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in the company's own contract, under the company's keys. USDC only. Sample invoices are fictional.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
+<script src="site.js"></script>
+</body>
+</html>

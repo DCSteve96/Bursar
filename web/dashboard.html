@@ -7,7 +7,7 @@
 <meta name="description" content="Read-only dashboard for a Bursar policy contract: balance, caps, vendors and every payment decision, straight from the NEAR RPC.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="brand/icon-192.png">
@@ -15,44 +15,74 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bursar">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="site.css">
 <style>
-  form { display: grid; grid-template-columns: 160px minmax(0, 1fr) auto; gap: 12px; align-items: end; }
-  @media (max-width: 640px) { form { grid-template-columns: 1fr; } }
+  .dhero { padding: 90px 0 40px; }
+  .dhero .wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 22px; }
+  .dhero form#f, .dhero #err { align-self: stretch; }
+  .table td.id { overflow-wrap: normal; white-space: nowrap; }
+  form#f { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px 20px; align-items: end; padding: 26px; }
+  @media (max-width: 760px) { form#f { grid-template-columns: 1fr; } }
+  form#f label, form#f .lbl { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  form#f label > span, form#f .lbl > span { font: 600 12px/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-4); }
+  form#f .seg { align-self: start; }
+  form#f .seg button { min-height: 40px; }
+  form#f input { min-height: 48px; font-family: var(--font-mono); font-size: 15px; }
+  form#f { position: relative; }
+  .sr { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .err { margin-top: 16px; padding: 14px 18px; border-radius: 14px; background: rgba(255, 128, 112, .12); color: var(--refuse-text); font: 14px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+  #stats { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  #stats .stat .k::first-letter { text-transform: uppercase; }
+  #stats .stat .v { font-size: 28px; }
+  .sub-h { font-size: clamp(26px, 3vw, 34px); margin: 56px 0 20px; }
+  .table td.mono { font-size: 14px; }
+  .table td.ref { font-size: 12px; color: var(--text-3); min-width: 260px; }
+  .table .nowrap { white-space: nowrap; }
+  .table th { white-space: nowrap; }
+  .table td { color: var(--text-2); }
+  .bar-meter { height: 6px; border-radius: 999px; background: #262c28; margin-top: 8px; overflow: hidden; min-width: 120px; }
+  .bar-meter i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  #foot { margin-top: 28px; font-size: 14px; }
 </style>
 </head>
-<body>
-<header class="bar"><div class="in">
-  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <nav><a href="explorer">Explorer</a><a href="docs">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login" class="btn btn-ghost">Log in</a></nav>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works">How it works</a><a href="explorer" aria-current="page">Live</a><a href="verify">Verify</a><a href="docs">Docs</a><a href="code">Code</a></nav>
+  <a class="btn btn-ghost small" href="login">Log in</a>
 </div></header>
 
-<section class="band" style="border-top:0">
-  <div class="in">
-    <div class="eyebrow accent">[ DASHBOARD ]</div>
-    <h1 class="heading" style="margin-top:16px">Every decision the contract made, read from the chain.</h1>
-    <p class="sub muted" style="max-width:60ch;margin-top:16px">Balance, caps, vendors and payments come straight from the policy contract over RPC. There is no database and nothing to trust but the chain.</p>
-    <form id="f" style="margin-top:32px">
-      <label><span>Network</span><select id="network"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select></label>
+<section class="dhero rel">
+  <div class="glow" style="width:460px;height:460px;background:rgba(157,240,196,.10);top:-140px;left:-120px"></div>
+  <div class="wrap rel">
+    <span class="eyebrow reveal"><span class="live-dot" style="width:8px;height:8px;border-radius:50%;background:var(--accent)"></span>Dashboard</span>
+    <h1 class="hero-h reveal" style="font-size:clamp(38px,6vw,68px);max-width:980px">Every decision the contract made, read from the chain.</h1>
+    <p class="lead reveal-2" style="max-width:680px">Balance, caps, vendors and payments come straight from the policy contract over RPC. There is no database and nothing to trust but the chain.</p>
+    <form id="f" class="card reveal-2">
+      <div class="lbl"><span id="netLbl">Network</span><select id="network" class="sr" tabindex="-1" aria-hidden="true"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select>
+        <div class="seg" role="group" aria-labelledby="netLbl" id="netSeg"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div></div>
       <label><span>Treasury account</span><input id="treasury" placeholder="treasury.you.testnet" required></label>
-      <button type="submit" class="btn-signal">Load</button>
+      <button type="submit" class="btn btn-primary">Load</button>
     </form>
     <div id="err" class="err" hidden></div>
   </div>
 </section>
 
-<section class="band light" id="out" hidden>
-  <div class="in">
-    <div class="grid stats" id="stats"></div>
-    <h2 class="heading-sm" style="margin:40px 0 16px">Vendors, allowlisted by the owner</h2>
-    <div class="wrap"><table id="vendors"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th><th>active</th></tr></thead><tbody></tbody></table></div>
-    <h2 class="heading-sm" style="margin:40px 0 16px">Payments</h2>
-    <div class="wrap"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
-    <p class="muted" id="foot" style="margin-top:24px;font-size:14px"></p>
+<section class="tight" id="out" hidden>
+  <div class="wrap">
+    <div class="grid" id="stats"></div>
+    <h2 class="sub-h">Vendors, allowlisted by the owner</h2>
+    <div class="table"><table id="vendors"><thead><tr><th>vendor</th><th>name</th><th>payout recorded by the owner</th><th>monthly budget</th><th>active</th></tr></thead><tbody></tbody></table></div>
+    <h2 class="sub-h">Payments</h2>
+    <div class="table"><table id="payments"><thead><tr><th>#</th><th>vendor</th><th>invoice</th><th>amount</th><th>decision</th><th>why / where</th><th>attestation</th></tr></thead><tbody></tbody></table></div>
+    <p class="muted" id="foot"></p>
   </div>
 </section>
 
-<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys.</footer>
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
 
 <script>
 const RPC = { testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org", "https://rpc.testnet.near.org"], mainnet: ["https://free.rpc.fastnear.com", "https://near.drpc.org", "https://rpc.mainnet.near.org"] };
@@ -79,6 +109,8 @@ const rpcBad = new Map();
 const rpcOverride = new URLSearchParams(location.search).get("rpc");
 const EXPLORER = { testnet: "https://testnet.nearblocks.io", mainnet: "https://nearblocks.io" };
 const DEC = 6;
+// decision states: green paid or settled, amber held or on the way, coral refused, grey cancelled
+const pillKind = (s) => ["Paid", "Settled"].includes(s) ? "paid" : ["Queued", "Settling", "Approval"].includes(s) ? "hold" : s === "Cancelled" ? "off" : "refuse";
 const $ = (s) => document.querySelector(s);
 const q = new URLSearchParams(location.search);
 if (q.get("treasury")) $("#treasury").value = q.get("treasury");
@@ -131,9 +163,9 @@ async function load(e) {
     $("#vendors tbody").innerHTML = vendors.map(([id, v]) => {
       const b = BigInt(v.monthly_budget), s = BigInt(v.spent_this_month);
       const pct = b > 0n ? Number(s * 100n / b) : 0;
-      return `<tr><td class="mono id">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${payout(v.payout)}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td><td>${v.active ? "yes" : "no"}</td></tr>`;
+      return `<tr><td class="mono id">${esc(id)}</td><td>${esc(v.name)}</td><td class="mono">${payout(v.payout)}</td><td>${b > 0n ? `${usdc(s)} of ${usdc(b)}<div class="bar-meter"><i style="width:${Math.min(100, pct)}%"></i></div>` : `<span class="muted">no budget</span>`}</td><td>${v.active ? `<span class="pill paid">yes</span>` : `<span class="pill off">no</span>`}</td></tr>`;
     }).join("") || `<tr><td colspan="5" class="muted">no vendors</td></tr>`;
-    $("#payments tbody").innerHTML = payments.slice().reverse().map((p) => `<tr><td>${p.id}</td><td class="mono id">${esc(p.vendor_id)}</td><td class="mono id">${esc(p.invoice_number)}</td><td>${usdc(p.amount)}</td><td><span class="s ${esc(p.status)}">${esc(p.status)}</span>${p.reason && p.status === "Blocked" ? `<div class="mono">${esc(p.reason)}</div>` : ""}</td><td>${why(p)}</td><td class="mono">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
+    $("#payments tbody").innerHTML = payments.slice().reverse().map((p) => `<tr><td class="mono">${p.id}</td><td class="mono id">${esc(p.vendor_id)}</td><td class="mono id">${esc(p.invoice_number)}</td><td class="mono nowrap">${usdc(p.amount)}</td><td><span class="pill ${pillKind(p.status)}">${esc(p.status)}</span>${p.reason && p.status === "Blocked" ? `<div class="mono faint" style="margin-top:6px">${esc(p.reason)}</div>` : ""}</td><td>${why(p)}</td><td class="mono ref">${esc(p.attestation_ref)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">no payments yet</td></tr>`;
     $("#foot").innerHTML = `owner ${esc(roles[0])}, agent ${esc(roles[1])} (one function-call key), executor ${esc(roles[2])}, DAO ${esc(roles[3] ?? "none")}, token ${esc(roles[4])}. Contract <a href="${EXPLORER[network]}/address/${encodeURIComponent(treasury)}" target="_blank" rel="noopener">${esc(treasury)}</a> on ${network}.`;
     $("#out").hidden = false;
   } catch (err) {
@@ -144,7 +176,16 @@ async function load(e) {
 $("#f").addEventListener("submit", load);
 if ($("#treasury").value) load();
 </script>
-<script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
-<script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>
+<script>
+// the segmented network control drives the select the script reads (and follows it after ?network= set it)
+(() => {
+  const sel = document.getElementById("network"), seg = document.getElementById("netSeg");
+  const sync = () => seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.net === sel.value)));
+  seg.addEventListener("click", (e) => { const b = e.target.closest("button[data-net]"); if (!b) return; sel.value = b.dataset.net; sel.dispatchEvent(new Event("change")); sync(); });
+  sel.addEventListener("change", sync);
+  sync();
+})();
+</script>
+<script src="site.js"></script>
 </body>
 </html>

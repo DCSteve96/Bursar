@@ -7,7 +7,7 @@
 <meta name="description" content="How Bursar works, end to end: the three roles, the rules the contract enforces, orders and holds, people and the DAO, the attested reading, signing in, the console, the explorer, and how to run it yourself.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="brand/icon-192.png">
@@ -15,201 +15,289 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bursar">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="site.css">
 <style>
-  body { background: var(--paper); color: var(--fg-light); color-scheme: light; }
-  .bar { color: var(--fg-dark); }
-  .docs { max-width: var(--max); margin: 0 auto; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 48px; padding: 48px max(16px, env(safe-area-inset-left, 0px)) 96px; }
-  .toc { position: sticky; top: 72px; align-self: start; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
-  .toc .eyebrow { margin-bottom: 8px; }
-  .toc a { color: var(--mute-light); text-decoration: none; padding: 4px 0; border-left: 2px solid transparent; padding-left: 12px; }
-  .toc a:hover, .toc a.on { color: var(--fg-light); border-left-color: var(--signal); }
-  .doc > section { padding: 0 0 48px; margin-bottom: 48px; border-bottom: 1px solid var(--line-light); }
-  .doc h1 { font-size: clamp(32px, 5vw, 44px); letter-spacing: -0.02em; line-height: 1.05; margin: 0 0 12px; }
-  .doc h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 8px; }
-  .doc h3 { font-size: 17px; margin: 28px 0 8px; }
-  .doc p, .doc li { font-size: 16px; line-height: 1.6; max-width: 72ch; }
-  .doc ul, .doc ol { padding-left: 22px; margin: 12px 0; }
-  .doc li { margin: 6px 0; }
-  .doc .eyebrow { color: var(--paid-light); }
-  .doc .lead { color: var(--mute-light); font-size: 18px; }
-  .doc .code { margin: 16px 0; }
-  .doc code { font: 500 0.92em var(--mono); background: var(--bone); padding: 1px 5px; border-radius: 3px; }
-  .doc table { margin: 12px 0; font-size: 15px; }
-  .doc .note { background: var(--mint); border-radius: 4px; padding: 16px 18px; max-width: 72ch; }
-  .doc .note p { margin: 0; }
-  .doc a { color: inherit; }
-  .rule { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 6px 16px; max-width: 76ch; }
-  .rule .k { font: 600 12px/1.6 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute-light); padding-top: 3px; }
-  @media (max-width: 900px) { .docs { grid-template-columns: minmax(0, 1fr); gap: 24px; } .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px 14px; } .toc .eyebrow { width: 100%; } .toc a { border-left: 0; padding-left: 0; } .rule { grid-template-columns: minmax(0, 1fr); } }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .side { max-height: calc(100vh - 112px); overflow-y: auto; padding-bottom: 8px; }
+  .side .side-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
+  .side .search { position: relative; }
+  .side .search input { min-height: 46px; padding-right: 44px; font-size: 15px; }
+  .side .search kbd { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font: 500 12px/1 var(--font-mono); color: var(--text-4); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 7px; pointer-events: none; }
+  .side a { min-height: 44px; line-height: 1.3; }
+  .side .none { color: var(--text-3); font-size: 14px; padding: 8px 14px; }
+  .docs > main { min-width: 0; }
+  .article { scroll-margin-top: 100px; min-width: 0; }
+  .article .head { margin-bottom: 0; gap: 12px; }
+  .crumb { font-size: 14px; color: var(--text-4); }
+  .crumb a { color: var(--text-3); text-decoration: none; } .crumb a:hover { color: var(--text); }
+  .article .body > * { max-width: 78ch; }
+  .article .body .code, .article .body .kv { max-width: none; }
+  .article .body h3.sub { font-size: 24px; color: var(--text); margin-top: 14px; }
+  .article .body ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .article .body ol li::marker { color: var(--accent); font-family: var(--font-mono); font-size: 14px; }
+  .article .body a { color: var(--accent); }
+  .article .body .code { font-size: 13px; }
+  .article .body .note { padding: 18px 22px; border-radius: var(--radius-row); background: rgba(157, 240, 196, .07); border: 1px solid rgba(157, 240, 196, .22); }
+  .article .body .note p { color: var(--text); }
+  .article .body .kv { padding: 6px 0; }
+  .article .body .kv .k { color: var(--accent); text-transform: none; letter-spacing: 0; font-size: 13px; }
+  .article .body .kv .v { font-size: 16px; }
+  .pager a { height: auto; min-height: 44px; padding: 10px 20px; line-height: 1.3; text-align: left; max-width: 100%; white-space: normal; }
+  .pager .next { margin-left: auto; text-align: right; }
+  @media (max-width: 900px) {
+    .side { max-height: none; overflow: visible; gap: 8px; }
+    .side .side-top { width: 100%; margin-bottom: 4px; }
+    .side a { border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 8px 16px; font-size: 14px; }
+  }
+  @media (max-width: 600px) {
+    .article .body { padding: 22px; border-radius: 22px; font-size: 16px; }
+    .article .body .kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .article .body .kv .v { margin-bottom: 12px; }
+    .pager a { width: 100%; } .pager .next { text-align: left; }
+  }
 </style>
+<noscript><style>
+  .article { display: flex; margin-bottom: 64px; }
+  .pager, .side .search { display: none; }
+</style></noscript>
 </head>
-<body>
-<header class="bar"><div class="in">
-  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <nav><a href="explorer">Explorer</a><a href="docs" aria-current="page">Docs</a><a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Code</a><a href="login" class="btn btn-ghost">Log in</a></nav>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works">How it works</a><a href="explorer">Live</a><a href="verify">Verify</a><a href="docs" aria-current="page">Docs</a><a href="code">Code</a></nav>
+  <a class="btn btn-ghost small" href="login">Log in</a>
 </div></header>
 
-<div class="docs">
-<nav class="toc" id="toc">
-  <div class="eyebrow">[ DOCS ]</div>
-  <a href="#what">What Bursar is</a>
-  <a href="#flow">How a payment flows</a>
-  <a href="#rules">The rules the contract enforces</a>
-  <a href="#orders">Orders and holds</a>
-  <a href="#people">People, roles, DAO</a>
-  <a href="#reading">The reading and its receipt</a>
-  <a href="#signin">Signing in</a>
-  <a href="#console">The console</a>
-  <a href="#explorer">Explorer and registry</a>
-  <a href="#run">Run it yourself</a>
-  <a href="#limits">Custody and limits</a>
-  <a href="#glossary">Glossary</a>
+<section class="tight" style="padding-top:48px">
+<div class="wrap docs">
+<h1 class="sr-only">Bursar docs</h1>
+<nav class="side" id="toc" aria-label="Sections">
+  <div class="side-top">
+    <span class="eyebrow" style="align-self:flex-start">Docs</span>
+    <label class="search"><span class="sr-only">Search the docs</span><input id="q" type="search" placeholder="Search the docs" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">/</kbd></label>
+  </div>
+    <a href="#01" data-for="01"><span class="n">01</span><span class="t">What Bursar is</span></a>
+    <a href="#02" data-for="02"><span class="n">02</span><span class="t">How a payment flows</span></a>
+    <a href="#03" data-for="03"><span class="n">03</span><span class="t">The rules the contract enforces</span></a>
+    <a href="#04" data-for="04"><span class="n">04</span><span class="t">Orders and holds</span></a>
+    <a href="#05" data-for="05"><span class="n">05</span><span class="t">People, roles, DAO</span></a>
+    <a href="#06" data-for="06"><span class="n">06</span><span class="t">The reading and its receipt</span></a>
+    <a href="#07" data-for="07"><span class="n">07</span><span class="t">Signing in</span></a>
+    <a href="#08" data-for="08"><span class="n">08</span><span class="t">The console</span></a>
+    <a href="#09" data-for="09"><span class="n">09</span><span class="t">Explorer and registry</span></a>
+    <a href="#10" data-for="10"><span class="n">10</span><span class="t">Run it yourself</span></a>
+    <a href="#11" data-for="11"><span class="n">11</span><span class="t">Custody and limits</span></a>
+    <a href="#12" data-for="12"><span class="n">12</span><span class="t">Glossary</span></a>
+  <p class="none" id="none" hidden>No section mentions that.</p>
 </nav>
 
-<main class="doc">
-<section id="what">
-  <div class="eyebrow">[ 01 ]</div>
-  <h1>What Bursar is</h1>
-  <p class="lead">An AI treasurer for companies of any size that pays invoices within limits it cannot change.</p>
-  <p>Every company pays invoices. Two things go wrong, often: someone pays a fake invoice (the "please note our new bank details" fraud, the most common business scam in the world), and someone pays the same invoice twice. Letting an AI do the work makes both worse, unless the AI never holds the keys.</p>
-  <p>Bursar splits the job in three. <strong>The AI reads</strong> the invoice inside a trusted execution environment on NEAR AI Cloud and reports what it says. <strong>The contract decides</strong>: a NEAR smart contract owned by the company checks the vendor, the payout, the amounts, the orders, and pays or refuses by itself. <strong>A dumb executor moves the money</strong>, and only to the destination the owner recorded. Nobody in the loop can both decide and move money, and the AI cannot choose an address.</p>
-  <div class="note"><p>Bursar is software, not a payment service. The USDC stays in the company's own contract, with the company's keys. No money passes through Bursar; invoices do only when a company uses the shared demo reading relay instead of its own NEAR AI key.</p></div>
-</section>
+<main id="doc">
+<article class="article" id="01" data-alias="what" aria-labelledby="t01">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> What Bursar is</p>
+  <div class="head">
+    <span class="sec-label">01</span>
+    <h2 class="h2" id="t01">What Bursar is</h2>
+    <p class="lead">An AI treasurer for companies of any size that pays invoices within limits it cannot change.</p>
+  </div>
+  <div class="body">
+    <p>Every company pays invoices. Two things go wrong, often: someone pays a fake invoice (the "please note our new bank details" fraud, the most common business scam in the world), and someone pays the same invoice twice. Letting an AI do the work makes both worse, unless the AI never holds the keys.</p>
+    <p>Bursar splits the job in three. <strong>The AI reads</strong> the invoice inside a trusted execution environment on NEAR AI Cloud and reports what it says. <strong>The contract decides</strong>: a NEAR smart contract owned by the company checks the vendor, the payout, the amounts, the orders, and pays or refuses by itself. <strong>A dumb executor moves the money</strong>, and only to the destination the owner recorded. Nobody in the loop can both decide and move money, and the AI cannot choose an address.</p>
+    <div class="note"><p>Bursar is software, not a payment service. The USDC stays in the company's own contract, with the company's keys. No money passes through Bursar; invoices do only when a company uses the shared demo reading relay instead of its own NEAR AI key.</p></div>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><span></span><a class="btn btn-ghost small next" href="#02"><span class="faint">Next</span> 02 How a payment flows</a></nav>
+</article>
 
-<section id="flow">
-  <div class="eyebrow">[ 02 ]</div>
-  <h2>How a payment flows</h2>
-  <ol>
+<article class="article" id="02" data-alias="flow" aria-labelledby="t02">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> How a payment flows</p>
+  <div class="head">
+    <span class="sec-label">02</span>
+    <h2 class="h2" id="t02">How a payment flows</h2>
+    <p class="lead">From the PDF to the payment, step by step.</p>
+  </div>
+  <div class="body">
+    <ol>
     <li>An invoice PDF arrives: dropped in the console, posted in a Telegram chat connected to the treasury (it shows up in Inbox, unread, until a person presses Read), or in the inbox folder the agent watches.</li>
     <li>The <strong>agent</strong> rasterizes it and sends the page to a model running in a TEE on NEAR AI Cloud. First it fetches an attestation for a fresh nonce; the answer comes back as structured JSON with an ECDSA signature over the exact bytes.</li>
     <li>The agent turns the answer into a claim (vendor, invoice number, amount, payout printed on the invoice, order reference, flags) and calls <code>request_payment</code> on the policy contract. Its only key can call that one method on that one contract.</li>
     <li>The <strong>contract</strong> decides, deterministically and on chain, in the same transaction.</li>
     <li>A vendor on NEAR is paid in that transaction. A vendor on Base, Arbitrum, Ethereum, Solana or Sui is queued for the <strong>executor</strong>, which settles through NEAR Intents to the address on record, verified by the contract before any USDC leaves (mainnet only).</li>
     <li>Every decision is an on-chain event and carries a reference to the signed receipt of the reading. There is no database.</li>
-  </ol>
-</section>
-
-<section id="rules">
-  <div class="eyebrow">[ 03 ]</div>
-  <h2>The rules the contract enforces</h2>
-  <p>The owner sets them; the AI cannot touch them. Each refusal has a reason code you see in the console, the dashboard and the explorer.</p>
-  <div class="rule">
-    <span class="k">unknown_vendor</span><span>The vendor must be in the owner's allowlist, by id.</span>
-    <span class="k">payout_changed</span><span>The payout printed on the invoice must equal the one the owner recorded for that vendor. A "new bank details" invoice dies here, blocked, not paid.</span>
-    <span class="k">duplicate_invoice</span><span>The same invoice number (normalized) or the same file as an invoice this vendor was already paid for or is waiting on; a refused invoice can be sent again.</span>
-    <span class="k">over_payment_cap</span><span>No single payment above the per-payment cap.</span>
-    <span class="k">over_daily_cap</span><span>No more than the daily cap in one day, across all vendors.</span>
-    <span class="k">over_monthly_budget</span><span>No more than the vendor's monthly budget in one month.</span>
-    <span class="k">insufficient_treasury</span><span>Not enough USDC in the contract.</span>
-    <span class="k">over_threshold</span><span>At or above the approval threshold the payment is held for a person: the DAO council votes, or the owner or an approver decides.</span>
-    <span class="k">no_order</span><span>Nothing the company agreed to buy covers this invoice. Held for a person.</span>
-    <span class="k">flagged</span><span>The reading carries a flag: the model noticed something (urgency, new payment details), or one of the cross-checks on its reading failed (see below). Held for a person. The AI can add scrutiny, never remove it.</span>
-    <span class="k">identity_mismatch</span><span>The vendor's tax id printed on the invoice is not the one the owner recorded for that vendor. A name can be imitated; the id cannot. Held for a person.</span>
-    <span class="k">buyer_mismatch</span><span>The invoice is not addressed to the company's own tax id: someone else's invoice, by mistake or on purpose. Held for a person.</span>
-    <span class="k">vendor_inactive</span><span>The vendor was deactivated by the owner: blocked.</span>
-    <span class="k">paused</span><span>The owner paused the treasury: everything is refused until it is resumed.</span>
-    <span class="k">zero_amount</span><span>An invoice for nothing: refused.</span>
-    <span class="k">no_invoice_identity</span><span>No invoice number and no file hash, so nothing tells it apart from another invoice: refused.</span>
-    <span class="k">many_invoices</span><span>A vendor already had its daily allowance of autopaid invoices: a person decides the next one.</span>
-    <span class="k">payout_unconfirmed</span><span>The vendor's payout was recorded or changed by an operator and the owner has not confirmed it yet: held.</span>
-    <span class="k">hold_quota_reached</span><span>The caller (the agent or an operator) already put its daily quota of invoices in front of a person: refused until tomorrow, or the owner asks.</span>
-    <span class="k">withholding_mismatch</span><span>The withholding tax the invoice shows differs from the rate the company's accountant set on this vendor, or the vendor has none set and the invoice shows one. Held for a person.</span>
+    </ol>
   </div>
-  <h3>Reading errors made harmless</h3>
-  <p>The model can misread a number. Five checks that do not trust the model run on every reading, and each failure is a flag the contract holds on: the total must appear in the PDF's text layer; no larger amount may appear in the document (a subtotal taken for the total is caught); subtotal plus tax must equal the total when the invoice shows them; the model's confidence must be at least 0.6; the currency must be USDC. A scan without a text layer is always held. What remains possible is paying less than the invoice says, to the right account, within the orders and caps: the vendor will say so.</p>
-  <h3>Withholding tax, set by your accountant</h3>
-  <p>Bursar knows no tax rules and does not try to. Many countries make the payer keep back part of what it pays certain vendors, typically freelancers, and remit it to the state: ritenuta d'acconto in Italy, TDS in India, retencion in Spain and Latin America, with rates and bases that differ and change. So the rule lives where it belongs: whoever keeps the company's books sets, per vendor, a country and a withholding percentage (0 for companies and most foreign vendors). The contract then pays the vendor the net, keeps the withheld share in the treasury, earmarked, and shows in Analytics what is due. Remitting it is the company's job: "Mark as remitted" sends the withheld USDC to the owner's account in one transaction and the counter goes down, and the company pays the state with it (a company that paid from elsewhere calls `mark_withholding_remitted` instead, which only lowers the counter). An invoice whose own withholding line disagrees with the rate set waits for a person.</p>
-  <p>Two things to be clear about. The withheld share is the vendor's money, not the company's: on a 1,000 invoice with 20% withholding the vendor receives 800 and the state 200 on the vendor's behalf, which the vendor later deducts from its own taxes; the company's cost is 1,000 either way. And the company still remits and files exactly as it does today, with its accountant: in Italy the F24 by the 16th of the following month, the Certificazione Unica and the 770; in India the TDS deposit by the 7th and the quarterly certificate; in Spain the modelo 111 each quarter. Bursar does not talk to any tax authority and will not; it keeps the amounts right and visible, per vendor and per month, so the filing is a copy, not a reconstruction.</p>
-  <h3>Who is who: tax ids</h3>
-  <p>Every vendor record can carry the identifier the vendor prints on its invoices: a VAT number in Europe, an EIN in the United States, a CNPJ in Brazil, a GSTIN in India, an ABN in Australia, or, for a freelancer with none, a supplier code the company assigns and asks them to print. The company records its own in Settings. Spaces and punctuation do not matter. Both checks are optional and both hold rather than block, so a tax id read wrong never refuses a real invoice.</p>
-  <p style="margin-top:20px">A vendor's payout is recorded by the owner; one changed by an operator pays nothing until the owner confirms it. The executor cannot redirect funds: it can settle only on a quote 1Click signed, and the contract checks that signature and that the quote pays the vendor's recorded address, the exact net amount, in USDC on the vendor's chain, before releasing USDC. A transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked <code>transfer_failed</code>.</p>
-</section>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#01"><span class="faint">Previous</span> 01 What Bursar is</a><a class="btn btn-ghost small next" href="#03"><span class="faint">Next</span> 03 The rules the contract enforces</a></nav>
+</article>
 
-<section id="orders">
-  <div class="eyebrow">[ 04 ]</div>
-  <h2>Orders and holds</h2>
-  <p>A registered vendor with the right account could still invent invoices under every cap. Bursar pays only what the company agreed to buy.</p>
-  <ul>
+<article class="article" id="03" data-alias="rules" aria-labelledby="t03">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> The rules the contract enforces</p>
+  <div class="head">
+    <span class="sec-label">03</span>
+    <h2 class="h2" id="t03">The rules the contract enforces</h2>
+    <p class="lead">The owner sets them; the AI cannot touch them. Each refusal has a reason code you see in the console, the dashboard and the explorer.</p>
+  </div>
+  <div class="body">
+    <div class="kv">
+    <span class="k">unknown_vendor</span><span class="v">The vendor must be in the owner's allowlist, by id.</span>
+    <span class="k">payout_changed</span><span class="v">The payout printed on the invoice must equal the one the owner recorded for that vendor. A "new bank details" invoice dies here, blocked, not paid.</span>
+    <span class="k">duplicate_invoice</span><span class="v">The same invoice number (normalized) or the same file as an invoice this vendor was already paid for or is waiting on; a refused invoice can be sent again.</span>
+    <span class="k">over_payment_cap</span><span class="v">No single payment above the per-payment cap.</span>
+    <span class="k">over_daily_cap</span><span class="v">No more than the daily cap in one day, across all vendors.</span>
+    <span class="k">over_monthly_budget</span><span class="v">No more than the vendor's monthly budget in one month.</span>
+    <span class="k">insufficient_treasury</span><span class="v">Not enough USDC in the contract.</span>
+    <span class="k">over_threshold</span><span class="v">At or above the approval threshold the payment is held for a person: the DAO council votes, or the owner or an approver decides.</span>
+    <span class="k">no_order</span><span class="v">Nothing the company agreed to buy covers this invoice. Held for a person.</span>
+    <span class="k">flagged</span><span class="v">The reading carries a flag: the model noticed something (urgency, new payment details), or one of the cross-checks on its reading failed (see below). Held for a person. The AI can add scrutiny, never remove it.</span>
+    <span class="k">identity_mismatch</span><span class="v">The vendor's tax id printed on the invoice is not the one the owner recorded for that vendor. A name can be imitated; the id cannot. Held for a person.</span>
+    <span class="k">buyer_mismatch</span><span class="v">The invoice is not addressed to the company's own tax id: someone else's invoice, by mistake or on purpose. Held for a person.</span>
+    <span class="k">vendor_inactive</span><span class="v">The vendor was deactivated by the owner: blocked.</span>
+    <span class="k">paused</span><span class="v">The owner paused the treasury: everything is refused until it is resumed.</span>
+    <span class="k">zero_amount</span><span class="v">An invoice for nothing: refused.</span>
+    <span class="k">no_invoice_identity</span><span class="v">No invoice number and no file hash, so nothing tells it apart from another invoice: refused.</span>
+    <span class="k">many_invoices</span><span class="v">A vendor already had its daily allowance of autopaid invoices: a person decides the next one.</span>
+    <span class="k">payout_unconfirmed</span><span class="v">The vendor's payout was recorded or changed by an operator and the owner has not confirmed it yet: held.</span>
+    <span class="k">hold_quota_reached</span><span class="v">The caller (the agent or an operator) already put its daily quota of invoices in front of a person: refused until tomorrow, or the owner asks.</span>
+    <span class="k">withholding_mismatch</span><span class="v">The withholding tax the invoice shows differs from the rate the company's accountant set on this vendor, or the vendor has none set and the invoice shows one. Held for a person.</span>
+    </div>
+    <h3 class="sub">Reading errors made harmless</h3>
+    <p>The model can misread a number. Five checks that do not trust the model run on every reading, and each failure is a flag the contract holds on: the total must appear in the PDF's text layer; no larger amount may appear in the document (a subtotal taken for the total is caught); subtotal plus tax must equal the total when the invoice shows them; the model's confidence must be at least 0.6; the currency must be USDC. A scan without a text layer is always held. What remains possible is paying less than the invoice says, to the right account, within the orders and caps: the vendor will say so.</p>
+    <h3 class="sub">Withholding tax, set by your accountant</h3>
+    <p>Bursar knows no tax rules and does not try to. Many countries make the payer keep back part of what it pays certain vendors, typically freelancers, and remit it to the state: ritenuta d'acconto in Italy, TDS in India, retencion in Spain and Latin America, with rates and bases that differ and change. So the rule lives where it belongs: whoever keeps the company's books sets, per vendor, a country and a withholding percentage (0 for companies and most foreign vendors). The contract then pays the vendor the net, keeps the withheld share in the treasury, earmarked, and shows in Analytics what is due. Remitting it is the company's job: "Mark as remitted" sends the withheld USDC to the owner's account in one transaction and the counter goes down, and the company pays the state with it (a company that paid from elsewhere calls <code>mark_withholding_remitted</code> instead, which only lowers the counter). An invoice whose own withholding line disagrees with the rate set waits for a person.</p>
+    <p>Two things to be clear about. The withheld share is the vendor's money, not the company's: on a 1,000 invoice with 20% withholding the vendor receives 800 and the state 200 on the vendor's behalf, which the vendor later deducts from its own taxes; the company's cost is 1,000 either way. And the company still remits and files exactly as it does today, with its accountant: in Italy the F24 by the 16th of the following month, the Certificazione Unica and the 770; in India the TDS deposit by the 7th and the quarterly certificate; in Spain the modelo 111 each quarter. Bursar does not talk to any tax authority and will not; it keeps the amounts right and visible, per vendor and per month, so the filing is a copy, not a reconstruction.</p>
+    <h3 class="sub">Who is who: tax ids</h3>
+    <p>Every vendor record can carry the identifier the vendor prints on its invoices: a VAT number in Europe, an EIN in the United States, a CNPJ in Brazil, a GSTIN in India, an ABN in Australia, or, for a freelancer with none, a supplier code the company assigns and asks them to print. The company records its own in Settings. Spaces and punctuation do not matter. Both checks are optional and both hold rather than block, so a tax id read wrong never refuses a real invoice.</p>
+    <p>A vendor's payout is recorded by the owner; one changed by an operator pays nothing until the owner confirms it. The executor cannot redirect funds: it can settle only on a quote 1Click signed, and the contract checks that signature and that the quote pays the vendor's recorded address, the exact net amount, in USDC on the vendor's chain, before releasing USDC. A transfer that fails on the token contract is rolled back in the callback: balance restored, payment marked <code>transfer_failed</code>.</p>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#02"><span class="faint">Previous</span> 02 How a payment flows</a><a class="btn btn-ghost small next" href="#04"><span class="faint">Next</span> 04 Orders and holds</a></nav>
+</article>
+
+<article class="article" id="04" data-alias="orders" aria-labelledby="t04">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> Orders and holds</p>
+  <div class="head">
+    <span class="sec-label">04</span>
+    <h2 class="h2" id="t04">Orders and holds</h2>
+    <p class="lead">A registered vendor with the right account could still invent invoices under every cap. Bursar pays only what the company agreed to buy.</p>
+  </div>
+  <div class="body">
+    <ul>
     <li><strong>Purchase order</strong>: a reference (PO-2026-118), a total, an optional expiry. Invoices that print the reference consume it until it is spent.</li>
     <li><strong>Standing order</strong>: an amount per period (500 USDC every 30 days). One invoice per period, up to the amount.</li>
     <li>An invoice that no order covers is <em>held</em>, not blocked: a person sees it in Attention and approves or cancels it. By default only vendors that have orders are held to them; <code>set_order_policy true</code> makes every invoice need an order.</li>
-  </ul>
-  <p>A hold is never silent. The Overview shows what waits for a person, and the hold's reasons are written on the payment (<code>over_threshold</code>, <code>no_order</code>, <code>flagged</code>, <code>identity_mismatch</code>, <code>buyer_mismatch</code>, <code>withholding_mismatch</code>, <code>many_invoices</code>, <code>payout_unconfirmed</code>), joined with + when there are several.</p>
-</section>
+    </ul>
+    <p>A hold is never silent. The Overview shows what waits for a person, and the hold's reasons are written on the payment (<code>over_threshold</code>, <code>no_order</code>, <code>flagged</code>, <code>identity_mismatch</code>, <code>buyer_mismatch</code>, <code>withholding_mismatch</code>, <code>many_invoices</code>, <code>payout_unconfirmed</code>), joined with + when there are several.</p>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#03"><span class="faint">Previous</span> 03 The rules the contract enforces</a><a class="btn btn-ghost small next" href="#05"><span class="faint">Next</span> 05 People, roles, DAO</a></nav>
+</article>
 
-<section id="people">
-  <div class="eyebrow">[ 05 ]</div>
-  <h2>People, roles, DAO</h2>
-  <h3>Owner</h3>
-  <p>The NEAR account that owns the contract: your wallet. It sets limits, vendors, orders and the company name, approves held payments, invites and removes collaborators.</p>
-  <h3>Operators</h3>
-  <p>Collaborators get an on-chain role with three permissions: approve, manage vendors, manage orders. An invite creates an account for them with a single key limited to exactly the methods their role allows, records the role in the contract, and gives you a link that carries the key after the hash sign, so it never reaches a server. Whoever opens it is signed in as that account with that role and nothing else. Remove revokes it on chain.</p>
-  <h3>DAO</h3>
-  <p>From Settings the owner creates a Sputnik DAO with the council of their choice. From then on every held payment opens a proposal that the council votes on, in the console or in Trezu on mainnet. A rejected or expired proposal cancels the payment and releases its budget; the contract reads the verdict back from the DAO itself. Each proposal costs the treasury a bond that comes back when the council decides: the DAO the console creates asks 0.1 NEAR (Sputnik's default is 1 NEAR, which locked a NEAR per open hold); a DAO created earlier is moved to 0.1 NEAR from Settings with one proposal, voted with the owner's seat. When the account cannot cover a bond, the invoice still waits, without a proposal, until someone opens it or adds NEAR.</p>
-</section>
+<article class="article" id="05" data-alias="people" aria-labelledby="t05">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> People, roles, DAO</p>
+  <div class="head">
+    <span class="sec-label">05</span>
+    <h2 class="h2" id="t05">People, roles, DAO</h2>
+    <p class="lead">Who can do what on a treasury.</p>
+  </div>
+  <div class="body">
+    <h3 class="sub">Owner</h3>
+    <p>The NEAR account that owns the contract: your wallet. It sets limits, vendors, orders and the company name, approves held payments, invites and removes collaborators.</p>
+    <h3 class="sub">Operators</h3>
+    <p>Collaborators get an on-chain role with three permissions: approve, manage vendors, manage orders. An invite creates an account for them with a single key limited to exactly the methods their role allows, records the role in the contract, and gives you a link that carries the key after the hash sign, so it never reaches a server. Whoever opens it is signed in as that account with that role and nothing else. Remove revokes it on chain.</p>
+    <h3 class="sub">DAO</h3>
+    <p>From Settings the owner creates a Sputnik DAO with the council of their choice. From then on every held payment opens a proposal that the council votes on, in the console or in Trezu on mainnet. A rejected or expired proposal cancels the payment and releases its budget; the contract reads the verdict back from the DAO itself. Each proposal costs the treasury a bond that comes back when the council decides: the DAO the console creates asks 0.1 NEAR (Sputnik's default is 1 NEAR, which locked a NEAR per open hold); a DAO created earlier is moved to 0.1 NEAR from Settings with one proposal, voted with the owner's seat. When the account cannot cover a bond, the invoice still waits, without a proposal, until someone opens it or adds NEAR.</p>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#04"><span class="faint">Previous</span> 04 Orders and holds</a><a class="btn btn-ghost small next" href="#06"><span class="faint">Next</span> 06 The reading and its receipt</a></nav>
+</article>
 
-<section id="reading">
-  <div class="eyebrow">[ 06 ]</div>
-  <h2>The reading and its receipt</h2>
-  <p>The invoice is read by a model running in a TEE on NEAR AI Cloud. With the company's own NEAR AI key the invoice goes to the enclave over TLS and no Bursar server sees it; the shared demo relay forwards the bytes untouched but does see them pass. The answer comes with a receipt anyone can verify, without the API key and without trusting the agent:</p>
-  <ul>
+<article class="article" id="06" data-alias="reading" aria-labelledby="t06">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> The reading and its receipt</p>
+  <div class="head">
+    <span class="sec-label">06</span>
+    <h2 class="h2" id="t06">The reading and its receipt</h2>
+    <p class="lead">How the invoice is read, and how anyone can check the reading.</p>
+  </div>
+  <div class="body">
+    <p>The invoice is read by a model running in a TEE on NEAR AI Cloud. With the company's own NEAR AI key the invoice goes to the enclave over TLS and no Bursar server sees it; the shared demo relay forwards the bytes untouched but does see them pass. The answer comes with a receipt anyone can verify, without the API key and without trusting the agent:</p>
+    <ul>
     <li>the exact request and response bytes, and their hashes;</li>
     <li>the enclave's ECDSA signature over <code>model:sha256(request):sha256(response)</code>;</li>
     <li>the attestation report with the Intel TDX quote, bound to the signer and to the fresh nonce the agent chose;</li>
     <li>the quote checked against Intel's collateral (TCB status).</li>
-  </ul>
-  <p>Change one byte and the signature fails. The contract stores a compact reference to the receipt next to the payment, so a decision can always be traced to exactly the model output it was made on. The console runs the same checks in the browser; <code>bursar verify</code> runs them from the terminal.</p>
-  <h3>Invoices by Telegram</h3>
-  <p>Vendors send invoices the way they already do; nobody at the company uploads anything. In Settings the owner connects a Telegram chat and says who it is for: one vendor, or the whole company. The bot gives a link; the vendor (or a colleague) presses Start once, and from then on every PDF posted in that chat lands in the console's Inbox, under that vendor. A person presses Read: the enclave reads it, the contract decides, and the bot tells that chat, and only that chat, what was decided. Nothing is paid from Telegram. A chat linked to one vendor is also a check the AI cannot talk its way around: an invoice from Acme's chat that names another vendor carries the flag <span class="mono">chat_vendor_mismatch</span>, and the contract holds it for a person. Connect as many chats as you like, change what a chat is for, or disconnect it, all from Settings. Bursar's relay keeps the sender, the chat, the file name, Telegram's file reference and the approval state until the invoice is decided (the privacy notice lists it all); the PDF stays on Telegram until someone presses Read.</p>
-  <p>The owner can decide from the phone too. In Settings, "Connect your Telegram as approver" pairs the owner's own chat: every invoice that reaches the inbox is forwarded there with the PDF attached and two buttons, Approve and Reject (with several waiting, reply to the one you mean, or type yes or no under it). Many waiting at once: type "approve all" in the approver chat, see the list and one button, "Approve all N". Approve is a yes recorded on the relay: the vendor reads "accepted by the company", and the next person who opens Inbox presses Read, so the enclave reads the invoice and <span class="mono">request_payment</span> goes to the contract, which applies the same caps, thresholds and holds as always (a company that runs the agent with the inbox token gets that step done on its own). A vendor marked as trusted skips the question: its invoices are accepted as they arrive, the owner only gets a notice, and the contract still applies every rule, so the exceptions are held or blocked as always; with the agent running, nobody touches anything between the PDF and the payment. No key lives on the relay. The outcome comes back under the message: paid, with the transaction link; held, with the contract's reason and a link to Attention, where the owner approves with the wallet; or blocked, with the reason. The vendor's chat reads only paid, under review or declined. Only the Telegram user who pressed Start with the owner's code can decide, in a group too, and no key ever lives on a server: Telegram carries a yes, the contract carries the rules.</p>
-  <h3>Who holds the NEAR AI Cloud key</h3>
-  <p>Two plans. <strong>Bursar reading</strong>, used for this hackathon demo: the browser goes through Bursar's relay, a Cloudflare Worker that holds a key paid by the team and forwards the bytes untouched, with daily caps. <strong>Own key</strong>: a company using Bursar brings its own NEAR AI Cloud key, and the invoice goes from the browser straight to the enclave, never through Bursar.</p>
-</section>
+    </ul>
+    <p>Change one byte and the signature fails. The contract stores a compact reference to the receipt next to the payment, so a decision can always be traced to exactly the model output it was made on. The console runs the same checks in the browser; <code>bursar verify</code> runs them from the terminal.</p>
+    <h3 class="sub">Invoices by Telegram</h3>
+    <p>Vendors send invoices the way they already do; nobody at the company uploads anything. In Settings the owner connects a Telegram chat and says who it is for: one vendor, or the whole company. The bot gives a link; the vendor (or a colleague) presses Start once, and from then on every PDF posted in that chat lands in the console's Inbox, under that vendor. A person presses Read: the enclave reads it, the contract decides, and the bot tells that chat, and only that chat, what was decided. Nothing is paid from Telegram. A chat linked to one vendor is also a check the AI cannot talk its way around: an invoice from Acme's chat that names another vendor carries the flag <span class="mono">chat_vendor_mismatch</span>, and the contract holds it for a person. Connect as many chats as you like, change what a chat is for, or disconnect it, all from Settings. Bursar's relay keeps the sender, the chat, the file name, Telegram's file reference and the approval state until the invoice is decided (the privacy notice lists it all); the PDF stays on Telegram until someone presses Read.</p>
+    <p>The owner can decide from the phone too. In Settings, "Connect your Telegram as approver" pairs the owner's own chat: every invoice that reaches the inbox is forwarded there with the PDF attached and two buttons, Approve and Reject (with several waiting, reply to the one you mean, or type yes or no under it). Many waiting at once: type "approve all" in the approver chat, see the list and one button, "Approve all N". Approve is a yes recorded on the relay: the vendor reads "accepted by the company", and the next person who opens Inbox presses Read, so the enclave reads the invoice and <span class="mono">request_payment</span> goes to the contract, which applies the same caps, thresholds and holds as always (a company that runs the agent with the inbox token gets that step done on its own). A vendor marked as trusted skips the question: its invoices are accepted as they arrive, the owner only gets a notice, and the contract still applies every rule, so the exceptions are held or blocked as always; with the agent running, nobody touches anything between the PDF and the payment. No key lives on the relay. The outcome comes back under the message: paid, with the transaction link; held, with the contract's reason and a link to Attention, where the owner approves with the wallet; or blocked, with the reason. The vendor's chat reads only paid, under review or declined. Only the Telegram user who pressed Start with the owner's code can decide, in a group too, and no key ever lives on a server: Telegram carries a yes, the contract carries the rules.</p>
+    <h3 class="sub">Who holds the NEAR AI Cloud key</h3>
+    <p>Two plans. <strong>Bursar reading</strong>, used for this hackathon demo: the browser goes through Bursar's relay, a Cloudflare Worker that holds a key paid by the team and forwards the bytes untouched, with daily caps. <strong>Own key</strong>: a company using Bursar brings its own NEAR AI Cloud key, and the invoice goes from the browser straight to the enclave, never through Bursar.</p>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#05"><span class="faint">Previous</span> 05 People, roles, DAO</a><a class="btn btn-ghost small next" href="#07"><span class="faint">Next</span> 07 Signing in</a></nav>
+</article>
 
-<section id="signin">
-  <div class="eyebrow">[ 07 ]</div>
-  <h2>Signing in</h2>
-  <p>No password, no server. Three doors on the <a href="login">sign-in page</a>:</p>
-  <ul>
+<article class="article" id="07" data-alias="signin" aria-labelledby="t07">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> Signing in</p>
+  <div class="head">
+    <span class="sec-label">07</span>
+    <h2 class="h2" id="t07">Signing in</h2>
+    <p class="lead">How you get into a treasury, and what the browser key may sign.</p>
+  </div>
+  <div class="body">
+    <p>No password, no server. Three doors on the <a href="login">sign-in page</a>:</p>
+    <ul>
     <li><strong>NEAR wallet.</strong> The wallet tells the console who you are. If your account owns a treasury (the registry lists it, the contract confirms it), you pick it and the wallet adds a key limited to that contract to your browser: it signs orders, approvals, DAO proposals, balance sync, the vault and requests, never a vendor or a payout, a limit, the company record, pause, the withholding counters, an operator, the DAO, a withdrawal, the owner or a new build: those the wallet signs, and shows you first. A stolen browser key can request payments to registered vendors as the owner, add or close orders, approve holds when there is no DAO, cancel held or queued payments, open DAO proposals, and overwrite the vault; the allowlist, the payouts, the caps and the budgets still bound it, and it can change none of them. If your account owns none, the console creates one at this first sign-in, in three small windows: your company (name, what it does, country; tax id optional), the creation, and how invoices are read. On testnet, under the hood: a payer account from the testnet faucet, the policy contract deployed with your wallet as owner, test USDC, four demo vendors and three orders, an agent with one key; you pay nothing. On mainnet your wallet funds the payer with about 7 NEAR, 4.7 of them locked as the contract's storage, and you add your own vendors and USDC.</li>
     <li><strong>Invite link.</strong> A colleague's link signs you in with exactly the role they chose.</li>
     <li><strong>Keys file.</strong> For a treasury created with throwaway keys ("Download the keys"), when there is no wallet at all.</li>
-  </ul>
-  <p>Several treasuries live side by side in the console's switcher. "Switch account" takes you back to the door.</p>
-  <h3>Done on mainnet, 2 and 3 November 2026</h3>
-  <p>The core path ran for real, with small amounts, from a browser and a phone: treasury <a href="https://nearblocks.io/address/treasury.bursar-8ccac085.near">treasury.bursar-8ccac085.near</a> created by a payer account the page made, with no access key, handed to the wallet and listed in the registry; an invoice for 5 USDC to a vendor on NEAR (for the demo, a vendor whose payout is the owner's own account) read in the enclave, <a href="https://nearblocks.io/txns/Hcx5Scqm6mNXAmcasemJXfskxNkHsRfCizUwnna1NSof">held</a> because the model flagged it, then <a href="https://nearblocks.io/txns/8mKk1126EuqDZ1FBpr325Rw9qm3GcMXGtUbtrotvZqNm">approved by the owner and paid</a>; an invoice for 10 USDC to a vendor on Base <a href="https://nearblocks.io/txns/Bg1Cett5fRg1WmVzoY5BE7Wwwj7RagHSiceUyCKRxBw9">queued</a>, the deposit account registered by the owner, <a href="https://nearblocks.io/txns/CcHpJwRmZCcCM1FhGakNzbUTGLeHLNg73mQW5S3AyQVx">settled by the executor</a> through NEAR Intents and <a href="https://basescan.org/tx/0x9784ec838c10f1622132f994b75d0e7b2fc4ee91d3be730695f363bfb3713b15">received on Base</a> (9.996381 USDC), then <a href="https://nearblocks.io/txns/G3W6LMv1qbJnNcUzdUUmUqeLSp5MhnvYUzrLj5HbaJhU">marked settled</a> with the Base hash. That was the build of 2 November. On 3 November the owner <a href="https://nearblocks.io/txns/6Gm41Co8GybdZh6SD5R6E9td2QZX2j43tMTHEX15U4yS">upgraded</a> the treasury to the current build, and the console <a href="https://nearblocks.io/txns/9NindR1cjsbgAGroQbewxRsYfjsYkdET3TVzgzpbsbKJ">settled</a> the next invoice on Base by itself, on a quote whose signature the contract verified, <a href="https://basescan.org/tx/0x46bff94770ad6230a06d5e694be29aa0ff72d231bb1f7a8a479ca94a990d1d13">received on Base</a>. The README lists every transaction.</p>
-  <h3>The vault: lose the browser, keep the company</h3>
-  <p>Everything that matters is on the contract and comes back at every sign-in: vendors, limits, payments, roles. What lives only in a browser is secret by nature: the agent key, the Telegram inbox token, the labels. A wallet owner keeps them in the <strong>vault</strong>: the wallet signs one fixed message (no transaction, no cost), the signature becomes an encryption key, the secrets are encrypted in the browser and stored on the contract with <span class="mono">set_vault</span>, owner only. A new browser, after signing in with the same wallet, presses "Unlock with the wallet" and gets them back. The vault holds one content key, wrapped once per wallet key: a device whose wallet key is new (the wallet app on a phone keeps its own key for the same account) asks to be admitted, leaving a public key on the contract with one transaction; the request carries the wallet's signature, and any device that holds the vault checks on chain that the key is one of the owner account's own full-access keys and admits it by itself; a request from any other key waits for a person, with the reason next to it. From then on the newcomer's own signature opens the vault. The first device lists the admitted devices by browser, wallet key and date, and can forget a lost one. With no device left to admit from, the owner replaces the executor from the browser at hand: the wallet creates a new executor account with one key limited to settling on this treasury and tells the contract with <span class="mono">set_roles</span>. Nobody can open the vault without one of those wallet keys, Bursar included. The contract never reads it. Keep the keys backup file too.</p>
-  <p>A person in the console can also ask the contract directly: <span class="mono">request_payment</span> accepts the agent, the owner and the operators. The decision is the same whoever asks; only the contract decides.</p>
-</section>
-
-<section id="console">
-  <div class="eyebrow">[ 08 ]</div>
-  <h2>The console</h2>
-  <p>A static page: nothing to install, every number read from the contract over RPC, every change signed in the browser.</p>
-  <div class="rule">
-    <span class="k">Inbox</span><span>Invoices received through the Telegram bot, grouped by the vendor each chat is linked to, with sender and file name, and whether someone already approved one. Read sends one to the enclave and the contract; Discard drops it; "Approve all waiting" marks every waiting invoice approved for the agent, each still decided on its own by the contract. The bot tells the chat each decision, and only that chat.</span>
-    <span class="k">Overview</span><span>Balance, spent this month, budgets, what waits for a person, the last decisions. The "Top up" card: the treasury account to send USDC to, as text and as a QR code, the NEAR the account has free of its storage, and for the owner "Deposit USDC" and "Add NEAR" signed from the page (on testnet also "Mint test USDC"); a transfer made from outside shows up with a "Sync balance" button.</span>
-    <span class="k">Invoices</span><span>Drop a PDF or load a recorded reading; watch the enclave read it, the receipt verify, and, before you press anything, what the contract would answer: "will pay", "will wait" with the reason a person is needed, or "will be refused" with the rule. That preview is the contract's own view method on the same rules; pressing "Request payment" asks it for real, with the agent's key, the owner's or a collaborator's.</span>
-    <span class="k">Attention</span><span>Held payments to approve or cancel, one at a time or picked together ("Approve selected": four per signature; with a DAO, one vote per proposal), council votes when there is a DAO, what was refused, with the reason, and the cross-chain payments queued or settling, which the owner can close when nobody could confirm them.</span>
-    <span class="k">Vendors</span><span>The allowlist: id, name, the identifier printed on invoices, country, withholding rate set by the accountant, payout on record, monthly budget, active or not.</span>
-    <span class="k">Orders</span><span>Purchase orders and standing orders, what each has consumed, close.</span>
-    <span class="k">Analytics</span><span>Spend by month (with the withheld share), by vendor and the mix of decisions, as charts; every payment grouped by vendor with gross, withheld and net; the withholding kept back for the state with "Mark as remitted"; and the accountant's report: an Excel file with five sheets (Summary, Payments, By vendor, By month, Withholding) or a CSV, built in the browser from the chain, with the transactions behind it (request, approval, settle, mark, destination chain) as links, also in the CSV and Excel exports</span>
-    <span class="k">Settings</span><span>Company (name, country, tax id), limits, strict order mode, collaborators and invites, Telegram inbox, governance (create the DAO, its proposal bond), the build the treasury runs and "Upgrade contract", keys, the vault and the reading plan.</span>
+    </ul>
+    <p>Several treasuries live side by side in the console's switcher. "Switch account" takes you back to the door.</p>
+    <h3 class="sub">Done on mainnet, 2 and 3 November 2026</h3>
+    <p>The core path ran for real, with small amounts, from a browser and a phone: treasury <a href="https://nearblocks.io/address/treasury.bursar-8ccac085.near">treasury.bursar-8ccac085.near</a> created by a payer account the page made, with no access key, handed to the wallet and listed in the registry; an invoice for 5 USDC to a vendor on NEAR (for the demo, a vendor whose payout is the owner's own account) read in the enclave, <a href="https://nearblocks.io/txns/Hcx5Scqm6mNXAmcasemJXfskxNkHsRfCizUwnna1NSof">held</a> because the model flagged it, then <a href="https://nearblocks.io/txns/8mKk1126EuqDZ1FBpr325Rw9qm3GcMXGtUbtrotvZqNm">approved by the owner and paid</a>; an invoice for 10 USDC to a vendor on Base <a href="https://nearblocks.io/txns/Bg1Cett5fRg1WmVzoY5BE7Wwwj7RagHSiceUyCKRxBw9">queued</a>, the deposit account registered by the owner, <a href="https://nearblocks.io/txns/CcHpJwRmZCcCM1FhGakNzbUTGLeHLNg73mQW5S3AyQVx">settled by the executor</a> through NEAR Intents and <a href="https://basescan.org/tx/0x9784ec838c10f1622132f994b75d0e7b2fc4ee91d3be730695f363bfb3713b15">received on Base</a> (9.996381 USDC), then <a href="https://nearblocks.io/txns/G3W6LMv1qbJnNcUzdUUmUqeLSp5MhnvYUzrLj5HbaJhU">marked settled</a> with the Base hash. That was the build of 2 November. On 3 November the owner <a href="https://nearblocks.io/txns/6Gm41Co8GybdZh6SD5R6E9td2QZX2j43tMTHEX15U4yS">upgraded</a> the treasury to the current build, and the console <a href="https://nearblocks.io/txns/9NindR1cjsbgAGroQbewxRsYfjsYkdET3TVzgzpbsbKJ">settled</a> the next invoice on Base by itself, on a quote whose signature the contract verified, <a href="https://basescan.org/tx/0x46bff94770ad6230a06d5e694be29aa0ff72d231bb1f7a8a479ca94a990d1d13">received on Base</a>. The README lists every transaction.</p>
+    <h3 class="sub">The vault: lose the browser, keep the company</h3>
+    <p>Everything that matters is on the contract and comes back at every sign-in: vendors, limits, payments, roles. What lives only in a browser is secret by nature: the agent key, the Telegram inbox token, the labels. A wallet owner keeps them in the <strong>vault</strong>: the wallet signs one fixed message (no transaction, no cost), the signature becomes an encryption key, the secrets are encrypted in the browser and stored on the contract with <span class="mono">set_vault</span>, owner only. A new browser, after signing in with the same wallet, presses "Unlock with the wallet" and gets them back. The vault holds one content key, wrapped once per wallet key: a device whose wallet key is new (the wallet app on a phone keeps its own key for the same account) asks to be admitted, leaving a public key on the contract with one transaction; the request carries the wallet's signature, and any device that holds the vault checks on chain that the key is one of the owner account's own full-access keys and admits it by itself; a request from any other key waits for a person, with the reason next to it. From then on the newcomer's own signature opens the vault. The first device lists the admitted devices by browser, wallet key and date, and can forget a lost one. With no device left to admit from, the owner replaces the executor from the browser at hand: the wallet creates a new executor account with one key limited to settling on this treasury and tells the contract with <span class="mono">set_roles</span>. Nobody can open the vault without one of those wallet keys, Bursar included. The contract never reads it. Keep the keys backup file too.</p>
+    <p>A person in the console can also ask the contract directly: <span class="mono">request_payment</span> accepts the agent, the owner and the operators. The decision is the same whoever asks; only the contract decides.</p>
   </div>
-</section>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#06"><span class="faint">Previous</span> 06 The reading and its receipt</a><a class="btn btn-ghost small next" href="#08"><span class="faint">Next</span> 08 The console</a></nav>
+</article>
 
-<section id="explorer">
-  <div class="eyebrow">[ 09 ]</div>
-  <h2>Explorer and registry</h2>
-  <p>The <a href="explorer">explorer</a> shows the whole network: how many companies, the USDC their contracts hold, what was paid out today, this month and all time, how many decisions, blocked, waiting for a person, and the last decisions across every company. Nothing private: amounts and decisions are on-chain events. The explorer does not show vendor names or invoice numbers; they are on each company's contract and its dashboard.</p>
-  <p>It reads a small public contract, the <strong>registry</strong>, where every treasury lists itself when it is created (the console does it; <code>bursar setup</code> too). Entries are hints, not proof: the explorer and the sign-in page check each treasury's code hash against the list of Bursar builds and read <code>get_roles</code> on it, and drop what does not match. Every page reads the chain through public RPC endpoints, three in turn, so one that throttles or drops a burst of requests does not take the page down.</p>
-</section>
+<article class="article" id="08" data-alias="console" aria-labelledby="t08">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> The console</p>
+  <div class="head">
+    <span class="sec-label">08</span>
+    <h2 class="h2" id="t08">The console</h2>
+    <p class="lead">A static page: nothing to install, every number read from the contract over RPC, every change signed in the browser.</p>
+  </div>
+  <div class="body">
+    <div class="kv">
+    <span class="k">Inbox</span><span class="v">Invoices received through the Telegram bot, grouped by the vendor each chat is linked to, with sender and file name, and whether someone already approved one. Read sends one to the enclave and the contract; Discard drops it; "Approve all waiting" marks every waiting invoice approved for the agent, each still decided on its own by the contract. The bot tells the chat each decision, and only that chat.</span>
+    <span class="k">Overview</span><span class="v">Balance, spent this month, budgets, what waits for a person, the last decisions. The "Top up" card: the treasury account to send USDC to, as text and as a QR code, the NEAR the account has free of its storage, and for the owner "Deposit USDC" and "Add NEAR" signed from the page (on testnet also "Mint test USDC"); a transfer made from outside shows up with a "Sync balance" button.</span>
+    <span class="k">Invoices</span><span class="v">Drop a PDF or load a recorded reading; watch the enclave read it, the receipt verify, and, before you press anything, what the contract would answer: "will pay", "will wait" with the reason a person is needed, or "will be refused" with the rule. That preview is the contract's own view method on the same rules; pressing "Request payment" asks it for real, with the agent's key, the owner's or a collaborator's.</span>
+    <span class="k">Attention</span><span class="v">Held payments to approve or cancel, one at a time or picked together ("Approve selected": four per signature; with a DAO, one vote per proposal), council votes when there is a DAO, what was refused, with the reason, and the cross-chain payments queued or settling, which the owner can close when nobody could confirm them.</span>
+    <span class="k">Vendors</span><span class="v">The allowlist: id, name, the identifier printed on invoices, country, withholding rate set by the accountant, payout on record, monthly budget, active or not.</span>
+    <span class="k">Orders</span><span class="v">Purchase orders and standing orders, what each has consumed, close.</span>
+    <span class="k">Analytics</span><span class="v">Spend by month (with the withheld share), by vendor and the mix of decisions, as charts; every payment grouped by vendor with gross, withheld and net; the withholding kept back for the state with "Mark as remitted"; and the accountant's report: an Excel file with five sheets (Summary, Payments, By vendor, By month, Withholding) or a CSV, built in the browser from the chain, with the transactions behind it (request, approval, settle, mark, destination chain) as links, also in the CSV and Excel exports</span>
+    <span class="k">Settings</span><span class="v">Company (name, country, tax id), limits, strict order mode, collaborators and invites, Telegram inbox, governance (create the DAO, its proposal bond), the build the treasury runs and "Upgrade contract", keys, the vault and the reading plan.</span>
+    </div>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#07"><span class="faint">Previous</span> 07 Signing in</a><a class="btn btn-ghost small next" href="#09"><span class="faint">Next</span> 09 Explorer and registry</a></nav>
+</article>
 
-<section id="run">
-  <div class="eyebrow">[ 10 ]</div>
-  <h2>Run it yourself</h2>
+<article class="article" id="09" data-alias="explorer" aria-labelledby="t09">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> Explorer and registry</p>
+  <div class="head">
+    <span class="sec-label">09</span>
+    <h2 class="h2" id="t09">Explorer and registry</h2>
+    <p class="lead">What the network page shows, and where it reads it from.</p>
+  </div>
+  <div class="body">
+    <p>The <a href="explorer">explorer</a> shows the whole network: how many companies, the USDC their contracts hold, what was paid out today, this month and all time, how many decisions, blocked, waiting for a person, and the last decisions across every company. Nothing private: amounts and decisions are on-chain events. The explorer does not show vendor names or invoice numbers; they are on each company's contract and its dashboard.</p>
+    <p>It reads a small public contract, the <strong>registry</strong>, where every treasury lists itself when it is created (the console does it; <code>bursar setup</code> too). Entries are hints, not proof: the explorer and the sign-in page check each treasury's code hash against the list of Bursar builds and read <code>get_roles</code> on it, and drop what does not match. Every page reads the chain through public RPC endpoints, three in turn, so one that throttles or drops a burst of requests does not take the page down.</p>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#08"><span class="faint">Previous</span> 08 The console</a><a class="btn btn-ghost small next" href="#10"><span class="faint">Next</span> 10 Run it yourself</a></nav>
+</article>
+
+<article class="article" id="10" data-alias="run" aria-labelledby="t10">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> Run it yourself</p>
+  <div class="head">
+    <span class="sec-label">10</span>
+    <h2 class="h2" id="t10">Run it yourself</h2>
+    <p class="lead">The whole stack on your own machine, on testnet.</p>
+  </div>
+  <div class="body">
   <p>The <a href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">README</a> is a walkthrough in "do X, see Y" form; the short version:</p>
   <div class="code">git clone https://github.com/DCSteve96/Bursar && cd Bursar
 (cd contracts/policy && cargo test && ./build.sh)
@@ -222,14 +310,21 @@ npm run agent -- --once --offline                # drop --offline to read with N
 npm run dev status
 npm run dev verify 1                             # the receipt behind payment 1 (read with a NEAR AI key)</div>
   <p>The agent sends its claims as meta transactions (NEP-366) through a relayer that only forwards <code>request_payment</code>, so on that path the agent pays no gas (the console and the MCP server can also call directly, with a little NEAR on the agent). An MCP server (<code>bursar mcp</code>) lets any assistant drive it with the agent's powers, plus two housekeeping tools that use the executor's and the owner's keys when the environment has them: submit an invoice, list payments, explain a decision, verify a receipt, sync the DAO, cancel a held payment.</p>
-  <h3>What it is built with</h3>
+  <h3 class="sub">What it is built with</h3>
   <p>No template or boilerplate. Contracts: near-sdk 5 (near-contract-standards for the test token). App: near-api-js 7, borsh, @noble/curves and @noble/hashes, @phala/dcap-qvl for the TDX quote, the NEAR Intents 1-Click SDK, the MCP SDK with zod; TypeScript, tsx, vitest. Pages: @fastnear/near-connect for the wallets, @noble, pdf.js, dcap-qvl, SheetJS, qrcode-generator, from CDNs pinned by version, with integrity hashes where the import map allows (dcap-qvl comes from esm.sh by version only), and the Meteor SDK bundled for the extension. Relay: the Cloudflare Workers runtime, no dependencies. Sample invoices: reportlab. Tools: poppler, near-cli-rs. The reading at runtime is a model on NEAR AI Cloud inside a TDX enclave; it reads, it never decides. The code was written by one person with Claude Code as pair programmer, under their direction and review; the README lists it all.</p>
-</section>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#09"><span class="faint">Previous</span> 09 Explorer and registry</a><a class="btn btn-ghost small next" href="#11"><span class="faint">Next</span> 11 Custody and limits</a></nav>
+</article>
 
-<section id="limits">
-  <div class="eyebrow">[ 11 ]</div>
-  <h2>Custody and limits</h2>
-  <ul>
+<article class="article" id="11" data-alias="limits" aria-labelledby="t11">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> Custody and limits</p>
+  <div class="head">
+    <span class="sec-label">11</span>
+    <h2 class="h2" id="t11">Custody and limits</h2>
+    <p class="lead">Where the guarantees stop, said plainly.</p>
+  </div>
+  <div class="body">
+    <ul>
     <li>Software, not a payment service. You run it on your own accounts with your own keys; no money passes through Bursar (invoices do only through the shared demo reading relay). USDC only.</li>
     <li>The AI never chooses an address. The executor cannot redirect funds. A payout changed by an operator pays nothing until the owner confirms it, and a changed payout on an invoice is a block.</li>
     <li>Cross-chain payouts through NEAR Intents are mainnet only; on testnet the Base vendor stops at Queued unless the console runs with ?intents=stub, which plays 1Click with the contract's test signer.</li>
@@ -237,35 +332,76 @@ npm run dev verify 1                             # the receipt behind payment 1 
     <li>The wallet sign-in adds a function-call key. Creating the DAO and inviting collaborators need NEAR deposits, which the payer account kept from creation funds on testnet.</li>
     <li>Sample invoices are fictional. Nothing in the demo is a real person or company.</li>
     <li>Paying vendors in a stablecoin is regulated differently from country to country: in some it is unrestricted, in some it must be reported, in a few it is not allowed for businesses. Bursar does not check this and cannot: the company runs the contract on its own accounts, with its own keys, under its own law. Check your jurisdiction before you fund a treasury.</li>
-  </ul>
-  <h3>Where invoices are already structured</h3>
-  <p>More and more countries mandate electronic invoices in a fixed format: SDI and FatturaPA in Italy, Peppol across much of Europe and in Singapore, Australia and New Zealand, Factur-X and ZUGFeRD in France and Germany, Verifactu in Spain, KSeF in Poland, CFDI in Mexico, NF-e in Brazil, DTE in Chile, the GST e-invoice in India, Fatoora in Saudi Arabia, e-Fatura in Turkey. The United States has no mandate; PDFs by email are the norm, with Peppol-style exchange only starting. Where a structured format exists, the vendor, the amount, the tax ids and the payment details come as fields, not as a picture. Bursar's reading step is built for the PDF that still dominates everywhere else; where a structured invoice exists, that step becomes optional: a deterministic parser builds the claim, and the contract decides exactly as it does today. This is the direction after the hackathon, not something the demo does.</p>
-</section>
-
-<section id="glossary" style="border-bottom:0">
-  <div class="eyebrow">[ 12 ]</div>
-  <h2>Glossary</h2>
-  <div class="rule">
-    <span class="k">treasury</span><span>The company's policy contract, a NEAR account that holds the USDC and the rules.</span>
-    <span class="k">agent</span><span>The process (or the browser) that reads invoices and asks the contract to pay. One key, one method.</span>
-    <span class="k">executor</span><span>The process that settles cross-chain payments the contract queued. No AI, no choice of destination.</span>
-    <span class="k">payout</span><span>Where a vendor gets paid: a NEAR account, or a chain and an address. Recorded by the owner, compared on every invoice.</span>
-    <span class="k">hold</span><span>A payment that waits for a person: over the threshold, outside the orders, flagged by the model, with a tax id, buyer or withholding that does not match the record, past the vendor's daily autopay allowance, to a payout the owner has not confirmed, or from a chat bound to another vendor.</span>
-    <span class="k">receipt</span><span>The signed, attested record of one reading inside the enclave.</span>
-    <span class="k">TEE</span><span>Trusted execution environment: hardware-isolated compute (Intel TDX here) that proves what ran with an attestation quote.</span>
-    <span class="k">registry</span><span>The public list of treasuries the explorer and the sign-in page read.</span>
+    </ul>
+    <h3 class="sub">Where invoices are already structured</h3>
+    <p>More and more countries mandate electronic invoices in a fixed format: SDI and FatturaPA in Italy, Peppol across much of Europe and in Singapore, Australia and New Zealand, Factur-X and ZUGFeRD in France and Germany, Verifactu in Spain, KSeF in Poland, CFDI in Mexico, NF-e in Brazil, DTE in Chile, the GST e-invoice in India, Fatoora in Saudi Arabia, e-Fatura in Turkey. The United States has no mandate; PDFs by email are the norm, with Peppol-style exchange only starting. Where a structured format exists, the vendor, the amount, the tax ids and the payment details come as fields, not as a picture. Bursar's reading step is built for the PDF that still dominates everywhere else; where a structured invoice exists, that step becomes optional: a deterministic parser builds the claim, and the contract decides exactly as it does today. This is the direction after the hackathon, not something the demo does.</p>
   </div>
-</section>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#10"><span class="faint">Previous</span> 10 Run it yourself</a><a class="btn btn-ghost small next" href="#12"><span class="faint">Next</span> 12 Glossary</a></nav>
+</article>
+
+<article class="article" id="12" data-alias="glossary" aria-labelledby="t12">
+  <p class="crumb"><a href="#01">Docs</a> <span aria-hidden="true">/</span> Glossary</p>
+  <div class="head">
+    <span class="sec-label">12</span>
+    <h2 class="h2" id="t12">Glossary</h2>
+    <p class="lead">The words this manual uses.</p>
+  </div>
+  <div class="body">
+    <div class="kv">
+    <span class="k">treasury</span><span class="v">The company's policy contract, a NEAR account that holds the USDC and the rules.</span>
+    <span class="k">agent</span><span class="v">The process (or the browser) that reads invoices and asks the contract to pay. One key, one method.</span>
+    <span class="k">executor</span><span class="v">The process that settles cross-chain payments the contract queued. No AI, no choice of destination.</span>
+    <span class="k">payout</span><span class="v">Where a vendor gets paid: a NEAR account, or a chain and an address. Recorded by the owner, compared on every invoice.</span>
+    <span class="k">hold</span><span class="v">A payment that waits for a person: over the threshold, outside the orders, flagged by the model, with a tax id, buyer or withholding that does not match the record, past the vendor's daily autopay allowance, to a payout the owner has not confirmed, or from a chat bound to another vendor.</span>
+    <span class="k">receipt</span><span class="v">The signed, attested record of one reading inside the enclave.</span>
+    <span class="k">TEE</span><span class="v">Trusted execution environment: hardware-isolated compute (Intel TDX here) that proves what ran with an attestation quote.</span>
+    <span class="k">registry</span><span class="v">The public list of treasuries the explorer and the sign-in page read.</span>
+    </div>
+  </div>
+  <nav class="pager" aria-label="Previous and next"><a class="btn btn-ghost small prev" href="#11"><span class="faint">Previous</span> 11 Custody and limits</a></nav>
+</article>
 </main>
 </div>
+</section>
 
-<footer>Bursar is software, not a payment service. Funds stay in the company's own contract, with the company's keys. USDC only. Sample invoices are fictional. <a href="privacy" style="color:inherit">Privacy</a></footer>
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in the company's own contract, under the company's keys. USDC only. Sample invoices are fictional.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
+
 <script>
-const links = [...document.querySelectorAll("#toc a")];
-const obs = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) for (const a of links) a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); }, { rootMargin: "-20% 0px -70% 0px" });
-for (const s of document.querySelectorAll(".doc > section")) obs.observe(s);
+// One article at a time, chosen by the hash (#03). The old anchors (#rules, ...) still land on their section.
+(() => {
+  const arts = [...document.querySelectorAll("#doc .article")];
+  const links = [...document.querySelectorAll("#toc a[data-for]")];
+  const alias = Object.fromEntries(arts.map((a) => [a.dataset.alias, a.id]));
+  const docs = document.querySelector(".docs");
+  let first = true;
+  function show() {
+    const h = decodeURIComponent(location.hash.slice(1));
+    const id = arts.some((a) => a.id === h) ? h : alias[h] || "01";
+    for (const a of arts) a.toggleAttribute("data-on", a.id === id);
+    for (const l of links) { if (l.dataset.for === id) l.setAttribute("aria-current", "true"); else l.removeAttribute("aria-current"); }
+    const t = arts.find((a) => a.id === id).querySelector("h2").textContent;
+    document.title = id === "01" && !h ? "Bursar docs" : t + " | Bursar docs";
+    if (!first) { const y = docs.getBoundingClientRect().top + scrollY - 90; if (scrollY > y) scrollTo({ top: y, behavior: "instant" }); }
+    first = false;
+  }
+  addEventListener("hashchange", show);
+  show();
+  // the search filters the sidebar by title and body text
+  const q = document.getElementById("q"), none = document.getElementById("none");
+  const text = Object.fromEntries(arts.map((a) => [a.id, (a.querySelector(".head").textContent + " " + a.querySelector(".body").textContent).replace(/\s+/g, " ").toLowerCase()]));
+  q.addEventListener("input", () => {
+    const s = q.value.trim().toLowerCase();
+    let shown = 0;
+    for (const l of links) { const hit = !s || text[l.dataset.for].includes(s); l.hidden = !hit; shown += hit; }
+    none.hidden = shown > 0;
+  });
+  q.addEventListener("keydown", (e) => { if (e.key === "Escape") { q.value = ""; q.dispatchEvent(new Event("input")); q.blur(); } if (e.key === "Enter") { const l = links.find((x) => !x.hidden); if (l) { location.hash = l.getAttribute("href"); } } });
+  addEventListener("keydown", (e) => { if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) { e.preventDefault(); q.focus(); } });
+})();
 </script>
-<script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
-<script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>
+<script src="site.js"></script>
 </body>
 </html>

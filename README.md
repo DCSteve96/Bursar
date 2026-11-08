@@ -584,7 +584,11 @@ app/src/quote.ts      the bytes 1Click signs for a quote, rebuilt so the contrac
 app/src/mcp.ts        MCP server, ten tools (submit_invoice, list_payments, get_payment, explain_decision, orders, vendors, treasury_status, verify_attestation, sync_dao_approvals, owner_cancel_payment)
 app/src/setup.ts      one-shot environment setup
 app/test/             vitest: receipt tampering, a real gateway receipt, offline parser, money parsing, the bytes of a 1Click quote
-web/index.html        landing page: the three roles, the last decisions read live from the contract
+web/index.html        landing page: the three roles, the last decisions read live from the contract, the verifier on the demo receipt with a tamper switch
+web/how-it-works.html the six steps, the rules, the people
+web/verify.html       drop a receipt, run the checks in the browser
+web/code.html         the repository, the testnet steps, the stack
+web/site.css, web/site.js, web/verify.js  the public pages' shared styles, behaviour and receipt verifier
 web/login.html        sign in: any NEAR wallet via NEAR Connect (a treasury is created at first sign-in), an invite link, or a keys file
 web/meteor.js         Meteor through its own SDK when the browser extension is on the page (the sandboxed connector cannot see it)
 web/vendor/           the Meteor Connect SDK bundled as one ES module, with the script that rebuilds it

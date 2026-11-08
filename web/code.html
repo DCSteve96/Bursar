@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bursar code</title>
+<meta name="description" content="The Bursar repository: the policy contract, the agent, the relayer, the executor and the console, all testable on testnet.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="brand/icon-192.png">
+<meta name="theme-color" content="#0d0f0e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bursar">
+<link rel="stylesheet" href="site.css">
+<style>
+<style>
+  .page-hero { padding: 96px 0 40px; }
+  .page-hero .eyebrow { align-self: flex-start; }
+  .page-hero .wrap { display: flex; flex-direction: column; gap: 24px; max-width: 980px; margin: 0 auto; }
+  .clone { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .clone .code { flex: 1 1 360px; min-width: 0; }
+  .copy[data-state="copied"] { background: rgba(157, 240, 196, .12); color: var(--accent); border-color: rgba(157, 240, 196, .35); }
+  .tree { white-space: pre; line-height: 1.7; }
+  .tree b { color: var(--text); font-weight: 500; }
+  .tree .c { color: var(--text-4); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .step .card { display: flex; flex-direction: column; gap: 14px; }
+  .step .card .h3 { font-size: 24px; }
+  .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  .card .h3.sm { font-size: 24px; }
+  @media (max-width: 760px) { .step { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; } .step .num { width: 44px; height: 44px; font-size: 17px; } .code { font-size: 13px; } .tree { font-size: 12.5px; } }
+</style>
+</head>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works">How it works</a><a href="explorer">Live</a><a href="verify">Verify</a><a href="docs">Docs</a><a href="code" aria-current="page">Code</a></nav>
+  <a class="btn btn-ghost small" href="login">Log in</a>
+</div></header>
+
+<main>
+<section class="page-hero rel">
+  <div class="glow" style="width:480px;height:480px;background:rgba(157,240,196,.10);top:-140px;left:-120px"></div>
+  <div class="wrap rel">
+    <span class="eyebrow reveal">Code</span>
+    <h1 class="hero-h reveal">Read every line that touches the money.</h1>
+    <p class="lead reveal-2" style="max-width:720px">The policy contract, the agent, the relayer, the executor and the console. One repository, all of it testable on testnet.</p>
+    <div class="clone reveal-2">
+      <div class="code" id="cloneCmd"><span class="p">$</span> git clone https://github.com/DCSteve96/Bursar</div>
+      <button type="button" class="btn btn-ghost small copy" id="copyBtn" aria-live="polite">Copy</button>
+      <a class="btn btn-ghost small" href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+    <p class="faint reveal-3" style="font-size:15px">The build is reproducible: <span class="mono">./build.sh</span> in <span class="mono">contracts/policy</span> writes the wasm that ships in <span class="mono">web/contracts/bursar_policy.wasm</span>, 462,773 bytes (smaller if <span class="mono">wasm-opt</span> is installed). Its code hash, <span class="mono">6UbMLQ8tBEFzCV6M8rTjL8CRFVb8mkYM7LEP7WCagCKB</span>, is the one running on the mainnet treasury <span class="mono">treasury.bursar-8ccac085.near</span>.</p>
+  </div>
+</section>
+
+<section class="tight" id="inside">
+  <div class="wrap">
+    <div class="head reveal"><span class="sec-label">What's inside</span><h2 class="h2">The repository, folder by folder.</h2></div>
+    <div class="card terminal reveal" style="margin-bottom:20px">
+      <div class="term-bar"><i></i><i></i><i></i><span class="mono">tree Bursar</span></div>
+      <div class="term-body"><pre class="tree" style="margin:0;font:inherit"><b>contracts/policy</b>     <span class="c">Rust, the policy contract (near-sdk 5), with unit tests</span>
+<b>contracts/registry</b>   <span class="c">Rust, the public list of treasuries the explorer and the sign-in page read</span>
+<b>contracts/test-usdc</b>  <span class="c">Rust, throwaway NEP-141 for testnet</span>
+<b>app/src/</b>
+  config.ts          <span class="c">all configuration from env; USDC asset ids per chain</span>
+  near.ts            <span class="c">near-api-js 7 helpers, meta transactions</span>
+  ai.ts              <span class="c">NEAR AI Cloud client: attestation preflight, extraction, signed receipt</span>
+  agent.ts           <span class="c">inbox watcher (folder and Telegram approvals), PDF to PNG, claim submission</span>
+  verify.ts          <span class="c">independent receipt verification: signature, nonce, TDX quote, chain</span>
+  relayer.ts         <span class="c">NEP-366 relayer, restricted to request_payment</span>
+  executor.ts        <span class="c">NEAR Intents 1-Click routing for cross-chain vendors</span>
+  quote.ts           <span class="c">the bytes 1Click signs for a quote, rebuilt so the contract can verify them</span>
+  mcp.ts             <span class="c">MCP server, ten tools</span>
+  setup.ts           <span class="c">one-shot environment setup</span>
+  cli.ts             <span class="c">bursar setup|agent|submit|read|executor|relayer|mcp|status|verify|sync</span>
+<b>web/</b>                 <span class="c">static pages, no build: landing, login, explorer, dashboard, console, docs</span>
+<b>relay/</b>               <span class="c">Cloudflare Worker: the reading relay, the Telegram inbox and approvals</span>
+<b>invoices/</b>            <span class="c">make_invoices.py and the fictional sample invoices</span>
+<b>video/</b>               <span class="c">the demo video, a Remotion project</span></pre></div>
+    </div>
+    <div class="grid">
+      <article class="card lift reveal stack">
+        <span class="mono accent" style="font-size:13px">contracts/policy</span>
+        <h3 class="h3 sm">Policy contract</h3>
+        <p class="soft">Rust, near-sdk 5, 67 unit tests. Holds the USDC, the vendors, the limits and the orders, decides every claim, and verifies 1Click's quote signature with <span class="mono">env::ed25519_verify</span> before a cross-chain payment.</p>
+      </article>
+      <article class="card lift reveal-2 stack">
+        <span class="mono accent" style="font-size:13px">app/src/agent.ts, ai.ts</span>
+        <h3 class="h3 sm">Agent</h3>
+        <p class="soft">Watches an inbox folder and the Telegram inbox, has each PDF read in NEAR AI Cloud's TEE, builds the claim and calls <span class="mono">request_payment</span> with its one function-call key.</p>
+      </article>
+      <article class="card lift reveal-3 stack">
+        <span class="mono accent" style="font-size:13px">app/src/relayer.ts</span>
+        <h3 class="h3 sm">Relayer</h3>
+        <p class="soft">Takes the agent's NEP-366 meta transactions and pays their gas. It forwards <span class="mono">request_payment</span> from the agent and nothing else.</p>
+      </article>
+      <article class="card lift reveal stack">
+        <span class="mono accent" style="font-size:13px">app/src/executor.ts, quote.ts</span>
+        <h3 class="h3 sm">Executor</h3>
+        <p class="soft">A plain process with no AI and four methods: <span class="mono">settle</span>, <span class="mono">mark_settled</span>, <span class="mono">mark_settlement_failed</span>, <span class="mono">sync_dao_proposal</span>. It brings a 1Click quote for each queued payment; the contract checks it. Mainnet only.</p>
+      </article>
+      <article class="card lift reveal-2 stack">
+        <span class="mono accent" style="font-size:13px">web/console.html</span>
+        <h3 class="h3 sm">Console</h3>
+        <p class="soft">The back office in one static page: Overview, Invoices, Attention, Vendors, Orders, Analytics, Settings and Inbox. Renders the PDF, calls the enclave, checks the receipt and signs <span class="mono">request_payment</span> in the browser.</p>
+      </article>
+      <article class="card lift reveal-3 stack">
+        <span class="mono accent" style="font-size:13px">app/src/mcp.ts</span>
+        <h3 class="h3 sm">MCP server</h3>
+        <p class="soft">Ten tools, so any assistant can drive a treasury with the agent's powers, plus two housekeeping tools that use the executor's and the owner's keys when the environment has them.</p>
+        <div class="chips"><span class="tag mono">submit_invoice</span><span class="tag mono">list_payments</span><span class="tag mono">get_payment</span><span class="tag mono">explain_decision</span><span class="tag mono">orders</span><span class="tag mono">vendors</span><span class="tag mono">treasury_status</span><span class="tag mono">verify_attestation</span><span class="tag mono">sync_dao_approvals</span><span class="tag mono">owner_cancel_payment</span></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="tight" id="run">
+  <div class="wrap" style="max-width:980px">
+    <div class="head reveal"><span class="sec-label">Run it yourself</span><h2 class="h2">Testnet in five steps.</h2><p class="soft">Prerequisites: Rust stable with the <span class="mono">wasm32-unknown-unknown</span> target, Node 22+, poppler (<span class="mono">pdftoppm</span>, <span class="mono">pdftotext</span>), Python 3 with <span class="mono">reportlab</span>, and near-cli-rs for the accounts.</p></div>
+    <ol class="steps" style="list-style:none;margin:0;padding:0">
+      <li class="step reveal"><span class="num">1</span><article class="card">
+        <span class="kicker">Contracts</span><h3 class="h3">Build and test the contracts.</h3>
+        <div class="code">(cd contracts/policy &amp;&amp; cargo test &amp;&amp; ./build.sh)
+(cd contracts/test-usdc &amp;&amp; cargo build --release --target wasm32-unknown-unknown)
+(cd contracts/registry &amp;&amp; cargo test &amp;&amp; ./build.sh)</div>
+        <p class="soft">See <span class="mono">67 passed</span> for the policy contract and <span class="mono">bursar_policy.wasm: 462773 bytes</span>.</p>
+      </article></li>
+      <li class="step reveal"><span class="num">2</span><article class="card">
+        <span class="kicker">App</span><h3 class="h3">Install and test the app.</h3>
+        <div class="code">cd app &amp;&amp; npm install &amp;&amp; npm test</div>
+        <p class="soft">See 14 passing tests: signature recovery, receipt tampering, a real NEAR AI Cloud receipt, the offline parser, money parsing, and a real 1Click quote rebuilt byte for byte.</p>
+      </article></li>
+      <li class="step reveal"><span class="num">3</span><article class="card">
+        <span class="kicker">Accounts and deploy</span><h3 class="h3">Create three faucet accounts and run setup.</h3>
+        <div class="code">near account create-account sponsor-by-faucet-service you.testnet autogenerate-new-keypair save-to-keychain network-config testnet create
+near account create-account sponsor-by-faucet-service you-b.testnet autogenerate-new-keypair save-to-keychain network-config testnet create
+near account create-account sponsor-by-faucet-service you-c.testnet autogenerate-new-keypair save-to-keychain network-config testnet create
+near tokens you-b.testnet send-near you.testnet '9.5 NEAR' network-config testnet sign-with-keychain send
+near tokens you-c.testnet send-near you.testnet '9.5 NEAR' network-config testnet sign-with-keychain send
+npx tsx src/cli.ts setup --root you.testnet</div>
+        <p class="soft">About 25 NEAR in one account; the faucet gives 10 per account. <span class="mono">setup</span> creates the treasury, agent, executor and vendor accounts, a test USDC token and a Sputnik DAO, deploys and funds the contract, and leaves the agent a single function-call key. If it stops on a network error, run it again: it resumes.</p>
+      </article></li>
+      <li class="step reveal"><span class="num">4</span><article class="card">
+        <span class="kicker">Read the invoices</span><h3 class="h3">Start the relayer and read the invoices.</h3>
+        <div class="code">set -a; source .env.testnet; set +a
+npm run relayer &amp;
+mkdir -p ../invoices/inbox &amp;&amp; cp ../invoices/samples/0[1-4]-*.pdf ../invoices/inbox/
+npm run agent -- --once --offline</div>
+        <p class="soft">The offline parser only understands the sample invoices. Drop <span class="mono">--offline</span> to read them with NEAR AI Cloud inside the TEE (needs <span class="mono">NEAR_AI_API_KEY</span>).</p>
+      </article></li>
+      <li class="step reveal"><span class="num">5</span><article class="card">
+        <span class="kicker">Check</span><h3 class="h3">Check and verify.</h3>
+        <div class="code">npm run dev status
+npm run dev verify 1</div>
+        <p class="soft">See four decisions: paid, queued, held for the DAO, refused for a changed payout. <span class="mono">verify</span> checks the TEE receipt of payment 1, written when the invoices were read with a NEAR AI key.</p>
+      </article></li>
+    </ol>
+    <p class="soft reveal" style="margin-top:28px">The <a href="https://github.com/DCSteve96/Bursar#try-it-do-x-see-y" target="_blank" rel="noopener">README</a> has the full walkthrough, with every expected output.</p>
+  </div>
+</section>
+
+<section class="tight" id="stack">
+  <div class="wrap">
+    <article class="card reveal stack" style="gap:20px">
+      <span class="sec-label">Stack</span>
+      <h2 class="h3">What it stands on.</h2>
+      <p class="soft">No template, starter kit or boilerplate: every file was written for this project.</p>
+      <div class="chips">
+        <span class="tag mono">near-sdk 5</span><span class="tag mono">bs58</span><span class="tag mono">near-api-js 7</span><span class="tag mono">@noble/curves</span><span class="tag mono">@noble/hashes</span><span class="tag mono">@scure/base</span><span class="tag mono">borsh</span><span class="tag mono">NEAR Intents 1-Click SDK</span><span class="tag mono">MCP SDK</span><span class="tag mono">zod</span><span class="tag mono">TypeScript</span><span class="tag mono">tsx</span><span class="tag mono">vitest</span><span class="tag mono">@phala/dcap-qvl</span><span class="tag mono">pdf.js</span><span class="tag mono">SheetJS</span><span class="tag mono">qrcode-generator</span><span class="tag mono">@fastnear/near-connect</span><span class="tag mono">Cloudflare Workers</span><span class="tag mono">reportlab</span><span class="tag mono">poppler</span><span class="tag mono">near-cli-rs</span>
+      </div>
+      <div class="ctas" style="margin-top:8px">
+        <a class="btn btn-primary" href="https://github.com/DCSteve96/Bursar" target="_blank" rel="noopener">Open the repo</a>
+        <a class="btn btn-ghost" href="docs">Read the docs</a>
+      </div>
+    </article>
+  </div>
+</section>
+</main>
+
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in the company's own contract, under the company's keys. USDC only. Sample invoices are fictional.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
+<script>
+(() => {
+  const btn = document.getElementById("copyBtn"); const cmd = "git clone https://github.com/DCSteve96/Bursar"; let t = null;
+  const show = (text, state) => { btn.textContent = text; btn.dataset.state = state; clearTimeout(t); t = setTimeout(() => { btn.textContent = "Copy"; delete btn.dataset.state; }, 2000); };
+  btn.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(cmd); show("Copied", "copied"); }
+    catch { const r = document.createRange(); r.selectNodeContents(document.getElementById("cloneCmd")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); show("Press Ctrl+C", "select"); }
+  });
+})();
+</script>
+<script src="site.js"></script>
+</body>
+</html>

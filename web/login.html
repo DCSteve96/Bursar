@@ -8,7 +8,7 @@
 <meta name="description" content="Sign in to the Bursar console with your NEAR wallet (Meteor, HOT, Intear, Nightly and more) or an invite link. No password, no server. A wallet without a treasury gets one created on the spot.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="brand/icon-192.png">
@@ -16,88 +16,98 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bursar">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="site.css">
 <style>
-  body { background: var(--bone); color: var(--fg-light); color-scheme: light; min-height: 100vh; display: flex; flex-direction: column; }
-  .top { padding: 20px max(16px, env(safe-area-inset-left, 0px)); display: flex; justify-content: space-between; align-items: center; }
-  .top .wordmark { color: var(--fg-light); }
-  .top a.plain { color: var(--mute-light); text-decoration: none; font-size: 14px; }
-  .center { flex: 1; display: grid; place-items: start center; padding: 24px max(16px, env(safe-area-inset-left, 0px)) 64px; }
-  .box { width: 100%; max-width: 520px; }
-  .mark { width: 48px; height: 48px; margin: 0 auto 16px; display: block; }
-  h1 { text-align: center; font-size: 28px; }
-  .lead { text-align: center; color: var(--mute-light); margin: 8px 0 28px; }
-  .card { background: var(--paper); border: 1px solid var(--line-light); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-  .way { display: flex; flex-direction: column; gap: 10px; }
-  .way h2 { font-size: 15px; font-weight: 600; }
-  .way p { margin: 0; color: var(--mute-light); font-size: 14px; }
-  .or { display: flex; align-items: center; gap: 12px; color: var(--mute-light); font: 600 11px/1 var(--mono); letter-spacing: 0.1em; }
-  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line-light); }
-  input, select { border-color: var(--line-light); background: var(--bone); color: var(--fg-light); }
-  label > span { color: var(--mute-light); }
-  .btn-inverse { background: var(--void); color: var(--paper); }
-  .btn-ghost { color: var(--fg-light); border-color: var(--line-light); background: var(--paper); }
-  .err { color: var(--blocked-light); font-size: 13px; }
-  .fine { text-align: center; color: var(--mute-light); font-size: 13px; margin-top: 20px; line-height: 1.6; }
-  .fine a, .way a { color: inherit; }
-  .fine label { display: inline; text-decoration: underline; cursor: pointer; }
-  .net { display: flex; justify-content: center; gap: 8px; margin-bottom: 16px; }
-  .net button { font: 500 13px/1 var(--mono); padding: 8px 14px; background: var(--paper); border: 1px solid var(--line-light); color: var(--mute-light); border-radius: 4px; }
-  .net button[aria-pressed="true"] { background: var(--void); color: var(--paper); border-color: var(--void); }
-  .who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--mint); border-radius: 4px; }
-  .who .av { width: 36px; height: 36px; border-radius: 4px; background: var(--void); color: var(--signal); display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
-  .who .n { font-weight: 600; font-size: 14px; word-break: break-all; }
-  .who .r { font-size: 12px; color: var(--mute-light); }
-  .list { display: flex; flex-direction: column; gap: 8px; }
-  .list button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; background: var(--bone); border: 1px solid var(--line-light); border-radius: 4px; color: var(--fg-light); font: 500 14px var(--display); }
-  .list button:hover { border-color: var(--void); }
-  .list button .m { font: 500 12px var(--mono); color: var(--mute-light); }
-  .spin { color: var(--mute-light); font: 500 13px var(--mono); }
+  /* sign in: one centred column; the old class names (way, or, net, who, list, spin, fine, err) stay on the markup */
+  .signin { padding: 72px 0 110px; }
+  @media (max-width: 760px) { .signin { padding: 40px 0 64px; } }
+  .col { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .intro { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; margin-bottom: 8px; }
+  .intro h1 { font-size: clamp(40px, 7vw, 60px); }
+  .intro .lead { font-size: 18px; }
+  .ways { display: flex; flex-direction: column; gap: 16px; }
+  .way { display: flex; flex-direction: column; gap: 14px; }
+  .way h2 { font-size: 24px; }
+  .way p { color: var(--text-2); font-size: 15px; }
+  .way .btn { width: 100%; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .pair .btn { width: auto; }
+  .or { display: flex; align-items: center; gap: 12px; color: var(--text-4); font: 500 12px/1 var(--font-mono); letter-spacing: .12em; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .fine { color: var(--text-3); font-size: 14px; line-height: 1.7; }
+  .col > .fine { text-align: center; }
+  .err { margin-top: 0; overflow-wrap: anywhere; }
+  .spin { color: var(--text-3); font: 500 14px/1.5 var(--font-mono); }
+  .who { gap: 14px; flex-wrap: nowrap; }
+  .who .av { width: 44px; height: 44px; border-radius: 14px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font: 700 15px var(--font-display); flex: none; }
+  .who .n { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+  .who .r { font: 13px/1.4 var(--font-mono); color: var(--text-4); }
+  /* the treasury list: the script writes plain buttons, styled here as site.css rows */
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .list button { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; min-height: 56px; text-align: left; padding: 14px 22px; border-radius: var(--radius-row); background: #141816; border: 1px solid #20251f; color: var(--text); font: 600 16px/1.3 var(--font-body); cursor: pointer; transition: border-color .3s, transform .3s var(--ease); }
+  .list button:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .list button:disabled { opacity: .5; cursor: default; transform: none; }
+  .list button .m { font: 500 13px var(--font-mono); color: var(--text-3); overflow-wrap: anywhere; }
+  .another { align-items: center; font-size: 14px; }
+  .another a { display: inline-flex; align-items: center; min-height: 44px; }
 </style>
 </head>
-<body>
-<div class="top">
-  <a class="wordmark" href="./"><img src="brand/mark.svg" alt="" width="24" height="24">Bursar</a>
-  <a class="plain" href="./">Back to the site</a>
-</div>
-<div class="center"><div class="box">
-  <img class="mark" src="brand/mark.svg" alt="">
-  <h1 id="title">Log in</h1>
-  <p class="lead" id="lead">Your company's console. No password: your NEAR wallet, or the invite a colleague sent you.</p>
+<body class="motion">
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Bursar"><span class="mark"><img src="brand/mark.svg" alt=""></span>Bursar</a>
+  <nav class="nav" aria-label="Main"><a href="how-it-works">How it works</a><a href="explorer">Live</a><a href="verify">Verify</a><a href="docs">Docs</a><a href="code">Code</a></nav>
+  <a class="btn btn-ghost small" href="./">Back to the site</a>
+</div></header>
 
-  <div class="net" id="net" role="group" aria-label="Network"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
+<main class="signin"><div class="wrap"><div class="col">
+  <div class="intro">
+    <span class="eyebrow reveal">Sign in</span>
+    <h1 class="hero-h reveal" id="title">Log in</h1>
+    <p class="lead reveal-2" id="lead">Your company's console. No password: your NEAR wallet, or the invite a colleague sent you.</p>
+    <div class="net seg" id="net" role="group" aria-label="Network"><button type="button" data-net="testnet" aria-pressed="true">testnet</button><button type="button" data-net="mainnet" aria-pressed="false">mainnet</button></div>
+  </div>
 
-  <div class="card" id="choose">
-    <div class="way">
+  <div class="ways" id="choose">
+    <div class="card way">
       <h2>Continue with your NEAR wallet</h2>
       <p>Meteor, HOT, Intear, Nightly, Near Mobile and the other NEAR wallets. The wallet signs you in. If your account owns a treasury, the console opens it. If it owns none yet, Bursar creates one on the spot: on testnet the faucet pays and you pay nothing; on mainnet your wallet pays about 7 NEAR, most of it the contract's storage on your own account.</p>
-      <button id="wGo" type="button" class="btn-signal">Continue with NEAR wallet</button>
+      <button id="wGo" type="button" class="btn-signal btn btn-primary">Continue with NEAR wallet</button>
       <p class="fine" id="wExt" hidden></p>
       <p>No NEAR wallet yet? <a href="https://meteorwallet.app" target="_blank" rel="noopener">Meteor</a>, <a href="https://wallet.intear.tech" target="_blank" rel="noopener">Intear</a> or <a href="https://nightly.app" target="_blank" rel="noopener">Nightly</a> take a minute to set up, and testnet accounts are free. <span id="wNetNote">On testnet, HOT and OKX are not available: they run on mainnet only.</span></p>
-      <div id="wErr" class="err" hidden></div>
+      <div id="wErr" class="err verdict bad" hidden></div>
     </div>
     <div class="or">OR</div>
-    <div class="way">
+    <div class="card way">
       <h2>Open an invite link</h2>
       <p>A colleague invited you to approve invoices or manage vendors. Open the link, or paste it here. It signs you in with exactly the role they chose.</p>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="iLink" placeholder="https://bursar.network/console#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse">Open</button></div>
-      <div id="iErr" class="err" hidden></div>
+      <div class="pair"><input id="iLink" placeholder="https://bursar.network/console#invite=..." autocomplete="off"><button id="iGo" type="button" class="btn-inverse btn btn-ghost">Open</button></div>
+      <div id="iErr" class="err verdict bad" hidden></div>
     </div>
   </div>
 
-  <div class="card" id="back" hidden>
-    <div class="who"><div class="av" id="av"></div><div><div class="n" id="acct"></div><div class="r" id="acctNet"></div></div></div>
+  <div class="ways" id="back" hidden>
+    <div class="row who"><div class="av" id="av"></div><div><div class="n" id="acct"></div><div class="r" id="acctNet"></div></div></div>
     <div id="lookup" class="spin">looking for your treasuries...</div>
-    <div id="have" hidden class="way"><h2>Your treasuries</h2><p>Pick one. The wallet will ask you to approve one transaction: it adds a key to this browser limited to that treasury, which signs payment requests, orders, approvals and cancellations, DAO proposals, balance sync and the vault, never a vendor or a payout, a limit, an operator, the DAO or a withdrawal: those the wallet signs, and shows you first.</p><div class="list" id="list"></div><div id="keyWait" class="spin" hidden>waiting for the wallet to approve the key...</div></div>
-    <div id="none" hidden class="way"><h2>No treasury yet</h2><p id="noneText">This account owns no Bursar treasury. Create it now: Bursar funds the accounts and the contract storage, registers four demo vendors and mints test USDC. About a minute, nothing to pay.</p><button id="createGo" type="button" class="btn-signal">Create my treasury</button></div>
-    <div id="offered" hidden class="way"><h2>Was a treasury offered to you?</h2><p>The list above shows only the treasuries this account owns. An owner who offered you theirs (Settings, Ownership) gives you its account name: the page checks the offer on the contract, adds a key for it, and the console shows "Accept ownership".</p><div style="display:grid;grid-template-columns:1fr auto;gap:10px"><input id="offAcct" placeholder="treasury.their-company.testnet" autocomplete="off"><button id="offGo" type="button" class="btn-inverse">Open it</button></div></div>
-    <div id="bErr" class="err" hidden></div>
-    <p class="way" style="margin:0"><a href="#" id="another" style="font-size:13px">Use another account</a></p>
+    <div id="have" hidden class="card way"><h2>Your treasuries</h2><p>Pick one. The wallet will ask you to approve one transaction: it adds a key to this browser limited to that treasury, which signs payment requests, orders, approvals and cancellations, DAO proposals, balance sync and the vault, never a vendor or a payout, a limit, an operator, the DAO or a withdrawal: those the wallet signs, and shows you first.</p><div class="list rows" id="list"></div><div id="keyWait" class="spin" hidden>waiting for the wallet to approve the key...</div></div>
+    <div id="none" hidden class="card way"><h2>No treasury yet</h2><p id="noneText">This account owns no Bursar treasury. Create it now: Bursar funds the accounts and the contract storage, registers four demo vendors and mints test USDC. About a minute, nothing to pay.</p><button id="createGo" type="button" class="btn-signal btn btn-primary">Create my treasury</button></div>
+    <div id="offered" hidden class="card way"><h2>Was a treasury offered to you?</h2><p>The list above shows only the treasuries this account owns. An owner who offered you theirs (Settings, Ownership) gives you its account name: the page checks the offer on the contract, adds a key for it, and the console shows "Accept ownership".</p><div class="pair"><input id="offAcct" placeholder="treasury.their-company.testnet" autocomplete="off"><button id="offGo" type="button" class="btn-inverse btn btn-ghost">Open it</button></div></div>
+    <div id="bErr" class="err verdict bad" hidden></div>
+    <p class="way another"><a href="#" id="another">Use another account</a></p>
   </div>
 
-  <p class="fine">Just looking? <a href="console#settings" id="demoLink">Open the README demo, read-only</a>.<br>Have a keys file from an earlier treasury? <label for="kFile">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">. No wallet at all? <a href="console#start">Try it with throwaway keys</a>.</p>
-  <div id="kErr" class="err" hidden style="text-align:center"></div>
-</div></div>
+  <div class="card way">
+    <p>Have a keys file from an earlier treasury?</p>
+    <label for="kFile" class="btn btn-ghost small">Use it</label><input id="kFile" type="file" accept="application/json" style="display:none">
+    <div id="kErr" class="err verdict bad" hidden></div>
+  </div>
+
+  <p class="fine">Just looking? <a href="console#settings" id="demoLink">Open the README demo, read-only</a>.<br>No wallet at all? <a href="console#start">Try it with throwaway keys</a>.</p>
+</div></div></main>
+
+<footer class="site"><div class="wrap">
+  <p style="max-width:640px">Bursar is software, not a payment service. Funds stay in the company's own contract, under the company's keys. USDC only. Sample invoices are fictional.</p>
+  <a href="privacy">Privacy</a>
+</div></footer>
 
 <script src="contracts/builds.js"></script>
 <script type="importmap">
@@ -279,5 +289,6 @@ $("#kFile").addEventListener("change", async (e) => {
 </script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
 <script>/* Opened as a local file, the short page addresses the site serves need their .html. */ if (location.protocol === "file:") document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const m = /^(console|login|explorer|dashboard|docs|index|privacy|app)([?#].*)?$/.exec(a.getAttribute("href")); if (m) a.setAttribute("href", m[1] + ".html" + (m[2] || "")); }, true);</script>
+<script src="site.js"></script>
 </body>
 </html>
