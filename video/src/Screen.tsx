@@ -12,8 +12,8 @@ const SHOW_W = 1600, SHOW_H = 1000;
 const LEFT = (1920 - SHOW_W) / 2, TOP = (1080 - SHOW_H) / 2;
 
 type Segment = (typeof data.segments)[number];
-type Zoom = Segment["zooms"][number];
-type Cap = Segment["captions"][number];
+type Zoom = { readonly at: number; readonly ms: number; readonly scale: number; readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+type Cap = { readonly at: number; readonly text: string };
 
 const ease = Easing.bezier(0.4, 0, 0.2, 1);
 
@@ -64,10 +64,28 @@ const Zoomed: React.FC<{ readonly zooms: readonly Zoom[]; readonly children: Rea
   );
 };
 
-/** One segment of the capture: its clips back to back (the waits cut out), its captions and zooms. */
-export const Screen: React.FC<{ readonly seg: number }> = ({ seg }) => {
+// A window of a segment, in play seconds: its clips sliced, its captions and zooms shifted to the window's start.
+const windowOf = (s: Segment, from: number, to: number) => {
+  const clips: { from: number; to: number }[] = [];
+  let acc = 0;
+  for (const c of s.clips) {
+    const len = c.to - c.from, a = Math.max(from, acc), b = Math.min(to, acc + len);
+    if (b > a) clips.push({ from: c.from + (a - acc), to: c.from + (b - acc) });
+    acc += len;
+  }
+  const inside = <T extends { readonly at: number }>(m: T) => m.at >= from - 0.05 && m.at < to;
+  return {
+    clips,
+    captions: s.captions.filter(inside).map((c) => ({ ...c, at: Math.max(0, c.at - from) })),
+    zooms: s.zooms.filter(inside).map((z) => ({ ...z, at: Math.max(0, z.at - from) })),
+  };
+};
+
+/** One segment of the capture, or a window of it (`from` and `to` in the segment's play seconds): its clips back to
+ *  back (the waits cut out), its captions and zooms. */
+export const Screen: React.FC<{ readonly seg: number; readonly from?: number; readonly to?: number }> = ({ seg, from = 0, to }) => {
   const { fps } = useVideoConfig();
-  const s: Segment = data.segments[seg];
+  const s = windowOf(data.segments[seg], from, to ?? data.segments[seg].seconds);
   return (
     <AbsoluteFill style={{ background: "radial-gradient(1300px 900px at 50% 38%, #1a2a21 0%, #0a0c0b 70%)" }}>
       <Zoomed zooms={s.zooms}>

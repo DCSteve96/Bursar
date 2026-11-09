@@ -184,3 +184,24 @@ export const SlideClose: React.FC = () => (
     <Reveal i={4} style={{ fontFamily: theme.display, fontSize: 44, fontWeight: 700, letterSpacing: "-0.02em", marginTop: 56 }}>The AI reads. <span style={{ color: theme.signal }}>The contract decides.</span> <span style={{ color: theme.mute }}>A dumb executor moves the money.</span></Reveal>
   </Frame>
 );
+
+// ---- the short cut (under 2:20, the length X takes from any account): one slide in, one slide out
+
+export const SlideHook: React.FC = () => (
+  <Frame foot="BURSAR, AN AI TREASURER ON NEAR">
+    <Eyebrow i={0}>The problem</Eyebrow>
+    <Reveal i={1} style={{ fontFamily: theme.display, fontSize: 92, lineHeight: 1.04, letterSpacing: "-0.03em", fontWeight: 700, color: theme.blocked, marginBottom: 36 }}>&ldquo;Please note our new bank details.&rdquo;</Reveal>
+    <Reveal i={2} style={{ fontSize: 40, lineHeight: 1.35, color: theme.soft, maxWidth: 1450 }}>Companies pay fake invoices because whoever pays can be fooled. Hand the job to an AI with the keys and it can be fooled faster.</Reveal>
+    <Reveal i={4} style={{ fontFamily: theme.display, fontSize: 56, fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.12, marginTop: 64 }}>So the AI only reads. <span style={{ color: theme.signal }}>The company&apos;s NEAR contract decides.</span></Reveal>
+  </Frame>
+);
+
+export const SlideCloseShort: React.FC = () => (
+  <Frame foot="BUILT AT THE NEAR HACKATHON, NOVEMBER 2026">
+    <Reveal i={0}><Mark /></Reveal>
+    <Reveal i={1} style={{ fontFamily: theme.display, fontSize: 96, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1, margin: "44px 0 36px" }}>bursar.network</Reveal>
+    <Reveal i={2} style={{ fontSize: 36, lineHeight: 1.4, color: theme.soft, maxWidth: 1450 }}>Done on NEAR mainnet with real USDC on 2 and 3 November: every step is a public transaction. 67 tests on the contract. Open source.</Reveal>
+    <Reveal i={3} style={{ fontSize: 36, lineHeight: 1.4, color: theme.soft, maxWidth: 1450, marginTop: 18 }}>Software, not a payment service. Funds stay in the company&apos;s own contract, with the company&apos;s keys.</Reveal>
+    <Reveal i={4} style={{ fontFamily: theme.display, fontSize: 44, fontWeight: 700, letterSpacing: "-0.02em", marginTop: 52 }}>The AI reads. <span style={{ color: theme.signal }}>The contract decides.</span> <span style={{ color: theme.mute }}>A dumb executor moves the money.</span></Reveal>
+  </Frame>
+);
