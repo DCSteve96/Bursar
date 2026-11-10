@@ -1,0 +1,97 @@
+{
+  "comment": "The short cut for the post on X. Scenes in order: a slide (hook, close) with its seconds, or a window of a capture segment (seg, from and to in the segment's play seconds, see data.ts; to null is the segment's end). Narration: one line per recorded clip, `at` in seconds from the start of its scene; `say` is what the voice reads when it differs from the subtitle `text`. voice.cjs reads this file too.",
+  "scenes": [
+    {
+      "name": "The problem",
+      "slide": "hook",
+      "seconds": 10.5
+    },
+    {
+      "name": "Paid, then the fraud blocked",
+      "seg": 0,
+      "from": 25.2,
+      "to": null
+    },
+    {
+      "name": "Held and approved, then Base",
+      "seg": 1,
+      "from": 0,
+      "to": 50.6
+    },
+    {
+      "name": "One byte",
+      "seg": 2,
+      "from": 10.4,
+      "to": null
+    },
+    {
+      "name": "Close",
+      "slide": "close",
+      "seconds": 13
+    }
+  ],
+  "narration": [
+    {
+      "scene": 0,
+      "at": 0.6,
+      "text": "Companies pay fake invoices because whoever pays can be fooled. In Bursar, the AI only reads. The company's NEAR contract decides."
+    },
+    {
+      "scene": 1,
+      "at": 0.4,
+      "text": "An invoice arrives. It is read inside a NEAR AI Cloud enclave, which attests itself and signs what it read. The signature is verified right here, in the page."
+    },
+    {
+      "scene": 1,
+      "at": 13.8,
+      "text": "The agent's key can only ask. The contract checks vendor, payout, caps and orders, and pays in the same transaction. Nobody had to look."
+    },
+    {
+      "scene": 1,
+      "at": 25.8,
+      "text": "Next invoice, same vendor, with a note: please use our new bank details. The classic fraud. Will the contract notice?"
+    },
+    {
+      "scene": 1,
+      "at": 39.3,
+      "text": "Blocked. That payout is not the one the owner registered. No money moved."
+    },
+    {
+      "scene": 2,
+      "at": 1.0,
+      "text": "A law firm's invoice: 9,800 USDC. That is above the threshold the owner set, so the contract will not pay it on its own.",
+      "say": "A law firm's invoice: nine thousand eight hundred USDC. That is above the threshold the owner set, so the contract will not pay it on its own."
+    },
+    {
+      "scene": 2,
+      "at": 15.9,
+      "text": "Held for a person. The owner approves with their own key, and only then it is paid. The approval is on chain too."
+    },
+    {
+      "scene": 2,
+      "at": 29.8,
+      "text": "This vendor is paid on Base, another chain. Same reading, same checks."
+    },
+    {
+      "scene": 2,
+      "at": 44.1,
+      "text": "Queued. On mainnet, NEAR Intents settles it on a quote the contract verifies."
+    },
+    {
+      "scene": 3,
+      "at": 0.3,
+      "text": "Every reading leaves a receipt anyone can check, right in the browser."
+    },
+    {
+      "scene": 3,
+      "at": 7.3,
+      "text": "Change a single byte, and the signature fails."
+    },
+    {
+      "scene": 4,
+      "at": 0.6,
+      "text": "Bursar. The AI reads. The contract decides. A dumb executor moves the money. Proven on NEAR mainnet with real USDC. Try it at bursar.network.",
+      "say": "Bursar. The AI reads. The contract decides. A dumb executor moves the money. Proven on NEAR mainnet with real USDC. Try it at bursar dot network."
+    }
+  ]
+}

@@ -13,7 +13,7 @@ const LEFT = (1920 - SHOW_W) / 2, TOP = (1080 - SHOW_H) / 2;
 
 type Segment = (typeof data.segments)[number];
 type Zoom = { readonly at: number; readonly ms: number; readonly scale: number; readonly x: number; readonly y: number; readonly w: number; readonly h: number };
-type Cap = { readonly at: number; readonly text: string };
+type Cap = { readonly at: number; readonly text: string; readonly until?: number };
 
 const ease = Easing.bezier(0.4, 0, 0.2, 1);
 
@@ -42,10 +42,11 @@ const Caption: React.FC<{ readonly caps: readonly Cap[] }> = ({ caps }) => {
   if (!cur) return null;
   const age = second - cur.at;
   const next = caps.find((c) => c.at > cur!.at);
-  const left = next ? next.at - second : 99;
+  const left = Math.min(next ? next.at - second : 99, cur.until === undefined ? 99 : cur.until - second);
   const inP = interpolate(age, [0, 0.45], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.bezier(0.16, 1, 0.3, 1) });
   const outP = interpolate(left, [0, 0.3], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const p = Math.min(inP, outP);
+  if (p <= 0) return null;
   return (
     <div style={{ position: "absolute", left: 0, right: 0, bottom: 40, display: "flex", justifyContent: "center", opacity: p, translate: `0px ${(1 - p) * 24}px` }}>
       <div style={{ maxWidth: 1420, padding: "20px 34px 22px", background: "rgba(13,15,14,.9)", color: theme.text, fontFamily: theme.sans, fontSize: 30, lineHeight: 1.38, fontWeight: 500, borderRadius: 20, border: `1px solid ${theme.line}`, boxShadow: `0 14px 50px rgba(0,0,0,.5), inset 4px 0 0 ${theme.signal}` }}>{cur.text}</div>
@@ -82,8 +83,9 @@ const windowOf = (s: Segment, from: number, to: number) => {
 };
 
 /** One segment of the capture, or a window of it (`from` and `to` in the segment's play seconds): its clips back to
- *  back (the waits cut out), its captions and zooms. */
-export const Screen: React.FC<{ readonly seg: number; readonly from?: number; readonly to?: number }> = ({ seg, from = 0, to }) => {
+ *  back (the waits cut out), its captions and zooms. `captions` replaces the capture's own (at in seconds from the
+ *  window's start). */
+export const Screen: React.FC<{ readonly seg: number; readonly from?: number; readonly to?: number; readonly captions?: readonly Cap[] }> = ({ seg, from = 0, to, captions }) => {
   const { fps } = useVideoConfig();
   const s = windowOf(data.segments[seg], from, to ?? data.segments[seg].seconds);
   return (
@@ -97,7 +99,7 @@ export const Screen: React.FC<{ readonly seg: number; readonly from?: number; re
           ))}
         </Series>
       </Zoomed>
-      <Caption caps={s.captions} />
+      <Caption caps={captions ?? s.captions} />
     </AbsoluteFill>
   );
 };

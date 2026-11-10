@@ -2,10 +2,11 @@ import React from "react";
 import { Audio } from "@remotion/media";
 import { TransitionSeries, linearTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
-import { AbsoluteFill, interpolate, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { SlideClose, SlideCloseShort, SlideHook, SlideHow, SlideIntro, SlideNever, SlideOutcomes, SlideProblem, SlideProof } from "./Slides";
 import { Screen } from "./Screen";
 import { data } from "./data";
+import short from "./short.json";
 
 export const FPS = 30;
 const T = 20; // frames of crossfade between scenes
@@ -71,33 +72,63 @@ export const Bursar: React.FC = () => {
 
 // ---- the short cut for the post on X: the problem in one slide, then straight to a real action and its result.
 // The hackathon's guidance for the demo ("skip long intros, architecture slides, and setup") and the 140 seconds X
-// takes from any account. Windows are play seconds inside the capture's segments (see data.ts).
-const SHORT: readonly { readonly name: string; readonly seconds: number; readonly seg?: number; readonly from?: number }[] = [
-  { name: "The problem", seconds: 7 },
-  { name: "Paid, then the fraud blocked", seg: 0, from: 25.2, seconds: data.segments[0].seconds - 25.2 },
-  { name: "Held and approved, then Base", seg: 1, from: 0, seconds: 50.6 },
-  { name: "One byte", seg: 2, from: 10.4, seconds: data.segments[2].seconds - 10.4 },
-  { name: "Close", seconds: 8 },
-];
-export const SHORT_TOTAL_FRAMES = Math.round(SHORT.reduce((a, s) => a + s.seconds * FPS, 0) - (SHORT.length - 1) * T);
+// takes from any account. Scenes and narration are in short.json; the narrator's clips (public/voice, made by
+// voice.cjs from an ElevenLabs recording) are optional: without them the video is the same, with music only.
+export type VoiceClip = { readonly file: string; readonly seconds: number } | null;
+type ShortScene = { readonly name: string; readonly slide?: string; readonly seconds?: number; readonly seg?: number; readonly from?: number; readonly to?: number | null };
+type Line = { readonly scene: number; readonly at: number; readonly text: string; readonly say?: string };
+const SCENES_SHORT = short.scenes as readonly ShortScene[];
+const LINES = short.narration as readonly Line[];
+const secondsOf = (s: ShortScene) => s.seg === undefined ? s.seconds! : (s.to ?? data.segments[s.seg].seconds) - (s.from ?? 0);
+const framesOf = (s: ShortScene) => Math.round(secondsOf(s) * FPS);
+// the frame every scene starts at: each crossfade overlaps the scene before it
+const STARTS = SCENES_SHORT.map((_, i) => SCENES_SHORT.slice(0, i).reduce((a, s) => a + framesOf(s) - T, 0));
+export const SHORT_TOTAL_FRAMES = STARTS[STARTS.length - 1] + framesOf(SCENES_SHORT[SCENES_SHORT.length - 1]);
+const lineFrame = (l: Line) => STARTS[l.scene] + Math.round(l.at * FPS);
+// how long a line stays on screen as a subtitle: its clip, or a reading time when there is no voice
+const lineSeconds = (l: Line, v: VoiceClip | undefined) => v ? v.seconds + 0.5 : l.text.split(" ").length / 2.6 + 1.2;
 
-export const BursarShort: React.FC = () => {
-  const { fps } = useVideoConfig();
-  const f = (i: number) => Math.round(SHORT[i].seconds * fps);
-  const win = (i: number) => <Screen seg={SHORT[i].seg!} from={SHORT[i].from} to={SHORT[i].from! + SHORT[i].seconds} />;
+// Music under the narrator: full between the lines, down to a third while a clip plays.
+const ShortMusic: React.FC<{ readonly voice: readonly VoiceClip[] }> = ({ voice }) => {
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames } = useVideoConfig();
+  const base = interpolate(frame, [0, 2 * fps, durationInFrames - 5 * fps, durationInFrames - 1], [0, 0.4, 0.4, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  let duck = 0;
+  LINES.forEach((l, i) => {
+    const v = voice[i]; if (!v) return;
+    const a = lineFrame(l), b = a + v.seconds * fps;
+    duck = Math.max(duck, Math.min(interpolate(frame, [a - 0.4 * fps, a], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }), interpolate(frame, [b, b + 0.6 * fps], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })));
+  });
+  return <Audio src={staticFile("music.mp3")} volume={base * (1 - 0.68 * duck)} />;
+};
+
+export const BursarShort: React.FC<{ readonly voice: readonly VoiceClip[] }> = ({ voice }) => {
+  const scene = (i: number) => {
+    const s = SCENES_SHORT[i];
+    if (s.slide === "hook") return <SlideHook />;
+    if (s.slide === "close") return <SlideCloseShort />;
+    // the subtitles of a window are the narrator's lines, so the video reads the same with the sound off
+    const captions = LINES.map((l, k) => ({ l, k })).filter(({ l }) => l.scene === i).map(({ l, k }) => ({ at: l.at, text: l.text, until: l.at + lineSeconds(l, voice[k]) }));
+    return <Screen seg={s.seg!} from={s.from ?? 0} to={(s.from ?? 0) + secondsOf(s)} captions={captions} />;
+  };
   return (
     <AbsoluteFill style={{ background: "#0d0f0e" }}>
-      <Music />
+      <ShortMusic voice={voice} />
+      {LINES.map((l, i) => voice[i] ? (
+        <Sequence key={i} name={`Voice ${i + 1}`} from={lineFrame(l)} durationInFrames={Math.ceil(voice[i]!.seconds * FPS) + 3}>
+          <Audio src={staticFile(voice[i]!.file)} />
+        </Sequence>
+      ) : null)}
       <TransitionSeries>
-        <TransitionSeries.Sequence name={SHORT[0].name} durationInFrames={f(0)}><SlideHook /></TransitionSeries.Sequence>
+        <TransitionSeries.Sequence name={SCENES_SHORT[0].name} durationInFrames={framesOf(SCENES_SHORT[0])}>{scene(0)}</TransitionSeries.Sequence>
         <TransitionSeries.Transition presentation={fade()} timing={linearTiming({ durationInFrames: T })} />
-        <TransitionSeries.Sequence name={SHORT[1].name} durationInFrames={f(1)}>{win(1)}</TransitionSeries.Sequence>
+        <TransitionSeries.Sequence name={SCENES_SHORT[1].name} durationInFrames={framesOf(SCENES_SHORT[1])}>{scene(1)}</TransitionSeries.Sequence>
         <TransitionSeries.Transition presentation={fade()} timing={linearTiming({ durationInFrames: T })} />
-        <TransitionSeries.Sequence name={SHORT[2].name} durationInFrames={f(2)}>{win(2)}</TransitionSeries.Sequence>
+        <TransitionSeries.Sequence name={SCENES_SHORT[2].name} durationInFrames={framesOf(SCENES_SHORT[2])}>{scene(2)}</TransitionSeries.Sequence>
         <TransitionSeries.Transition presentation={fade()} timing={linearTiming({ durationInFrames: T })} />
-        <TransitionSeries.Sequence name={SHORT[3].name} durationInFrames={f(3)}>{win(3)}</TransitionSeries.Sequence>
+        <TransitionSeries.Sequence name={SCENES_SHORT[3].name} durationInFrames={framesOf(SCENES_SHORT[3])}>{scene(3)}</TransitionSeries.Sequence>
         <TransitionSeries.Transition presentation={fade()} timing={linearTiming({ durationInFrames: T })} />
-        <TransitionSeries.Sequence name={SHORT[4].name} durationInFrames={f(4)}><SlideCloseShort /></TransitionSeries.Sequence>
+        <TransitionSeries.Sequence name={SCENES_SHORT[4].name} durationInFrames={framesOf(SCENES_SHORT[4])}>{scene(4)}</TransitionSeries.Sequence>
       </TransitionSeries>
     </AbsoluteFill>
   );
