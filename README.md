@@ -24,6 +24,18 @@
 
 Built for NEAR HACKATHON (November 1 to 14, 2026). Tracks: `realworld`, `business`, `privacy`, `security`. Development started on October 20, 2026, the day after the hackathon was announced: the rules count code from the announcement on October 19 to November 14 (HACKATHON.md, Q-001), so every commit in this repository, from the first one, is inside the window. The commit history is kept as it is.
 
+## Watch it, two minutes
+
+<p align="center"><a href="https://bursar.network/demo.mp4"><img src="web/brand/demo-poster.jpg" width="820" alt="Watch the demo video: an invoice read in the enclave and paid, the new bank details fraud blocked, a large invoice held and approved, a vendor on Base queued, a tampered receipt failing its signature"></a></p>
+
+[The demo video](https://bursar.network/demo.mp4) (2:10, with subtitles) was recorded on the live console at `bursar.network`, on a testnet treasury, by a script (`video/record.cjs`): every reading in it is a real reading in the enclave and every decision a real transaction. It shows, in order:
+
+1. An invoice read inside NEAR AI Cloud's enclave, its receipt verified in the page, then `Paid` by the contract in the same transaction (step 9 below).
+2. The same vendor with "please note our new bank details": `Blocked`, `payout_changed`.
+3. An invoice of 9,800 USDC, at or above the approval threshold: held for a person, approved with the owner's key, then `Paid`.
+4. A vendor paid on Base: `Queued` for the executor and NEAR Intents (settled for real on mainnet, see "Done on mainnet").
+5. A receipt checked in the browser, then one byte of it changed: the signature fails (step 6, and the landing page).
+
 ## The problem
 
 Every company pays invoices. The two things that go wrong are boring and expensive: someone pays a fake invoice (the "please note our new bank details" fraud, the most common business scam in the world), and someone pays the same invoice twice. Letting an AI do the work makes both worse, unless the AI never holds the keys.
